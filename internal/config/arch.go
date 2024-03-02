@@ -36,6 +36,7 @@ type Arch struct {
 	CommentCh    string         // Assembly comment character
 	CallOp       string         // Call instruction to use to move the params onto the stack
 	Disassembler []string       // Disassembler to use and flags
+	UseGoObjdump bool           // Use go tool objdump instead of clang
 	ClangFlags   []string       // Flags for clang
 }
 
@@ -104,12 +105,12 @@ func ARM64() *Arch {
 		Name:       "arm64",
 		Attribute:  regexp.MustCompile(`^\s+\..+$`),
 		Function:   regexp.MustCompile(`^\w+:.*$`),
-		Label:      regexp.MustCompile(`^.[A-Z0-9]+_\d+:.*$`),
+		Label:      regexp.MustCompile(`^\.[A-Z0-9]+_\d+:.*$`),
 		Code:       regexp.MustCompile(`^\s+\w+.+$`),
 		Symbol:     regexp.MustCompile(`^\w+\s+<\w+>:$`),
 		Data:       regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
 		Comment:    regexp.MustCompile(`^\s*//.*$`),
-		Const:      regexp.MustCompile(`^not_implemented$`),
+		Const:      regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
 		Registers:  []string{"R0", "R1", "R2", "R3"},
 		BuildTags:  "//go:build !noasm && !darwin && arm64\n",
 		CommentCh:  "//",
@@ -144,18 +145,20 @@ func Apple() *Arch {
 	}
 
 	return &Arch{
-		Name:      "arm64",
-		Attribute: regexp.MustCompile(`^\s+\..+$`),
-		Function:  regexp.MustCompile(`^\w+:.*$`),
-		Label:     regexp.MustCompile(`^[A-Z0-9]+_\d+:.*$`),
-		Code:      regexp.MustCompile(`^\s+\w+.+$`),
-		Symbol:    regexp.MustCompile(`^\w+\s+<\w+>:$`),
-		Data:      regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
-		Comment:   regexp.MustCompile(`^\s*;.*$`),
-		Registers: []string{"R0", "R1", "R2", "R3"},
-		BuildTags: "//go:build !noasm && darwin && arm64\n",
-		CommentCh: ";",
-		CallOp:    "MOVD",
+		Name:         "arm64",
+		Attribute:    regexp.MustCompile(`^\s+\..+$`),
+		Function:     regexp.MustCompile(`^\w+:.*$`),
+		Label:        regexp.MustCompile(`^[Ll][a-zA-Z0-9]+(?:_\d+)?:.*$`),
+		Code:         regexp.MustCompile(`^\s+\w+.+$`),
+		Symbol:       regexp.MustCompile(`^\w+\s+<\w+>:$`),
+		Data:         regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
+		Comment:      regexp.MustCompile(`^\s*;.*$`),
+		Const:        regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
+		Registers:    []string{"R0", "R1", "R2", "R3"},
+		BuildTags:    "//go:build !noasm && darwin && arm64\n",
+		CommentCh:    ";",
+		CallOp:       "MOVD",
+		UseGoObjdump: true,
 	}
 }
 
@@ -170,11 +173,18 @@ func FindClang() (string, error) {
 	})
 }
 
-// FindObjdump resolves clang disassembler to use.
-func FindObjdump() (string, error) {
+// FindClangObjdump resolves clang disassembler to use.
+func FindClangObjdump() (string, error) {
 	return find([]string{
 		"llvm-objdump-17", "llvm-objdump-16", "llvm-objdump-15", "llvm-objdump-14",
 		"llvm-objdump-13", "llvm-objdump-12", "llvm-objdump-11", "llvm-objdump-10",
 		"llvm-objdump", "objdump",
+	})
+}
+
+// FindGoObjdump resolves go toolchain to use.
+func FindGoObjdump() (string, error) {
+	return find([]string{
+		"golang", "go",
 	})
 }

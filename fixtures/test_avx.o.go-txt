@@ -1,0 +1,175 @@
+TEXT uint8_mul(SB) 
+  :0			0x0			55			PUSHQ BP			
+  :0			0x1			4889e5			MOVQ SP, BP			
+  :0			0x4			4883e4f8		ANDQ $-0x8, SP			
+  :0			0x8			85c9			TESTL CX, CX			
+  :0			0xa			0f8e96000000		JLE 0xa6			
+  :0			0x10			4189c8			MOVL CX, R8			
+  :0			0x13			4983f810		CMPQ R8, $0x10			
+  :0			0x17			0f8391000000		JAE 0xae			
+  :0			0x1d			4531c9			XORL R9, R9			
+  :0			0x20			4429c9			SUBL R9, CX			
+  :0			0x23			4d89ca			MOVQ R9, R10			
+  :0			0x26			49f7d2			NOTQ R10			
+  :0			0x29			4d01c2			ADDQ R8, R10			
+  :0			0x2c			4883e103		ANDQ $0x3, CX			
+  :0			0x30			7423			JE 0x55				
+  :0			0x32			662e0f1f840000000000	CS NOPW 0(AX)(AX*1)		
+  :0			0x3c			0f1f4000		NOPL 0(AX)			
+  :0			0x40			420fb6040e		MOVZX 0(SI)(R9*1), AX		
+  :0			0x45			42f6240f		MULB 0(DI)(R9*1)		
+  :0			0x49			4288040a		MOVB AL, 0(DX)(R9*1)		
+  :0			0x4d			49ffc1			INCQ R9				
+  :0			0x50			48ffc9			DECQ CX				
+  :0			0x53			75eb			JNE 0x40			
+  :0			0x55			4983fa03		CMPQ R10, $0x3			
+  :0			0x59			724b			JB 0xa6				
+  :0			0x5b			0f1f440000		NOPL 0(AX)(AX*1)		
+  :0			0x60			420fb6040e		MOVZX 0(SI)(R9*1), AX		
+  :0			0x65			42f6240f		MULB 0(DI)(R9*1)		
+  :0			0x69			4288040a		MOVB AL, 0(DX)(R9*1)		
+  :0			0x6d			420fb6440e01		MOVZX 0x1(SI)(R9*1), AX		
+  :0			0x73			42f6640f01		MULB 0x1(DI)(R9*1)		
+  :0			0x78			4288440a01		MOVB AL, 0x1(DX)(R9*1)		
+  :0			0x7d			420fb6440e02		MOVZX 0x2(SI)(R9*1), AX		
+  :0			0x83			42f6640f02		MULB 0x2(DI)(R9*1)		
+  :0			0x88			4288440a02		MOVB AL, 0x2(DX)(R9*1)		
+  :0			0x8d			420fb6440e03		MOVZX 0x3(SI)(R9*1), AX		
+  :0			0x93			42f6640f03		MULB 0x3(DI)(R9*1)		
+  :0			0x98			4288440a03		MOVB AL, 0x3(DX)(R9*1)		
+  :0			0x9d			4983c104		ADDQ $0x4, R9			
+  :0			0xa1			4d39c8			CMPQ R8, R9			
+  :0			0xa4			75ba			JNE 0x60			
+  :0			0xa6			4889ec			MOVQ BP, SP			
+  :0			0xa9			5d			POPQ BP				
+  :0			0xaa			c5f877			VZEROUPPER			
+  :0			0xad			c3			RET				
+  :0			0xae			4889d0			MOVQ DX, AX			
+  :0			0xb1			4829f8			SUBQ DI, AX			
+  :0			0xb4			4531c9			XORL R9, R9			
+  :0			0xb7			483d80000000		CMPQ AX, $0x80			
+  :0			0xbd			0f825dffffff		JB 0x20				
+  :0			0xc3			4889d0			MOVQ DX, AX			
+  :0			0xc6			4829f0			SUBQ SI, AX			
+  :0			0xc9			483d80000000		CMPQ AX, $0x80			
+  :0			0xcf			0f824bffffff		JB 0x20				
+  :0			0xd5			4181f880000000		CMPL R8, $0x80			
+  :0			0xdc			7308			JAE 0xe6			
+  :0			0xde			4531c9			XORL R9, R9			
+  :0			0xe1			e913010000		JMP 0x1f9			
+  :0			0xe6			4189ca			MOVL CX, R10			
+  :0			0xe9			4183e27f		ANDL $0x7f, R10			
+  :0			0xed			4d89c1			MOVQ R8, R9			
+  :0			0xf0			4d29d1			SUBQ R10, R9			
+  :0			0xf3			31c0			XORL AX, AX			
+  :0			0xf5			c5fd6f0500000000	VMOVDQA 0(IP), X0		
+  :0			0xfd			0f1f00			NOPL 0(AX)			
+  :0			0x100			c5fe6f1c07		VMOVDQU 0(DI)(AX*1), X3		
+  :0			0x105			c5fe6f640720		VMOVDQU 0x20(DI)(AX*1), X4	
+  :0			0x10b			c5fe6f6c0740		VMOVDQU 0x40(DI)(AX*1), X5	
+  :0			0x111			c5fe6f4c0760		VMOVDQU 0x60(DI)(AX*1), X1	
+  :0			0x117			c5fe6f3406		VMOVDQU 0(SI)(AX*1), X6		
+  :0			0x11c			c5fe6f7c0620		VMOVDQU 0x20(SI)(AX*1), X7	
+  :0			0x122			c57e6f440640		VMOVDQU 0x40(SI)(AX*1), X8	
+  :0			0x128			c5fe6f540660		VMOVDQU 0x60(SI)(AX*1), X2	
+  :0			0x12e			c56568cbc54d68		PUSHL $0x684dc5cb		
+  :0			0x135			d6			?				
+  :0			0x136			c4			?				
+  :0			0x137			412dd5c9c535		SUBL $0x35c5c9d5, AX		
+  :0			0x13d			dbc8			FCMOVNE F0, F0			
+  :0			0x13f			c5			?				
+  :0			0x140			e560			INL $0x60, AX			
+  :0			0x142			dbc5			FCMOVNB F5, F0			
+  :0			0x144			cd60			INT $0x60			
+  :0			0x146			f6c5cd			TESTL $0xcd, CH			
+  :0			0x149			d5			?				
+  :0			0x14a			dbc5			FCMOVNB F5, F0			
+  :0			0x14c			e5db			INL $0xdb, AX			
+  :0			0x14e			d8c4			FADD F4, F0			
+  :0			0x150			c16567d9		SHLL $0xd9, 0x67(BP)		
+  :0			0x154			c5dd68f4c54568		PUSHL $0x6845c5f4		
+  :0			0x15b			cf			IRETD				
+  :0			0x15c			c5			?				
+  :0			0x15d			b5d5			MOVL $0xd5, CH			
+  :0			0x15f			f6c5cd			TESTL $0xcd, CH			
+  :0			0x162			dbf0			FCOMI F0, F0			
+  :0			0x164			c5			?				
+  :0			0x165			dd60e4			FRSTORL -0x1c(AX)		
+  :0			0x168			c5			?				
+  :0			0x169			c560ffc5		INCL BP				
+  :0			0x16d			c5d5e4c5		INL $0xc5, AL			
+  :0			0x171			dddb			FSTP F3				
+  :0			0x173			e0c5			LOOPNE 0x13a			
+  :0			0x175			dd67e6			FRSTORL -0x1a(DI)		
+  :0			0x178			c5d568f5c4c13d		PUSHL $0x3dc1c4f5		
+  :0			0x17f			68f8c5c5d5		PUSHL $-0x2a3a3a08		
+  :0			0x184			f6c5cd			TESTL $0xcd, CH			
+  :0			0x187			dbf0			FCOMI F0, F0			
+  :0			0x189			c5			?				
+  :0			0x18a			d5			?				
+  :0			0x18b			60			?				
+  :0			0x18c			ed			INL DX, AX			
+  :0			0x18d			c4			?				
+  :0			0x18e			c13d60f8c5c5d5		SARL $0xd5, 0xc5c5f860(IP)	
+  :0			0x195			ed			INL DX, AX			
+  :0			0x196			c5d5dbe8		FUCOMI F0, F0			
+  :0			0x19a			c5d567ee		OUTL AL, DX			
+  :0			0x19e			c5f568f1c5ed68		PUSHL $0x68edc5f1		
+  :0			0x1a5			fa			CLI				
+  :0			0x1a6			c5			?				
+  :0			0x1a7			c5d5f6c5cd		TESTL $0xcd, CH			
+  :0			0x1ac			dbf0			FCOMI F0, F0			
+  :0			0x1ae			c5			?				
+  :0			0x1af			f5			CMC				
+  :0			0x1b0			60			?				
+  :0			0x1b1			c9			LEAVE				
+  :0			0x1b2			c5			?				
+  :0			0x1b3			ed			INL DX, AX			
+  :0			0x1b4			60			?				
+  :0			0x1b5			d2c5			ROLL CL, CH			
+  :0			0x1b7			ed			INL DX, AX			
+  :0			0x1b8			d5			?				
+  :0			0x1b9			c9			LEAVE				
+  :0			0x1ba			c5f5dbc8		FCMOVNE F0, F0			
+  :0			0x1be			c5			?				
+  :0			0x1bf			f5			CMC				
+  :0			0x1c0			67			?				
+  :0			0x1c1			ce			?				
+  :0			0x1c2			c5fe7f1c02		VMOVDQU X3, 0(DX)(AX*1)		
+  :0			0x1c7			c5fe7f640220		VMOVDQU X4, 0x20(DX)(AX*1)	
+  :0			0x1cd			c5fe7f6c0240		VMOVDQU X5, 0x40(DX)(AX*1)	
+  :0			0x1d3			c5fe7f4c0260		VMOVDQU X1, 0x60(DX)(AX*1)	
+  :0			0x1d9			4883e880		SUBQ $-0x80, AX			
+  :0			0x1dd			4939c1			CMPQ R9, AX			
+  :0			0x1e0			0f851affffff		JNE 0x100			
+  :0			0x1e6			4d85d2			TESTQ R10, R10			
+  :0			0x1e9			0f84b7feffff		JE 0xa6				
+  :0			0x1ef			4183fa10		CMPL R10, $0x10			
+  :0			0x1f3			0f8227feffff		JB 0x20				
+  :0			0x1f9			4c89c8			MOVQ R9, AX			
+  :0			0x1fc			4189ca			MOVL CX, R10			
+  :0			0x1ff			4183e20f		ANDL $0xf, R10			
+  :0			0x203			4d89c1			MOVQ R8, R9			
+  :0			0x206			4d29d1			SUBQ R10, R9			
+  :0			0x209			c5fd6f0500000000	VMOVDQA 0(IP), X0		
+  :0			0x211			662e0f1f840000000000	CS NOPW 0(AX)(AX*1)		
+  :0			0x21b			0f1f440000		NOPL 0(AX)(AX*1)		
+  :0			0x220			c4e27d300c07		XORB CL, 0(DI)(AX*1)		
+  :0			0x226			c4e27d301406		XORB DL, 0(SI)(AX*1)		
+  :0			0x22c			c5			?				
+  :0			0x22d			ed			INL DX, AX			
+  :0			0x22e			d5			?				
+  :0			0x22f			c9			LEAVE				
+  :0			0x230			c5f5dbc8		FCMOVNE F0, F0			
+  :0			0x234			c4e37d39ca		CMPL DX, CX			
+  :0			0x239			01c5			ADDL AX, BP			
+  :0			0x23b			f1			ICEBP				
+  :0			0x23c			67cac5fa		LRET $0xfac5			
+  :0			0x240			7f0c			JG 0x24e			
+  :0			0x242			024883			ADDB -0x7d(AX), CL		
+  :0			0x245			c01049			RCLB $0x49, 0(AX)		
+  :0			0x248			39c1			CMPL CX, AX			
+  :0			0x24a			75d4			JNE 0x220			
+  :0			0x24c			4d85d2			TESTQ R10, R10			
+  :0			0x24f			0f85cbfdffff		JNE 0x20			
+  :0			0x255			e94cfeffff		JMP 0xa6			

@@ -17,7 +17,7 @@ func main() {
 	// Health endpoint
 	r.GET("/health", func(c *gin.Context) {
 		clang, _ := config.FindClang()
-		objdump, _ := config.FindObjdump()
+		objdump, _ := config.FindClangObjdump()
 		c.JSON(http.StatusOK, gin.H{
 			"compiler":     clang,
 			"disassembler": objdump,

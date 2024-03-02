@@ -6,36 +6,50 @@ import (
 )
 
 type Disassembler struct {
-	arch    *config.Arch
-	objdump string
+	arch         *config.Arch
+	disassembler []string
 }
 
 func NewDisassembler(arch *config.Arch) (*Disassembler, error) {
-	objdump, err := config.FindObjdump()
+	var (
+		dasm    []string
+		objdump string
+		err     error
+	)
+
+	if arch.UseGoObjdump {
+		objdump, err = config.FindGoObjdump()
+		dasm = append(dasm, objdump, "tool", "objdump")
+	} else {
+		objdump, err = config.FindClangObjdump()
+		dasm = append(dasm, objdump)
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	return &Disassembler{
-		arch:    arch,
-		objdump: objdump,
+		arch:         arch,
+		disassembler: dasm,
 	}, nil
 }
 
 // Disassemble disassembles the object file
 func (d *Disassembler) Disassemble(assemblyPath, objectPath string) ([]asm.Function, error) {
-
 	// Parse the assembly file
 	assembly, err := asm.ParseAssembly(d.arch, assemblyPath)
 	if err != nil {
 		return nil, err
 	}
 
-	disassembler := []string{d.objdump}
+	disassembler := d.disassembler
 	if d.arch.Disassembler != nil {
-		disassembler = d.arch.Disassembler
+		disassembler = append(disassembler, d.arch.Disassembler...)
 	}
-	disassembler = append(disassembler, "-d", objectPath)
+	if !d.arch.UseGoObjdump {
+		disassembler = append(disassembler, "-d")
+	}
+	disassembler = append(disassembler, objectPath)
 
 	// Run the disassembler
 	dump, err := runCommand(disassembler[0], disassembler[1:]...)
@@ -44,7 +58,12 @@ func (d *Disassembler) Disassemble(assemblyPath, objectPath string) ([]asm.Funct
 	}
 
 	// Parse the object dump and map machine code to assembly
-	if err := asm.ParseObjectDump(d.arch, dump, assembly); err != nil {
+	if d.arch.UseGoObjdump {
+		err = asm.ParseGoObjectDump(d.arch, dump, assembly)
+	} else {
+		err = asm.ParseClangObjectDump(d.arch, dump, assembly)
+	}
+	if err != nil {
 		return nil, err
 	}
 

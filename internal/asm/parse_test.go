@@ -34,14 +34,31 @@ func TestParseAssembly(t *testing.T) {
 	}
 }
 
-func TestParseObjectDump(t *testing.T) {
+func TestParseClangObjectDump(t *testing.T) {
 	fn, err := ParseAssembly(config.AMD64(), "../../fixtures/test_avx.s")
 	assert.NoError(t, err)
 
 	dump, err := os.ReadFile("../../fixtures/test_avx.o.txt")
 	assert.NoError(t, err)
 
-	assert.NoError(t, ParseObjectDump(config.AMD64(), string(dump), fn))
+	assert.NoError(t, ParseClangObjectDump(config.AMD64(), string(dump), fn))
+	assert.Len(t, fn, 1)
+	assert.Len(t, fn[0].Consts, 1)
+	assert.Len(t, fn[0].Lines, 135)
+	for _, line := range fn[0].Lines {
+		assert.NotEmpty(t, line.Assembly)
+		assert.NotEmpty(t, line.Binary)
+	}
+}
+
+func TestParseGoObjectDump(t *testing.T) {
+	fn, err := ParseAssembly(config.AMD64(), "../../fixtures/test_avx.s")
+	assert.NoError(t, err)
+
+	dump, err := os.ReadFile("../../fixtures/test_avx.o.go-txt")
+	assert.NoError(t, err)
+
+	assert.NoError(t, ParseGoObjectDump(config.AMD64(), string(dump), fn))
 	assert.Len(t, fn, 1)
 	assert.Len(t, fn[0].Consts, 1)
 	assert.Len(t, fn[0].Lines, 135)

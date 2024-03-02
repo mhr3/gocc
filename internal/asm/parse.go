@@ -19,6 +19,8 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -55,7 +57,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 		case arch.Const.MatchString(line):
 			constant.Lines = append(constant.Lines, parseConst(arch, line))
 
-		// Skip attirubtes and comment lines
+		// Skip attributes and comment lines
 		case arch.Attribute.MatchString(line):
 			continue
 		case arch.Comment.MatchString(line):
@@ -65,7 +67,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 		// compiler decides to generate no-op instructions.
 		case arch.Label.MatchString(line):
 			labelName = strings.Split(line, ":")[0]
-			labelName = labelName[1:]
+			labelName = strings.TrimLeft(labelName, ".")
 			constant = &Const{Label: labelName} // reset the current constant
 			switch {
 			case current == nil: // No function yet
@@ -111,8 +113,8 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 	return functions, nil
 }
 
-// ParseObjectDump parses the output of objdump file and returns a list of functions
-func ParseObjectDump(arch *config.Arch, dump string, functions []Function) error {
+// ParseClangObjectDump parses the output of objdump file and returns a list of functions
+func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function) error {
 	var (
 		functionName string
 		functionIdx  int
@@ -171,6 +173,66 @@ func ParseObjectDump(arch *config.Arch, dump string, functions []Function) error
 			}
 
 			current.Lines[lineNumber].Binary = binary
+			lineNumber++
+		}
+	}
+	return nil
+}
+
+// ParseGoObjectDump parses the output of objdump file and returns a list of functions
+func ParseGoObjectDump(arch *config.Arch, dump string, functions []Function) error {
+	var (
+		functionName string
+		current      *Function
+		lineNumber   int
+	)
+
+	symbolRe := regexp.MustCompile(`^TEXT\s+(.*)+[(]SB[)]\s*$`)
+	dataRe := regexp.MustCompile(`^\s*([:]\d+)\s+(0x[0-9a-f]+)\s+([0-9a-f]+)\s+([?]|\w+.*)$`)
+
+	for i, line := range strings.Split(dump, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case symbolRe.MatchString(line):
+			m := symbolRe.FindStringSubmatch(line)
+			functionName = m[1]
+			functionIdx := slices.IndexFunc(functions, func(fn Function) bool {
+				return fn.Name == functionName
+			})
+			if functionIdx == -1 {
+				current = nil
+				continue
+			}
+			current = &functions[functionIdx]
+			lineNumber = 0
+		case dataRe.MatchString(line):
+			if current == nil {
+				continue
+			}
+			// matches in dataRe:
+			// 1: ??
+			// 2: address
+			// 3: binary
+			// 4: assembly
+			m := dataRe.FindStringSubmatch(line)
+
+			binary := m[3]
+			assembly := m[4]
+
+			switch {
+			case assembly == "":
+				return fmt.Errorf("try to increase --insn-width of objdump")
+			case strings.HasPrefix(assembly, "NOP"):
+				continue
+			case assembly == "XCHG AX, AX":
+				continue
+			case strings.HasPrefix(assembly, "CS NOPW"):
+				continue
+			case lineNumber >= len(current.Lines):
+				return fmt.Errorf("%d: unexpected objectdump line: %s, please compare assembly with objdump output", i, line)
+			}
+
+			current.Lines[lineNumber].Binary = []string{binary}
 			lineNumber++
 		}
 	}
