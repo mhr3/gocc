@@ -33,6 +33,6 @@ func TestGenerate(t *testing.T) {
 	asm, err := Generate(config.AMD64(), fn)
 	assert.NoError(t, err)
 
-	assert.Contains(t, string(asm), "GLOBL LCPI0_0<>(SB), (8+16), $32")
-	assert.Contains(t, string(asm), "TEXT ·uint8_mul(SB), $0-32")
+	assert.Contains(t, string(asm), "GLOBL LCPI0_0<>(SB), (RODATA|NOPTR), $32")
+	assert.Contains(t, string(asm), "TEXT ·uint8_mul(SB), NOSPLIT, $0-32")
 }

@@ -23,6 +23,14 @@ import (
 	"github.com/kelindar/gocc/internal/config"
 )
 
+var constSizes = map[string]int{
+	"byte":  1,
+	"short": 2,
+	"long":  4,
+	"int":   4,
+	"quad":  8,
+}
+
 // ------------------------------------- Function -------------------------------------
 
 type Function struct {
@@ -52,9 +60,10 @@ func (f *Function) String() string {
 
 // Line represents a line of assembly code
 type Line struct {
-	Labels   []string `json:"labels,omitempty"` // Labels for the line
-	Binary   []string `json:"binary"`           // Binary representation of the line
-	Assembly string   `json:"assembly"`         // Assembly representation of the line
+	Labels       []string `json:"labels,omitempty"`       // Labels for the line
+	Binary       []string `json:"binary"`                 // Binary representation of the line
+	Assembly     string   `json:"assembly"`               // Assembly representation of the line
+	Disassembled string   `json:"disassembled,omitempty"` // Disassembled representation of the line
 }
 
 // Compile returns the string representation of a line in PLAN9 assembly
@@ -66,13 +75,33 @@ func (line *Line) Compile(arch *config.Arch) string {
 	}
 
 	builder.WriteString("\t")
-	if strings.HasPrefix(line.Assembly, "j") {
-		splits := strings.Split(line.Assembly, ".")
-		op := strings.TrimSpace(splits[0])
-		operand := splits[1]
-		builder.WriteString(fmt.Sprintf("%s %s", strings.ToUpper(op), operand))
+
+	if line.Assembly == "ret" {
+		builder.WriteString("RET")
 		builder.WriteString("\n")
 		return builder.String()
+	}
+
+	// rewrite jumps
+	if arch.JumpInstr != nil {
+		parts := []string{line.Assembly}
+		if line.Disassembled != "" {
+			parts = append([]string{line.Disassembled}, parts...)
+		}
+		combined := strings.Join(parts, ";\t")
+		if arch.JumpInstr.MatchString(combined) {
+			match := arch.JumpInstr.FindStringSubmatch(combined)
+			reParams := map[string]int{}
+			for i, name := range arch.JumpInstr.SubexpNames() {
+				if name == "" {
+					continue
+				}
+				reParams[name] = i
+			}
+			fmt.Fprintf(&builder, "%s %s", strings.ToUpper(match[reParams["instr"]]), match[reParams["label"]])
+			builder.WriteString("\n")
+			return builder.String()
+		}
 	}
 
 	// Special case for arm64, since it's a RISC architecture
@@ -80,6 +109,10 @@ func (line *Line) Compile(arch *config.Arch) string {
 		builder.WriteString(fmt.Sprintf("WORD $0x%v%v%v%v",
 			line.Binary[3], line.Binary[2], line.Binary[1], line.Binary[0]))
 		builder.WriteString("\t// ")
+		if line.Disassembled != "" {
+			builder.WriteString(line.Disassembled)
+			builder.WriteString(";\t")
+		}
 		builder.WriteString(line.Assembly)
 		builder.WriteString("\n")
 		return builder.String()
@@ -173,37 +206,33 @@ type ConstLine struct {
 
 // Compile returns the string representation of a line in PLAN9 assembly
 func (c *Const) Compile(arch *config.Arch) string {
-	if arch.Name != "amd64" {
+	if arch.Name != "amd64" && arch.Name != "arm64" {
 		panic("gocc: only amd64 is supported for constants")
 	}
 
 	var output strings.Builder
 	var totalSize int
 	for _, d := range c.Lines {
-
 		// Write the DATA instruction.
-		instruction := fmt.Sprintf("DATA %s<>+%#04x(SB)/%d, $%#04x\n", c.Label, totalSize, d.Size, d.Value)
-		output.WriteString(instruction)
+		switch d.Size {
+		case 1, 2:
+			fmt.Fprintf(&output, "DATA %s<>+%#04x(SB)/%d, $%#02x\n", c.Label, totalSize, d.Size, d.Value)
+		default:
+			fmt.Fprintf(&output, "DATA %s<>+%#04x(SB)/%d, $%#04x\n", c.Label, totalSize, d.Size, d.Value)
+		}
+
 		totalSize += d.Size
 	}
 
 	// Write the GLOBL instruction (8=RODATA, 16=NOPTR)
-	output.WriteString(fmt.Sprintf("GLOBL %s<>(SB), (8+16), $%d\n", c.Label, totalSize))
+	output.WriteString(fmt.Sprintf("GLOBL %s<>(SB), (RODATA|NOPTR), $%d\n", c.Label, totalSize))
 	return output.String()
 }
 
 // parseConst parses a line in the constant section
 func parseConst(arch *config.Arch, line string) ConstLine {
-	if arch.Name != "amd64" {
+	if arch.Name != "amd64" && arch.Name != "arm64" {
 		panic("gocc: only amd64 is supported for constants")
-	}
-
-	sizes := map[string]int{
-		"byte":  1,
-		"short": 2,
-		"long":  4,
-		"int":   4,
-		"quad":  8,
 	}
 
 	match := arch.Const.FindStringSubmatch(line)
@@ -214,7 +243,7 @@ func parseConst(arch *config.Arch, line string) ConstLine {
 	}
 
 	return ConstLine{
-		Size:  sizes[typeName],
+		Size:  constSizes[typeName],
 		Value: value,
 	}
 }

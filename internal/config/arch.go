@@ -31,6 +31,7 @@ type Arch struct {
 	Data         *regexp.Regexp // Parses assembly data
 	Comment      *regexp.Regexp // Parses assembly comments
 	Const        *regexp.Regexp // Parses assembly constants
+	JumpInstr    *regexp.Regexp // Parses assembly jump instructions
 	Registers    []string       // Registers to use
 	BuildTags    string         // Golang build tags
 	CommentCh    string         // Assembly comment character
@@ -74,6 +75,7 @@ func AMD64() *Arch {
 		Data:         regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
 		Comment:      regexp.MustCompile(`^\s*#.*$`),
 		Const:        regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
+		JumpInstr:    regexp.MustCompile(`^(?P<instr>j\w+)\s+[.](?P<label>\w+)$`),
 		Registers:    []string{"DI", "SI", "DX", "CX"},
 		BuildTags:    "//go:build !noasm && amd64\n",
 		CommentCh:    "#",
@@ -137,29 +139,22 @@ func SVE() *Arch {
 // Apple returns a configuration for ARM64 architecture. On my M1 mac, supported features are:
 // AESARM, ASIMD, ASIMDDP, ASIMDHP, ASIMDRDM, ATOMICS, CRC32, DCPOP, FCMA, FP, FPHP, GPA, JSCVT, LRCPC, PMULL, SHA1, SHA2, SHA3, SHA512
 func Apple() *Arch {
+	arch := ARM64()
+	arch.BuildTags = "//go:build !noasm && darwin && arm64\n"
+
 	if runtime.GOOS != "darwin" {
-		arch := ARM64()
-		arch.BuildTags = "//go:build !noasm && darwin && arm64\n"
 		arch.ClangFlags = []string{"--target=aarch64-apple-darwin", "--sysroot=/usr/osxcross/SDK/MacOSX11.3.sdk/"}
 		return arch
 	}
 
-	return &Arch{
-		Name:         "arm64",
-		Attribute:    regexp.MustCompile(`^\s+\..+$`),
-		Function:     regexp.MustCompile(`^\w+:.*$`),
-		Label:        regexp.MustCompile(`^[Ll][a-zA-Z0-9]+(?:_\d+)?:.*$`),
-		Code:         regexp.MustCompile(`^\s+\w+.+$`),
-		Symbol:       regexp.MustCompile(`^\w+\s+<\w+>:$`),
-		Data:         regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
-		Comment:      regexp.MustCompile(`^\s*;.*$`),
-		Const:        regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
-		Registers:    []string{"R0", "R1", "R2", "R3"},
-		BuildTags:    "//go:build !noasm && darwin && arm64\n",
-		CommentCh:    ";",
-		CallOp:       "MOVD",
-		UseGoObjdump: true,
-	}
+	arch.ClangFlags = []string{}
+	arch.Label = regexp.MustCompile(`^[Ll][a-zA-Z0-9]+(?:_\d+)?:.*$`)
+	arch.Comment = regexp.MustCompile(`^\s*;.*$`)
+	arch.CommentCh = ";"
+	arch.JumpInstr = regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*(?P<label>[Ll][a-zA-Z0-9]+(?:_\d+))$`)
+	arch.UseGoObjdump = true
+
+	return arch
 }
 
 // ------------------------------------- Toolchain -------------------------------------

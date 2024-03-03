@@ -43,6 +43,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 	var (
 		functions    = make([]Function, 0, 8)
 		current      *Function
+		consts       []Const
 		constant     *Const
 		functionName string
 		labelName    string
@@ -68,6 +69,10 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 		case arch.Label.MatchString(line):
 			labelName = strings.Split(line, ":")[0]
 			labelName = strings.TrimLeft(labelName, ".")
+			// If we have a constant, attach it to the current function
+			if constant != nil && len(constant.Lines) > 0 {
+				consts = append(consts, *constant)
+			}
 			constant = &Const{Label: labelName} // reset the current constant
 			switch {
 			case current == nil: // No function yet
@@ -91,7 +96,9 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 
 			// If we have a constant, attach it to the current function
 			if constant != nil && len(constant.Lines) > 0 {
-				current.Consts = append(current.Consts, *constant)
+				consts = append(consts, *constant)
+				constant = nil
+				current.Consts = append(current.Consts, consts...)
 			}
 
 		// Handle assembly instructions
@@ -216,12 +223,12 @@ func ParseGoObjectDump(arch *config.Arch, dump string, functions []Function) err
 			// 4: assembly
 			m := dataRe.FindStringSubmatch(line)
 
-			binary := m[3]
+			binHex := m[3]
 			assembly := m[4]
 
 			switch {
-			case assembly == "":
-				return fmt.Errorf("try to increase --insn-width of objdump")
+			case assembly == "" || assembly == "?":
+				return fmt.Errorf("objectdump failure on line: %d, please compare assembly with objdump output", i)
 			case strings.HasPrefix(assembly, "NOP"):
 				continue
 			case assembly == "XCHG AX, AX":
@@ -232,7 +239,21 @@ func ParseGoObjectDump(arch *config.Arch, dump string, functions []Function) err
 				return fmt.Errorf("%d: unexpected objectdump line: %s, please compare assembly with objdump output", i, line)
 			}
 
-			current.Lines[lineNumber].Binary = []string{binary}
+			binary := []string{}
+			// split the binary representation into bytes
+			if len(binHex) > 2 {
+				// Iterate backwards
+				for i := len(binHex) - 2; i >= 0; i -= 2 {
+					binary = append(binary, binHex[i:i+2])
+				}
+			} else {
+				binary = append(binary, binHex)
+			}
+
+			curLine := &current.Lines[lineNumber]
+			curLine.Binary = binary
+			curLine.Disassembled = assembly
+
 			lineNumber++
 		}
 	}

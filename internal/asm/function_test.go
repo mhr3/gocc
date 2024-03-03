@@ -47,6 +47,15 @@ func TestLineLabel(t *testing.T) {
 	assert.Equal(t, "label:\n\tBYTE $0xc3\t// ret\n", line.Compile(nil))
 }
 
+func TestLineJumpAMD(t *testing.T) {
+	line := Line{
+		Assembly: "jmp .LBB0_2",
+		Binary:   []string{"e9", "13", "01", "00", "00"},
+	}
+	assert.Equal(t, "\tJMP LBB0_2\n",
+		line.Compile(config.AMD64()))
+}
+
 func TestLineARM(t *testing.T) {
 	line := Line{
 		Assembly: "mov x29, sp",
