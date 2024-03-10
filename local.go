@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/kelindar/gocc/internal/asm"
 	"github.com/kelindar/gocc/internal/cc"
@@ -96,13 +97,27 @@ func (t *Local) Translate() error {
 		return err
 	}
 
+	foundMapping := false
 	// Map the machine code to the assembly one
-	for i, v := range assembly {
-		functions[i].Consts = v.Consts
-		functions[i].Lines = v.Lines
+	for _, v := range assembly {
+		idx := slices.IndexFunc[[]asm.Function, asm.Function](functions, func(cFn asm.Function) bool {
+			return v.Name == cFn.Name || v.Name == "_"+cFn.Name
+		})
+		if idx == -1 {
+			continue
+		}
+		foundMapping = true
+
+		functions[idx].Consts = v.Consts
+		functions[idx].Lines = v.Lines
 	}
 
 	_ = t.Close()
+
+	if !foundMapping {
+		return errors.New("cannot find mapping to machine code")
+	}
+
 	return asm.GenerateFile(t.Arch, t.GoAssembly, functions)
 }
 

@@ -156,6 +156,14 @@ type Param struct {
 	IsPointer bool   `json:"isPointer,omitempty"` // Whether the parameter is a pointer
 }
 
+func (p *Param) CTypeStr() string {
+	if p.IsPointer {
+		return fmt.Sprintf("%s*", p.Type)
+	}
+	return p.Name
+
+}
+
 // String returns the Go string representation of a parameter
 func (p *Param) String() string {
 	if p.IsPointer {

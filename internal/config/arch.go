@@ -151,7 +151,7 @@ func Apple() *Arch {
 	arch.Label = regexp.MustCompile(`^[Ll][a-zA-Z0-9]+(?:_\d+)?:.*$`)
 	arch.Comment = regexp.MustCompile(`^\s*;.*$`)
 	arch.CommentCh = ";"
-	arch.JumpInstr = regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*(?P<label>[Ll][a-zA-Z0-9]+(?:_\d+))$`)
+	arch.JumpInstr = regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`)
 	arch.UseGoObjdump = true
 
 	return arch
