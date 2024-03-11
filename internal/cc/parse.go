@@ -98,7 +98,7 @@ func Parse(path string) ([]asm.Function, error) {
 		}
 		funcResult := funcDef.DeclarationSpecifiers.TypeSpecifier
 		funcComment := strings.TrimSpace(string(funcResult.Token.Sep()))
-		goName, goSig, err := extractGoSignature(funcComment)
+		goFunc, err := extractGoSignature(funcComment)
 		if err == errNoSignature {
 			continue
 		} else if err != nil {
@@ -111,15 +111,15 @@ func Parse(path string) ([]asm.Function, error) {
 			if funcIdent.Case != cc.DirectDeclaratorFuncParam {
 				continue
 			}
-			if goSig.Results.NumFields() > 0 && funcResult.Case != cc.TypeSpecifierVoid {
+			if goFunc.NumResults() > 0 && funcResult.Case != cc.TypeSpecifierVoid {
 				return nil, fmt.Errorf("%s: must return void, not %s", funcIdent.DirectDeclarator.Token.SrcStr(), funcResult.Token.SrcStr())
 			}
 
-			function, err := convertFunction(funcIdent, goName)
+			function, err := convertFunction(funcIdent, goFunc)
 			if err != nil {
 				return nil, err
 			}
-			if err := checkFunction(function, goSig); err != nil {
+			if err := checkFunction(function); err != nil {
 				return nil, err
 			}
 			functions = append(functions, function)
@@ -156,11 +156,14 @@ func redactSource(path string) (string, error) {
 	src.WriteString("#define int8_t char\n")
 
 	var clauseCount int
-	for _, line := range strings.Split(string(bytes), "\n") {
+
+	lines := strings.Split(string(bytes), "\n")
+	for _, l := range lines {
+		line := strings.TrimSpace(l)
 		switch {
 		case strings.HasPrefix(line, "#"):
 			continue
-		case strings.HasPrefix(line, "//"):
+		case strings.HasPrefix(line, "//") && clauseCount == 0:
 			// keep comments
 			src.WriteString(line)
 			src.WriteRune('\n')
@@ -208,7 +211,7 @@ func normalizeCType(t string) string {
 }
 
 // convertFunction extracts the function definition from cc.DirectDeclarator.
-func convertFunction(declarator *cc.DirectDeclarator, comment string) (asm.Function, error) {
+func convertFunction(declarator *cc.DirectDeclarator, goFunc asm.GoFunction) (asm.Function, error) {
 	params, err := convertFunctionParameters(declarator.ParameterTypeList.ParameterList)
 	if err != nil {
 		return asm.Function{}, err
@@ -218,10 +221,11 @@ func convertFunction(declarator *cc.DirectDeclarator, comment string) (asm.Funct
 		Name:     declarator.DirectDeclarator.Token.SrcStr(),
 		Position: declarator.Position().Line,
 		Params:   params,
+		GoFunc:   goFunc,
 	}, nil
 }
 
-func extractGoSignature(comment string) (string, *ast.FuncType, error) {
+func extractGoSignature(comment string) (asm.GoFunction, error) {
 	lines := strings.Split(comment, "\n")
 	for _, line := range lines {
 		if !strings.Contains(line, "gocc:") {
@@ -231,22 +235,22 @@ func extractGoSignature(comment string) (string, *ast.FuncType, error) {
 
 		goExpr, err := parser.ParseExpr("interface {" + parts[1] + "}")
 		if err != nil {
-			return "", nil, err
+			return asm.GoFunction{}, err
 		}
 		if interfaceType, ok := goExpr.(*ast.InterfaceType); !ok {
-			return "", nil, errors.New("gocc: invalid signature")
+			return asm.GoFunction{}, errors.New("gocc: invalid signature")
 		} else if len(interfaceType.Methods.List) != 1 {
-			return "", nil, errors.New("gocc: invalid signature")
+			return asm.GoFunction{}, errors.New("gocc: invalid signature")
 		} else {
 			method := interfaceType.Methods.List[0]
-			return method.Names[0].String(), method.Type.(*ast.FuncType), nil
+			return asm.GoFunction{Name: method.Names[0].String(), Expr: method.Type.(*ast.FuncType)}, nil
 		}
 	}
 
-	return "", nil, errNoSignature
+	return asm.GoFunction{}, errNoSignature
 }
 
-func checkFunction(function asm.Function, goSig *ast.FuncType) error {
+func checkFunction(function asm.Function) error {
 	checkParam := func(idx int, expectedParam asm.Param) error {
 		if idx >= len(function.Params) {
 			return fmt.Errorf("%s: too few parameters, missing %s", function.Name, expectedParam.CTypeStr())
@@ -272,7 +276,7 @@ func checkFunction(function asm.Function, goSig *ast.FuncType) error {
 	}
 
 	j := 0
-	for _, goParam := range goSig.Params.List {
+	for _, goParam := range function.GoFunc.Expr.Params.List {
 		goParamTypeName := types.ExprString(goParam.Type)
 		for range goParam.Names {
 			switch goParamTypeName {
@@ -315,8 +319,8 @@ func checkFunction(function asm.Function, goSig *ast.FuncType) error {
 		}
 	}
 
-	if goSig.Results != nil {
-		for _, goRet := range goSig.Results.List {
+	if function.GoFunc.Expr.Results != nil {
+		for _, goRet := range function.GoFunc.Expr.Results.List {
 			goRetTypeName := types.ExprString(goRet.Type)
 			switch goRetTypeName {
 			case "int", "int8", "int16", "int32", "int64",
@@ -327,6 +331,7 @@ func checkFunction(function asm.Function, goSig *ast.FuncType) error {
 				if err := checkParam(j, p); err != nil {
 					return err
 				}
+				function.Params[j].IsReturn = true
 				j++
 			case "unsafe.Pointer":
 				if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {

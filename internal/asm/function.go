@@ -17,6 +17,8 @@ package asm
 
 import (
 	"fmt"
+	"go/ast"
+	"go/types"
 	"strconv"
 	"strings"
 
@@ -31,6 +33,11 @@ var constSizes = map[string]int{
 	"quad":  8,
 }
 
+type GoFunction struct {
+	Name string
+	Expr *ast.FuncType
+}
+
 // ------------------------------------- Function -------------------------------------
 
 type Function struct {
@@ -39,12 +46,78 @@ type Function struct {
 	Params   []Param `json:"params"`
 	Consts   []Const `json:"consts,omitempty"`
 	Lines    []Line  `json:"lines"`
+	GoFunc   GoFunction
+}
+
+func (f *GoFunction) NumResults() int {
+	return f.Expr.Results.NumFields()
+}
+
+func (f *GoFunction) iterFieldList(fl *ast.FieldList, fn func(name, typ string)) {
+	if fl == nil {
+		return
+	}
+	for _, field := range fl.List {
+		typ := types.ExprString(field.Type)
+		if len(field.Names) == 0 {
+			fn("", typ)
+		}
+		for _, name := range field.Names {
+			fn(name.Name, typ)
+		}
+	}
+}
+
+func (f *GoFunction) ForEachParam(fn func(name, typ string)) {
+	f.iterFieldList(f.Expr.Params, fn)
+}
+
+func (f *GoFunction) ForEachResult(fn func(name, typ string)) {
+	f.iterFieldList(f.Expr.Results, fn)
 }
 
 // String returns the function signature for a Go stub
 func (f *Function) String() string {
 	var builder strings.Builder
 	builder.WriteString("\n//go:noescape,nosplit\n")
+	if f.GoFunc.Expr != nil {
+		builder.WriteString(fmt.Sprintf("func %s(", f.GoFunc.Name))
+		paramIdx := 0
+		f.GoFunc.ForEachParam(func(name, typ string) {
+			if paramIdx > 0 {
+				builder.WriteString(", ")
+			}
+			builder.WriteString(name)
+			builder.WriteByte(' ')
+			builder.WriteString(typ)
+			paramIdx++
+		})
+		builder.WriteString(")")
+		switch f.GoFunc.NumResults() {
+		case 0:
+		case 1:
+			builder.WriteByte(' ')
+			f.GoFunc.ForEachResult(func(_, typ string) {
+				builder.WriteString(typ)
+			})
+		default:
+			builder.WriteString(" (")
+			resultIdx := 0
+			f.GoFunc.ForEachResult(func(name, typ string) {
+				if resultIdx > 0 {
+					builder.WriteString(", ")
+				}
+				builder.WriteString(name)
+				builder.WriteByte(' ')
+				builder.WriteString(typ)
+				resultIdx++
+			})
+			builder.WriteString(")")
+		}
+		builder.WriteByte('\n')
+		return builder.String()
+	}
+
 	builder.WriteString(fmt.Sprintf("func %s(", f.Name))
 	for i, param := range f.Params {
 		if i > 0 {
@@ -154,6 +227,7 @@ type Param struct {
 	Type      string `json:"type"`                // Type of the parameter (C type)
 	Name      string `json:"name"`                // Name of the parameter
 	IsPointer bool   `json:"isPointer,omitempty"` // Whether the parameter is a pointer
+	IsReturn  bool   `json:"isReturn,omitempty"`  // Whether the parameter is a return value
 }
 
 func (p *Param) CTypeStr() string {

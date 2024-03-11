@@ -38,9 +38,17 @@ func Generate(arch *config.Arch, functions []Function) ([]byte, error) {
 			builder.WriteString(c.Compile(arch))
 		}
 
-		builder.WriteString(fmt.Sprintf("\nTEXT ·%v(SB),NOSPLIT,$0-32\n", function.Name))
+		name := function.Name
+		if function.GoFunc.Expr != nil {
+			name = function.GoFunc.Name
+		}
+		builder.WriteString(fmt.Sprintf("\nTEXT ·%v(SB),NOSPLIT,$0-%d\n", name, 8*len(function.Params)))
 		for i, param := range function.Params {
-			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", arch.CallOp, param.Name, i*8, arch.Registers[i]))
+			if param.IsReturn {
+				builder.WriteString(fmt.Sprintf("\t%s $%s+%d(FP), %s\n", arch.CallOp, param.Name, i*8, arch.Registers[i]))
+			} else {
+				builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", arch.CallOp, param.Name, i*8, arch.Registers[i]))
+			}
 		}
 		for _, line := range function.Lines {
 			builder.WriteString(line.Compile(arch))

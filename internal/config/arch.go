@@ -113,6 +113,7 @@ func ARM64() *Arch {
 		Data:       regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
 		Comment:    regexp.MustCompile(`^\s*//.*$`),
 		Const:      regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
+		JumpInstr:  regexp.MustCompile(`^(?P<instr>b)\s+[.](?P<label>[A-Z0-9]+_\d+)$`),
 		Registers:  []string{"R0", "R1", "R2", "R3"},
 		BuildTags:  "//go:build !noasm && !darwin && arm64\n",
 		CommentCh:  "//",
