@@ -83,7 +83,7 @@ func (line *Line) Compile(arch *config.Arch) string {
 	}
 
 	// rewrite jumps
-	if arch.JumpInstr != nil {
+	if arch != nil && arch.JumpInstr != nil {
 		parts := []string{line.Assembly}
 		if line.Disassembled != "" {
 			parts = append([]string{line.Disassembled}, parts...)

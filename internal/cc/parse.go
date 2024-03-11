@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/types"
 	"os"
 	"reflect"
 	"sort"
@@ -272,65 +273,69 @@ func checkFunction(function asm.Function, goSig *ast.FuncType) error {
 
 	j := 0
 	for _, goParam := range goSig.Params.List {
-		goParamType := goParam.Type.(*ast.Ident)
-		switch goParamType.Name {
-		case "int", "int8", "int16", "int32", "int64",
-			"uint", "uint8", "uint16", "uint32", "uint64",
-			"float32", "float64":
-			if err := checkParam(j, go2c[goParamType.Name]); err != nil {
-				return err
-			}
-			j++
-		case "string":
-			if err := checkParam(j, go2c[goParamType.Name]); err != nil {
-				return err
-			}
-			if err := checkParam(j+1, go2c["int"]); err != nil {
-				return err
-			}
-			j += 2
-		case "unsafe.Pointer":
-			if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
-				return err
-			}
-			j++
-		default:
-			if strings.HasPrefix(goParamType.Name, "[]") {
-				if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
+		goParamTypeName := types.ExprString(goParam.Type)
+		for range goParam.Names {
+			switch goParamTypeName {
+			case "int", "int8", "int16", "int32", "int64",
+				"uint", "uint8", "uint16", "uint32", "uint64",
+				"float32", "float64":
+				if err := checkParam(j, go2c[goParamTypeName]); err != nil {
+					return err
+				}
+				j++
+			case "string":
+				if err := checkParam(j, go2c[goParamTypeName]); err != nil {
 					return err
 				}
 				if err := checkParam(j+1, go2c["int"]); err != nil {
 					return err
 				}
-				if err := checkParam(j+2, go2c["int"]); err != nil {
+				j += 2
+			case "unsafe.Pointer":
+				if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
 					return err
 				}
-				j += 3
-				continue
+				j++
+			default:
+				if strings.HasPrefix(goParamTypeName, "[]") {
+					if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
+						return err
+					}
+					if err := checkParam(j+1, go2c["int"]); err != nil {
+						return err
+					}
+					if err := checkParam(j+2, go2c["int"]); err != nil {
+						return err
+					}
+					j += 3
+					continue
+				}
+				return fmt.Errorf("gocc: unsupported type: %v", goParamTypeName)
 			}
-			return fmt.Errorf("gocc: unsupported type: %v", goParamType.Name)
 		}
 	}
 
-	for _, goRet := range goSig.Results.List {
-		goRetType := goRet.Type.(*ast.Ident)
-		switch goRetType.Name {
-		case "int", "int8", "int16", "int32", "int64",
-			"uint", "uint8", "uint16", "uint32", "uint64",
-			"float32", "float64":
-			p := go2c[goRetType.Name]
-			p.IsPointer = true
-			if err := checkParam(j, p); err != nil {
-				return err
+	if goSig.Results != nil {
+		for _, goRet := range goSig.Results.List {
+			goRetTypeName := types.ExprString(goRet.Type)
+			switch goRetTypeName {
+			case "int", "int8", "int16", "int32", "int64",
+				"uint", "uint8", "uint16", "uint32", "uint64",
+				"float32", "float64":
+				p := go2c[goRetTypeName]
+				p.IsPointer = true
+				if err := checkParam(j, p); err != nil {
+					return err
+				}
+				j++
+			case "unsafe.Pointer":
+				if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
+					return err
+				}
+				j++
+			default:
+				return fmt.Errorf("%s: unsupported return type: %v", function.Name, goRetTypeName)
 			}
-			j++
-		case "unsafe.Pointer":
-			if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
-				return err
-			}
-			j++
-		default:
-			return fmt.Errorf("%s: unsupported return type: %v", function.Name, goRetType.Name)
 		}
 	}
 

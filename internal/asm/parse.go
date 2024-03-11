@@ -226,6 +226,7 @@ func ParseGoObjectDump(arch *config.Arch, dump string, functions []Function) err
 			binHex := m[3]
 			assembly := m[4]
 
+			// wait what, this should be independent of the instruction set
 			switch {
 			case assembly == "" || assembly == "?":
 				return fmt.Errorf("objectdump failure on line: %d, please compare assembly with objdump output", i)

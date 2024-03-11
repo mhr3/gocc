@@ -35,7 +35,7 @@ func TestLineByte(t *testing.T) {
 		Assembly: "ret",
 		Binary:   []string{"c3"},
 	}
-	assert.Equal(t, "\tBYTE $0xc3\t// ret\n", line.Compile(nil))
+	assert.Equal(t, "\tRET\n", line.Compile(nil))
 }
 
 func TestLineLabel(t *testing.T) {
@@ -44,7 +44,7 @@ func TestLineLabel(t *testing.T) {
 		Assembly: "ret",
 		Binary:   []string{"c3"},
 	}
-	assert.Equal(t, "label:\n\tBYTE $0xc3\t// ret\n", line.Compile(nil))
+	assert.Equal(t, "label:\n\tRET\n", line.Compile(nil))
 }
 
 func TestLineJumpAMD(t *testing.T) {
