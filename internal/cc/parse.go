@@ -333,10 +333,13 @@ func checkFunction(function asm.Function) error {
 				}
 				function.Params[j].IsReturn = true
 				j++
-			case "unsafe.Pointer":
-				if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
+			case "bool":
+				// TODO: does go want to write to a *int64 or a *byte?
+				p := asm.Param{Type: "longlong", IsPointer: true}
+				if err := checkParam(j, p); err != nil {
 					return err
 				}
+				function.Params[j].IsReturn = true
 				j++
 			default:
 				return fmt.Errorf("%s: unsupported return type: %v", function.Name, goRetTypeName)
