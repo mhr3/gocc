@@ -25,12 +25,13 @@ type Arch struct {
 	Name         string         // Architecture name
 	Attribute    *regexp.Regexp // Parses assembly attributes
 	Function     *regexp.Regexp // Parses assembly function names
-	Label        *regexp.Regexp // Parses assembly labels
+	SourceLabel  *regexp.Regexp // Parses assembly labels
 	Code         *regexp.Regexp // Parses assembly code
 	Symbol       *regexp.Regexp // Parses assembly symbols
 	Data         *regexp.Regexp // Parses assembly data
 	Comment      *regexp.Regexp // Parses assembly comments
 	Const        *regexp.Regexp // Parses assembly constants
+	Label        *regexp.Regexp // Parses assembly labels
 	JumpInstr    *regexp.Regexp // Parses assembly jump instructions
 	Registers    []string       // Registers to use
 	BuildTags    string         // Golang build tags
@@ -68,12 +69,13 @@ func AMD64() *Arch {
 		Name:         "amd64",
 		Attribute:    regexp.MustCompile(`^\s+\..+$`),
 		Function:     regexp.MustCompile(`^\w+:.*$`),
-		Label:        regexp.MustCompile(`^\.[A-Z0-9]+_\d+:.*$`),
+		SourceLabel:  regexp.MustCompile(`^\.[A-Z0-9]+_\d+:.*$`),
 		Code:         regexp.MustCompile(`^\s+\w+.+$`),
 		Symbol:       regexp.MustCompile(`^\w+\s+<\w+>:$`),
 		Data:         regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
 		Comment:      regexp.MustCompile(`^\s*#.*$`),
 		Const:        regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
+		Label:        regexp.MustCompile(`[A-Z0-9]+_\d+`),
 		JumpInstr:    regexp.MustCompile(`^(?P<instr>j\w+)\s+[.](?P<label>\w+)$`),
 		Registers:    []string{"DI", "SI", "DX", "CX"},
 		BuildTags:    "//go:build !noasm && amd64\n",
@@ -111,21 +113,22 @@ func Avx512() *Arch {
 // ARM64 returns a configuration for ARM64 architecture
 func ARM64() *Arch {
 	return &Arch{
-		Name:       "arm64",
-		Attribute:  regexp.MustCompile(`^\s+\..+$`),
-		Function:   regexp.MustCompile(`^\w+:.*$`),
-		Label:      regexp.MustCompile(`^\.[A-Z0-9]+_\d+:.*$`),
-		Code:       regexp.MustCompile(`^\s+\w+.+$`),
-		Symbol:     regexp.MustCompile(`^\w+\s+<\w+>:$`),
-		Data:       regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
-		Comment:    regexp.MustCompile(`^\s*//.*$`),
-		Const:      regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
-		JumpInstr:  regexp.MustCompile(`^(?P<instr>b)\s+[.](?P<label>[A-Z0-9]+_\d+)$`),
-		Registers:  []string{"R0", "R1", "R2", "R3"},
-		BuildTags:  "//go:build !noasm && !darwin && arm64\n",
-		CommentCh:  "//",
-		CallOp:     "MOVD",
-		ClangFlags: []string{"--target=aarch64-linux-gnu"},
+		Name:        "arm64",
+		Attribute:   regexp.MustCompile(`^\s+\..+$`),
+		Function:    regexp.MustCompile(`^\w+:.*$`),
+		SourceLabel: regexp.MustCompile(`^\.[A-Z0-9]+_\d+:.*$`),
+		Code:        regexp.MustCompile(`^\s+\w+.+$`),
+		Symbol:      regexp.MustCompile(`^\w+\s+<\w+>:$`),
+		Data:        regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
+		Comment:     regexp.MustCompile(`^\s*//.*$`),
+		Const:       regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
+		Label:       regexp.MustCompile(`[A-Z0-9]+_\d+`),
+		JumpInstr:   regexp.MustCompile(`^(?P<instr>b)\s+[.](?P<label>[A-Z0-9]+_\d+)$`),
+		Registers:   []string{"R0", "R1", "R2", "R3"},
+		BuildTags:   "//go:build !noasm && !darwin && arm64\n",
+		CommentCh:   "//",
+		CallOp:      "MOVD",
+		ClangFlags:  []string{"--target=aarch64-linux-gnu"},
 	}
 }
 
@@ -156,9 +159,10 @@ func Apple() *Arch {
 	}
 
 	arch.ClangFlags = []string{}
-	arch.Label = regexp.MustCompile(`^[Ll][a-zA-Z0-9]+(?:_\d+)?:.*$`)
+	arch.SourceLabel = regexp.MustCompile(`^[Ll][a-zA-Z0-9]+(?:_\d+)?:.*$`)
 	arch.Comment = regexp.MustCompile(`^\s*;.*$`)
 	arch.CommentCh = ";"
+	arch.Label = regexp.MustCompile(`[Ll_][a-zA-Z0-9_]+`)
 	arch.JumpInstr = regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`)
 
 	return arch

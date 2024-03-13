@@ -1,9 +1,6 @@
 package cc
 
 import (
-	"math"
-	"strings"
-
 	"github.com/kelindar/gocc/internal/asm"
 	"github.com/kelindar/gocc/internal/config"
 	"github.com/kelindar/gocc/internal/golang/objfile"
@@ -49,9 +46,6 @@ func (d *Disassembler) Disassemble(assemblyPath, objectPath string) ([]asm.Funct
 	if err != nil {
 		return nil, err
 	}
-	_ = disasm
-	var buf strings.Builder
-	disasm.Print(&buf, nil, 0, math.MaxUint64, false, false)
 
 	disassembler := d.disassembler
 	if d.arch.Disassembler != nil {
@@ -66,8 +60,7 @@ func (d *Disassembler) Disassemble(assemblyPath, objectPath string) ([]asm.Funct
 	}
 
 	// Parse the object dump and map machine code to assembly
-	asm.ParseGoObjectDump(d.arch, buf.String(), assembly)
-	err = asm.ParseClangObjectDump(d.arch, dump, assembly)
+	err = asm.ParseClangObjectDump(d.arch, dump, assembly, disasm)
 	if err != nil {
 		return nil, err
 	}

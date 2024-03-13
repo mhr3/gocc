@@ -10,11 +10,13 @@ import (
 	"container/list"
 	"debug/gosym"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -288,6 +290,43 @@ func (d *Disasm) Decode(start, end uint64, relocs []Reloc, gnuAsm bool, f func(p
 		f(pc, uint64(size), file, line, text)
 		pc += uint64(size)
 	}
+}
+
+func (d *Disasm) DecodeInstruction(symName string, binary []string) (string, error) {
+	idx := slices.IndexFunc(d.syms, func(sym Sym) bool {
+		return sym.Name == symName
+	})
+	if idx == -1 {
+		return "", fmt.Errorf("symbol not found")
+	}
+	sym := d.syms[idx]
+
+	symStart := sym.Addr
+	symEnd := sym.Addr + uint64(sym.Size)
+	relocs := sym.Relocs
+
+	joinedBinary := strings.Join(binary, "")
+	binaryAsCode, err := hex.DecodeString(joinedBinary)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode binary: %v", err)
+	}
+
+	textIdx := bytes.Index(d.text[symStart-d.textStart:], binaryAsCode)
+	if textIdx == -1 {
+		return "", fmt.Errorf("binary not found")
+	}
+
+	textIdx += int(d.textStart)
+	symStart = sym.Addr + uint64(textIdx)
+	symEnd = symStart + uint64(len(binaryAsCode))
+
+	var assembly string
+
+	d.Decode(symStart, symEnd, relocs, false, func(pc, size uint64, file string, line int, text string) {
+		assembly = text
+	})
+
+	return assembly, nil
 }
 
 type lookupFunc = func(addr uint64) (sym string, base uint64)

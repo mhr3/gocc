@@ -26,6 +26,10 @@ import (
 	"github.com/kelindar/gocc/internal/config"
 )
 
+type Plan9Decoder interface {
+	DecodeInstruction(symName string, binary []string) (string, error)
+}
+
 // ParseAssembly parses the assembly file and returns a list of functions
 func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 	file, err := os.Open(path)
@@ -65,7 +69,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 
 		// Handle assembly labels. We could potentially have multiple labels per line if
 		// compiler decides to generate no-op instructions.
-		case arch.Label.MatchString(line):
+		case arch.SourceLabel.MatchString(line):
 			labelName = strings.Split(line, ":")[0]
 			labelName = strings.TrimLeft(labelName, ".")
 			// If we have a constant, attach it to the current function
@@ -120,7 +124,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 }
 
 // ParseClangObjectDump parses the output of objdump file and returns a list of functions
-func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function) error {
+func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, dec Plan9Decoder) error {
 	var (
 		functionName string
 		functionIdx  int
@@ -176,12 +180,33 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function) 
 				return fmt.Errorf("%d: unexpected objectdump line: %s, please compare assembly with objdump output", i, line)
 			}
 
+			srcLine := current.Lines[lineNumber].Assembly
+			if dec != nil && arch.Label.MatchString(srcLine) {
+				p9asm, err := dec.DecodeInstruction(functionName, binary)
+				if err != nil {
+					return fmt.Errorf("cannot decode instruction %q: %v", data, err)
+				}
+				current.Lines[lineNumber].Disassembled = p9asm
+			}
+
 			current.Lines[lineNumber].Binary = binary
 			lineNumber++
 		}
 	}
 	return nil
 }
+
+/*
+func containsLabel(arch *config.Arch, line string) bool {
+	parts := whitespaceRe.Split(line, -1)
+	for _, part := range parts {
+		if arch.SourceLabel.MatchString(part) {
+			return true
+		}
+	}
+	return false
+}
+*/
 
 // ParseGoObjectDump parses the output of objdump file and returns a list of functions
 func ParseGoObjectDump(arch *config.Arch, dump string, functions []Function) error {
