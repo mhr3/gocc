@@ -96,8 +96,33 @@ func Parse(path string) ([]asm.Function, error) {
 		if funcDef.Position().Filename != path {
 			continue
 		}
-		funcResult := funcDef.DeclarationSpecifiers.TypeSpecifier
-		funcComment := strings.TrimSpace(string(funcResult.Token.Sep()))
+		var (
+			funcComment  string
+			funcTypeSpec *cc.TypeSpecifier
+		)
+		declSpec := funcDef.DeclarationSpecifiers
+		for declSpec != nil {
+			switch declSpec.Case {
+			case cc.DeclarationSpecifiersTypeSpec:
+				funcTypeSpec = declSpec.TypeSpecifier
+				if funcComment == "" {
+					funcComment = strings.TrimSpace(string(declSpec.TypeSpecifier.Token.Sep()))
+				}
+			case cc.DeclarationSpecifiersTypeQual:
+				if funcComment == "" {
+					funcComment = strings.TrimSpace(string(declSpec.TypeQualifier.Token.Sep()))
+				}
+			case cc.DeclarationSpecifiersStorage:
+				if funcComment == "" {
+					funcComment = strings.TrimSpace(string(declSpec.StorageClassSpecifier.Token.Sep()))
+				}
+			}
+			declSpec = declSpec.DeclarationSpecifiers
+		}
+		if funcTypeSpec == nil {
+			continue
+		}
+
 		goFunc, err := extractGoSignature(funcComment)
 		if err == errNoSignature {
 			continue
@@ -111,8 +136,8 @@ func Parse(path string) ([]asm.Function, error) {
 			if funcIdent.Case != cc.DirectDeclaratorFuncParam {
 				continue
 			}
-			if goFunc.NumResults() > 0 && funcResult.Case != cc.TypeSpecifierVoid {
-				return nil, fmt.Errorf("%s: must return void, not %s", funcIdent.DirectDeclarator.Token.SrcStr(), funcResult.Token.SrcStr())
+			if goFunc.NumResults() > 0 && funcTypeSpec.Case != cc.TypeSpecifierVoid {
+				return nil, fmt.Errorf("%s: function must return void, not %s (use arguments for go return values)", funcIdent.DirectDeclarator.Token.SrcStr(), funcTypeSpec.Token.SrcStr())
 			}
 
 			function, err := convertFunction(funcIdent, goFunc)
@@ -127,7 +152,7 @@ func Parse(path string) ([]asm.Function, error) {
 	}
 
 	if len(functions) == 0 {
-		return nil, errors.New("gocc: no functions found")
+		return nil, fmt.Errorf("gocc: %s no function annotations found", path)
 	}
 
 	sort.Slice(functions, func(i, j int) bool {
@@ -139,52 +164,57 @@ func Parse(path string) ([]asm.Function, error) {
 // redactSource removes code from the source and only leaves function declarations.
 // This is done to avoid parsing errors when the source is not compatible with the compiler.
 func redactSource(path string) (string, error) {
-	bytes, err := os.ReadFile(path)
+	src, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
 
-	var src strings.Builder
-	src.WriteString("#define __STDC_HOSTED__ 1\n")
-	src.WriteString("#define uint64_t unsigned long long\n")
-	src.WriteString("#define uint32_t unsigned int\n")
-	src.WriteString("#define uint16_t unsigned short\n")
-	src.WriteString("#define uint8_t unsigned char\n")
-	src.WriteString("#define int64_t long long\n")
-	src.WriteString("#define int32_t int\n")
-	src.WriteString("#define int16_t short\n")
-	src.WriteString("#define int8_t char\n")
+	var redacted strings.Builder
+	redacted.WriteString("#define __STDC_HOSTED__ 1\n")
+	redacted.WriteString("#define uint64_t unsigned long long\n")
+	redacted.WriteString("#define uint32_t unsigned int\n")
+	redacted.WriteString("#define uint16_t unsigned short\n")
+	redacted.WriteString("#define uint8_t unsigned char\n")
+	redacted.WriteString("#define int64_t long long\n")
+	redacted.WriteString("#define int32_t int\n")
+	redacted.WriteString("#define int16_t short\n")
+	redacted.WriteString("#define int8_t char\n")
 
 	var clauseCount int
 
-	lines := strings.Split(string(bytes), "\n")
-	for _, l := range lines {
+	lines := strings.Split(string(src), "\n")
+	for i, l := range lines {
 		line := strings.TrimSpace(l)
 		switch {
 		case strings.HasPrefix(line, "#"):
 			continue
 		case strings.HasPrefix(line, "//") && clauseCount == 0:
 			// keep comments
-			src.WriteString(line)
-			src.WriteRune('\n')
+			redacted.WriteString(line)
+			redacted.WriteRune('\n')
 		case strings.Contains(line, "{"):
 			if clauseCount == 0 {
-				src.WriteString(line[:strings.Index(line, "{")+1])
-				src.WriteString("\n // removed for compatibility\n")
+				bracketIdx := strings.Index(line, "{")
+				if bracketIdx == 0 {
+					// just try including the previous line
+					redacted.WriteString(lines[i-1])
+				}
+				redacted.WriteString(line[:bracketIdx+1])
+				redacted.WriteString("\n // removed for compatibility\n")
 			}
 			clauseCount++
 		case strings.Contains(line, "}"):
 			clauseCount--
 			if clauseCount == 0 {
-				src.WriteString(line[strings.Index(line, "}"):])
-				src.WriteRune('\n')
+				redacted.WriteString(line[strings.Index(line, "}"):])
+				redacted.WriteRune('\n')
 			}
 		default:
 			continue
 		}
 	}
 
-	return src.String(), nil
+	return redacted.String(), nil
 }
 
 func normalizeCType(t string) string {
@@ -259,16 +289,16 @@ func checkFunction(function asm.Function) error {
 		param := function.Params[idx]
 		if expectedParam.IsPointer {
 			if !param.IsPointer {
-				return fmt.Errorf("%s: expected pointer, got %v", function.Name, param.CTypeStr())
+				return fmt.Errorf("%s: param %q: expected pointer, got %v", function.Name, param.Name, param.CTypeStr())
 			}
 		} else if param.IsPointer {
-			return fmt.Errorf("%s: expected value, got pointer", function.Name)
+			return fmt.Errorf("%s: param %q: expected value, got pointer", function.Name, param.Name)
 		}
 		if param.Type != expectedParam.Type {
 			got := normalizeCType(param.Type)
 			// ignore the "unsigned" prefix
 			if !strings.HasSuffix(got, expectedParam.Type) {
-				return fmt.Errorf("%s: expected %v, got %v", function.Name, expectedParam.CTypeStr(), param.CTypeStr())
+				return fmt.Errorf("%s: param %q: expected %v, got %v", function.Name, param.Name, expectedParam.CTypeStr(), param.CTypeStr())
 			}
 		}
 

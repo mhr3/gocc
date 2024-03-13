@@ -22,7 +22,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/kelindar/gocc/internal/config"
 )
@@ -139,21 +138,19 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function) 
 			lineNumber = 0
 			functionIdx++
 		case arch.Data.MatchString(line):
-			data := strings.Split(line, ":")[1]
+			data := strings.SplitN(line, ":", 2)[1]
 			data = strings.TrimSpace(data)
-			splits := strings.Split(data, " ")
+			parts := strings.SplitN(data, "\t", 2)
+			splits := strings.Split(strings.TrimSpace(parts[0]), " ")
+			if len(parts) < 2 {
+				return fmt.Errorf("cannot parse instruction %q: try to increase --insn-width of objdump", data)
+			}
 			var (
 				binary   []string
-				assembly string
+				assembly = parts[1]
 			)
 
-			for i, s := range splits {
-				if s == "" || unicode.IsSpace(rune(s[0])) {
-					assembly = strings.Join(splits[i:], " ")
-					assembly = strings.TrimSpace(assembly)
-					break
-				}
-
+			for _, s := range splits {
 				// If the binary representation is not separated with spaces, split it
 				switch {
 				case len(s) > 2:

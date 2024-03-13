@@ -37,7 +37,6 @@ type Arch struct {
 	CommentCh    string         // Assembly comment character
 	CallOp       string         // Call instruction to use to move the params onto the stack
 	Disassembler []string       // Disassembler to use and flags
-	UseGoObjdump bool           // Use go tool objdump instead of clang
 	ClangFlags   []string       // Flags for clang
 }
 
@@ -65,7 +64,7 @@ func For(arch string) (*Arch, error) {
 
 // AMD64 returns a configuration for AMD64 architecture
 func AMD64() *Arch {
-	return &Arch{
+	arch := &Arch{
 		Name:         "amd64",
 		Attribute:    regexp.MustCompile(`^\s+\..+$`),
 		Function:     regexp.MustCompile(`^\w+:.*$`),
@@ -81,8 +80,16 @@ func AMD64() *Arch {
 		CommentCh:    "#",
 		CallOp:       "MOVQ",
 		ClangFlags:   []string{"--target=x86_64-linux-gnu"},
-		Disassembler: []string{"objdump", "--insn-width", "16"},
+		Disassembler: []string{"--insn-width", "16"},
 	}
+
+	if runtime.GOOS == "darwin" {
+		arch.ClangFlags = append(arch.ClangFlags, "-arch", "x86_64", "--sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/")
+		arch.Disassembler = []string{}
+		return arch
+	}
+
+	return arch
 }
 
 // Avx2 returns a configuration for AMD64 architecture with AVX2 support
@@ -153,7 +160,6 @@ func Apple() *Arch {
 	arch.Comment = regexp.MustCompile(`^\s*;.*$`)
 	arch.CommentCh = ";"
 	arch.JumpInstr = regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`)
-	arch.UseGoObjdump = true
 
 	return arch
 }

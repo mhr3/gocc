@@ -1,8 +1,12 @@
 package cc
 
 import (
+	"math"
+	"strings"
+
 	"github.com/kelindar/gocc/internal/asm"
 	"github.com/kelindar/gocc/internal/config"
+	"github.com/kelindar/gocc/internal/golang/objfile"
 )
 
 type Disassembler struct {
@@ -17,16 +21,11 @@ func NewDisassembler(arch *config.Arch) (*Disassembler, error) {
 		err     error
 	)
 
-	if arch.UseGoObjdump {
-		objdump, err = config.FindGoObjdump()
-		dasm = append(dasm, objdump, "tool", "objdump")
-	} else {
-		objdump, err = config.FindClangObjdump()
-		dasm = append(dasm, objdump)
-	}
+	objdump, err = config.FindClangObjdump()
 	if err != nil {
 		return nil, err
 	}
+	dasm = append(dasm, objdump)
 
 	return &Disassembler{
 		arch:         arch,
@@ -42,14 +41,23 @@ func (d *Disassembler) Disassemble(assemblyPath, objectPath string) ([]asm.Funct
 		return nil, err
 	}
 
+	objF, err := objfile.Open(objectPath)
+	if err != nil {
+		return nil, err
+	}
+	disasm, err := objF.Disasm()
+	if err != nil {
+		return nil, err
+	}
+	_ = disasm
+	var buf strings.Builder
+	disasm.Print(&buf, nil, 0, math.MaxUint64, false, false)
+
 	disassembler := d.disassembler
 	if d.arch.Disassembler != nil {
 		disassembler = append(disassembler, d.arch.Disassembler...)
 	}
-	if !d.arch.UseGoObjdump {
-		disassembler = append(disassembler, "-d")
-	}
-	disassembler = append(disassembler, objectPath)
+	disassembler = append(disassembler, "-d", objectPath)
 
 	// Run the disassembler
 	dump, err := runCommand(disassembler[0], disassembler[1:]...)
@@ -58,11 +66,8 @@ func (d *Disassembler) Disassemble(assemblyPath, objectPath string) ([]asm.Funct
 	}
 
 	// Parse the object dump and map machine code to assembly
-	if d.arch.UseGoObjdump {
-		err = asm.ParseGoObjectDump(d.arch, dump, assembly)
-	} else {
-		err = asm.ParseClangObjectDump(d.arch, dump, assembly)
-	}
+	asm.ParseGoObjectDump(d.arch, buf.String(), assembly)
+	err = asm.ParseClangObjectDump(d.arch, dump, assembly)
 	if err != nil {
 		return nil, err
 	}
