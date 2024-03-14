@@ -66,23 +66,23 @@ func For(arch string) (*Arch, error) {
 // AMD64 returns a configuration for AMD64 architecture
 func AMD64() *Arch {
 	arch := &Arch{
-		Name:         "amd64",
-		Attribute:    regexp.MustCompile(`^\s+\..+$`),
-		Function:     regexp.MustCompile(`^\w+:.*$`),
-		SourceLabel:  regexp.MustCompile(`^\.[A-Z0-9]+_\d+:.*$`),
-		Code:         regexp.MustCompile(`^\s+\w+.+$`),
-		Symbol:       regexp.MustCompile(`^\w+\s+<\w+>:$`),
-		Data:         regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
-		Comment:      regexp.MustCompile(`^\s*#.*$`),
-		Const:        regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
-		Label:        regexp.MustCompile(`[A-Z0-9]+_\d+`),
-		JumpInstr:    regexp.MustCompile(`^(?P<instr>j\w+)\s+[.](?P<label>\w+)$`),
-		Registers:    []string{"DI", "SI", "DX", "CX"},
-		BuildTags:    "//go:build !noasm && amd64\n",
-		CommentCh:    "#",
-		CallOp:       "MOVQ",
-		ClangFlags:   []string{"--target=x86_64-linux-gnu"},
-		Disassembler: []string{"--insn-width", "16"},
+		Name:        "amd64",
+		Attribute:   regexp.MustCompile(`^\s+\..+$`),
+		Function:    regexp.MustCompile(`^\w+:.*$`),
+		SourceLabel: regexp.MustCompile(`^\.[A-Z0-9]+_\d+:.*$`),
+		Code:        regexp.MustCompile(`^\s+\w+.+$`),
+		Symbol:      regexp.MustCompile(`^\w+\s+<\w+>:$`),
+		Data:        regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
+		Comment:     regexp.MustCompile(`^\s*#.*$`),
+		Const:       regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
+		Label:       regexp.MustCompile(`[A-Z0-9]+_\d+`),
+		JumpInstr:   regexp.MustCompile(`^(?P<instr>J\w+)[^;]+;.*?[.](?P<label>\w+)$`),
+		Registers:   []string{"DI", "SI", "DX", "CX"},
+		BuildTags:   "//go:build !noasm && amd64\n",
+		CommentCh:   "#",
+		CallOp:      "MOVQ",
+		ClangFlags:  []string{"--target=x86_64-linux-gnu"},
+		//Disassembler: []string{"--insn-width", "16"},
 	}
 
 	if runtime.GOOS == "darwin" {
@@ -123,7 +123,7 @@ func ARM64() *Arch {
 		Comment:     regexp.MustCompile(`^\s*//.*$`),
 		Const:       regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
 		Label:       regexp.MustCompile(`[A-Z0-9]+_\d+`),
-		JumpInstr:   regexp.MustCompile(`^(?P<instr>b)\s+[.](?P<label>[A-Z0-9]+_\d+)$`),
+		JumpInstr:   regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`),
 		Registers:   []string{"R0", "R1", "R2", "R3"},
 		BuildTags:   "//go:build !noasm && !darwin && arm64\n",
 		CommentCh:   "//",
@@ -153,17 +153,18 @@ func Apple() *Arch {
 	arch := ARM64()
 	arch.BuildTags = "//go:build !noasm && darwin && arm64\n"
 
+	arch.SourceLabel = regexp.MustCompile(`^[Ll][a-zA-Z0-9]+(?:_\d+)?:.*$`)
+	arch.Comment = regexp.MustCompile(`^\s*;.*$`)
+	arch.CommentCh = ";"
+	arch.Label = regexp.MustCompile(`[Ll_][a-zA-Z0-9_]+`)
+	arch.JumpInstr = regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`)
+
 	if runtime.GOOS != "darwin" {
 		arch.ClangFlags = []string{"--target=aarch64-apple-darwin", "--sysroot=/usr/osxcross/SDK/MacOSX11.3.sdk/"}
 		return arch
 	}
 
 	arch.ClangFlags = []string{}
-	arch.SourceLabel = regexp.MustCompile(`^[Ll][a-zA-Z0-9]+(?:_\d+)?:.*$`)
-	arch.Comment = regexp.MustCompile(`^\s*;.*$`)
-	arch.CommentCh = ";"
-	arch.Label = regexp.MustCompile(`[Ll_][a-zA-Z0-9_]+`)
-	arch.JumpInstr = regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`)
 
 	return arch
 }

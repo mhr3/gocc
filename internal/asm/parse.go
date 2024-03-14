@@ -89,7 +89,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 
 		// Handle assembly function name
 		case arch.Function.MatchString(line):
-			functionName = strings.Split(line, ":")[0]
+			functionName = strings.SplitN(line, ":", 2)[0]
 			functions = append(functions, Function{
 				Name:  functionName,
 				Lines: make([]Line, 0),
