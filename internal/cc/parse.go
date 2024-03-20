@@ -55,9 +55,11 @@ var go2c = map[string]asm.Param{
 	"uint16":  {Type: normalizeCType("uint16_t")},
 	"uint32":  {Type: normalizeCType("uint32_t")},
 	"uint64":  {Type: normalizeCType("uint64_t")},
+	"byte":    {Type: normalizeCType("uint8_t")},
 	"float32": {Type: "float"},
 	"float64": {Type: "double"},
 	"string":  {Type: "char", IsPointer: true},
+	"bool":    {Type: "bool"},
 }
 
 var errNoSignature = errors.New("no gocc signature found")
@@ -97,6 +99,7 @@ func Parse(path string) ([]asm.Function, error) {
 			continue
 		}
 		var (
+			allTypeSpecs []cc.TypeSpecifierCase
 			funcComment  string
 			funcTypeSpec *cc.TypeSpecifier
 		)
@@ -108,6 +111,7 @@ func Parse(path string) ([]asm.Function, error) {
 				if funcComment == "" {
 					funcComment = strings.TrimSpace(string(declSpec.TypeSpecifier.Token.Sep()))
 				}
+				allTypeSpecs = append(allTypeSpecs, declSpec.TypeSpecifier.Case)
 			case cc.DeclarationSpecifiersTypeQual:
 				if funcComment == "" {
 					funcComment = strings.TrimSpace(string(declSpec.TypeQualifier.Token.Sep()))
@@ -136,11 +140,18 @@ func Parse(path string) ([]asm.Function, error) {
 			if funcIdent.Case != cc.DirectDeclaratorFuncParam {
 				continue
 			}
-			if goFunc.NumResults() > 0 && funcTypeSpec.Case != cc.TypeSpecifierVoid {
-				return nil, fmt.Errorf("%s: function must return void, not %s (use arguments for go return values)", funcIdent.DirectDeclarator.Token.SrcStr(), funcTypeSpec.Token.SrcStr())
+			if goFunc.NumResults() > 0 {
+				if funcTypeSpec.Case == cc.TypeSpecifierVoid {
+					var expectedRet string
+					goFunc.ForEachResult(func(_, typ string) {
+						expectedRet = typ
+					})
+					return nil, fmt.Errorf("%s: function cannot return void, expected %s", funcIdent.DirectDeclarator.Token.SrcStr(), expectedRet)
+				}
+				// check whether the type actually matches
 			}
 
-			function, err := convertFunction(funcIdent, goFunc)
+			function, err := convertFunction(funcIdent, extractCReturnType(allTypeSpecs), goFunc)
 			if err != nil {
 				return nil, err
 			}
@@ -161,6 +172,16 @@ func Parse(path string) ([]asm.Function, error) {
 	return functions, nil
 }
 
+func extractCReturnType(specs []cc.TypeSpecifierCase) string {
+	var ret string
+	for _, spec := range specs {
+		s := strings.TrimPrefix(spec.String(), "TypeSpecifier")
+		s = strings.ToLower(s)
+		ret += s
+	}
+	return ret
+}
+
 // redactSource removes code from the source and only leaves function declarations.
 // This is done to avoid parsing errors when the source is not compatible with the compiler.
 func redactSource(path string) (string, error) {
@@ -179,6 +200,7 @@ func redactSource(path string) (string, error) {
 	redacted.WriteString("#define int32_t int\n")
 	redacted.WriteString("#define int16_t short\n")
 	redacted.WriteString("#define int8_t char\n")
+	redacted.WriteString("#define bool _Bool\n")
 
 	var clauseCount int
 
@@ -241,16 +263,25 @@ func normalizeCType(t string) string {
 }
 
 // convertFunction extracts the function definition from cc.DirectDeclarator.
-func convertFunction(declarator *cc.DirectDeclarator, goFunc asm.GoFunction) (asm.Function, error) {
+func convertFunction(declarator *cc.DirectDeclarator, returnType string, goFunc asm.GoFunction) (asm.Function, error) {
 	params, err := convertFunctionParameters(declarator.ParameterTypeList.ParameterList)
 	if err != nil {
 		return asm.Function{}, err
+	}
+
+	var retParam *asm.Param
+	if returnType != "void" {
+		retParam = &asm.Param{
+			Type: returnType,
+			Name: "ret",
+		}
 	}
 
 	return asm.Function{
 		Name:     declarator.DirectDeclarator.Token.SrcStr(),
 		Position: declarator.Position().Line,
 		Params:   params,
+		Ret:      retParam,
 		GoFunc:   goFunc,
 	}, nil
 }
@@ -294,7 +325,7 @@ func checkFunction(function asm.Function) error {
 		} else if param.IsPointer {
 			return fmt.Errorf("%s: param %q: expected value, got pointer", function.Name, param.Name)
 		}
-		if param.Type != expectedParam.Type {
+		if param.Size() != expectedParam.Size() {
 			got := normalizeCType(param.Type)
 			// ignore the "unsigned" prefix
 			if !strings.HasSuffix(got, expectedParam.Type) {
@@ -312,6 +343,7 @@ func checkFunction(function asm.Function) error {
 			switch goParamTypeName {
 			case "int", "int8", "int16", "int32", "int64",
 				"uint", "uint8", "uint16", "uint32", "uint64",
+				"byte", "char", "bool",
 				"float32", "float64":
 				if err := checkParam(j, go2c[goParamTypeName]); err != nil {
 					return err
@@ -344,33 +376,39 @@ func checkFunction(function asm.Function) error {
 					j += 3
 					continue
 				}
+				if strings.HasPrefix(goParamTypeName, "*") {
+					if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
+						return err
+					}
+					j++
+					continue
+				}
 				return fmt.Errorf("gocc: unsupported type: %v", goParamTypeName)
 			}
 		}
 	}
 
 	if function.GoFunc.Expr.Results != nil {
+		if function.GoFunc.NumResults() > 1 {
+			return fmt.Errorf("%s: multiple return values are not supported", function.Name)
+		}
 		for _, goRet := range function.GoFunc.Expr.Results.List {
 			goRetTypeName := types.ExprString(goRet.Type)
 			switch goRetTypeName {
 			case "int", "int8", "int16", "int32", "int64",
 				"uint", "uint8", "uint16", "uint32", "uint64",
-				"float32", "float64":
+				"float32", "float64",
+				"byte", "bool":
 				p := go2c[goRetTypeName]
-				p.IsPointer = true
-				if err := checkParam(j, p); err != nil {
-					return err
+
+				// check the return type
+				if function.Ret == nil {
+					return fmt.Errorf("%s: missing return type, expected %s", function.Name, p.CTypeStr())
 				}
-				function.Params[j].IsReturn = true
-				j++
-			case "bool":
-				// TODO: does go want to write to a *int64 or a *byte?
-				p := asm.Param{Type: "longlong", IsPointer: true}
-				if err := checkParam(j, p); err != nil {
-					return err
+
+				if p.Type != function.Ret.Type {
+					return fmt.Errorf("%s: invalid return type, expected %s, got %s", function.Name, p.Type, function.Ret.Type)
 				}
-				function.Params[j].IsReturn = true
-				j++
 			default:
 				return fmt.Errorf("%s: unsupported return type: %v", function.Name, goRetTypeName)
 			}
@@ -378,7 +416,8 @@ func checkFunction(function asm.Function) error {
 	}
 
 	if j < len(function.Params) {
-		return fmt.Errorf("%s: too many parameters, unexpected %s", function.Name, function.Params[j].CTypeStr())
+		extraParam := function.Params[j]
+		return fmt.Errorf("%s: too many parameters, unexpected %q", function.Name, extraParam.CString())
 	}
 
 	return nil

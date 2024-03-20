@@ -22,23 +22,25 @@ import (
 
 // Arch represents a context for a specific architecture
 type Arch struct {
-	Name         string         // Architecture name
-	Attribute    *regexp.Regexp // Parses assembly attributes
-	Function     *regexp.Regexp // Parses assembly function names
-	SourceLabel  *regexp.Regexp // Parses assembly labels
-	Code         *regexp.Regexp // Parses assembly code
-	Symbol       *regexp.Regexp // Parses assembly symbols
-	Data         *regexp.Regexp // Parses assembly data
-	Comment      *regexp.Regexp // Parses assembly comments
-	Const        *regexp.Regexp // Parses assembly constants
-	Label        *regexp.Regexp // Parses assembly labels
-	JumpInstr    *regexp.Regexp // Parses assembly jump instructions
-	Registers    []string       // Registers to use
-	BuildTags    string         // Golang build tags
-	CommentCh    string         // Assembly comment character
-	CallOp       string         // Call instruction to use to move the params onto the stack
-	Disassembler []string       // Disassembler to use and flags
-	ClangFlags   []string       // Flags for clang
+	Name         string          // Architecture name
+	Attribute    *regexp.Regexp  // Parses assembly attributes
+	Function     *regexp.Regexp  // Parses assembly function names
+	SourceLabel  *regexp.Regexp  // Parses assembly labels
+	Code         *regexp.Regexp  // Parses assembly code
+	Symbol       *regexp.Regexp  // Parses assembly symbols
+	Data         *regexp.Regexp  // Parses assembly data
+	Comment      *regexp.Regexp  // Parses assembly comments
+	Const        *regexp.Regexp  // Parses assembly constants
+	Label        *regexp.Regexp  // Finds label inside an instruction
+	DataLoad     *regexp.Regexp  // Finds instructions with data loads
+	JumpInstr    *regexp.Regexp  // Parses assembly jump instructions
+	Registers    []string        // Registers to use
+	RetRegister  string          // Register for return values
+	BuildTags    string          // Golang build tags
+	CommentCh    string          // Assembly comment character
+	CallOp       map[int8]string // Call instruction to use to move the params onto the stack
+	Disassembler []string        // Disassembler to use and flags
+	ClangFlags   []string        // Flags for clang
 }
 
 // For returns a configuration for a given architecture
@@ -78,9 +80,10 @@ func AMD64() *Arch {
 		Label:       regexp.MustCompile(`[A-Z0-9]+_\d+`),
 		JumpInstr:   regexp.MustCompile(`^(?P<instr>J\w+)[^;]+;.*?[.](?P<label>\w+)$`),
 		Registers:   []string{"DI", "SI", "DX", "CX"},
+		RetRegister: "AX",
 		BuildTags:   "//go:build !noasm && amd64\n",
 		CommentCh:   "#",
-		CallOp:      "MOVQ",
+		CallOp:      map[int8]string{1: "MOVB", 2: "MOVW", 4: "MOVL", 8: "MOVQ"},
 		ClangFlags:  []string{"--target=x86_64-linux-gnu"},
 		//Disassembler: []string{"--insn-width", "16"},
 	}
@@ -123,11 +126,13 @@ func ARM64() *Arch {
 		Comment:     regexp.MustCompile(`^\s*//.*$`),
 		Const:       regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
 		Label:       regexp.MustCompile(`[A-Z0-9]+_\d+`),
+		DataLoad:    regexp.MustCompile(`(?P<register>R\d+);.*?\b(?P<var>\w+)@PAGE\b`),
 		JumpInstr:   regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`),
 		Registers:   []string{"R0", "R1", "R2", "R3"},
+		RetRegister: "R0",
 		BuildTags:   "//go:build !noasm && !darwin && arm64\n",
 		CommentCh:   "//",
-		CallOp:      "MOVD",
+		CallOp:      map[int8]string{1: "MOVB", 2: "MOVS", 4: "MOVW", 8: "MOVD"},
 		ClangFlags:  []string{"--target=aarch64-linux-gnu"},
 	}
 }

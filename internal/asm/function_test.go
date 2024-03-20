@@ -49,8 +49,9 @@ func TestLineLabel(t *testing.T) {
 
 func TestLineJumpAMD(t *testing.T) {
 	line := Line{
-		Assembly: "jmp .LBB0_2",
-		Binary:   []string{"e9", "13", "01", "00", "00"},
+		Assembly:     "jmp .LBB0_2",
+		Binary:       []string{"e9", "13", "01", "00", "00"},
+		Disassembled: "JMP 0x123",
 	}
 	assert.Equal(t, "\tJMP LBB0_2\n",
 		line.Compile(config.AMD64()))

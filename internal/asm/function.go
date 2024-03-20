@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -46,6 +47,7 @@ type Function struct {
 	Params   []Param `json:"params"`
 	Consts   []Const `json:"consts,omitempty"`
 	Lines    []Line  `json:"lines"`
+	Ret      *Param  `json:"return,omitempty"`
 	GoFunc   GoFunction
 }
 
@@ -78,54 +80,48 @@ func (f *GoFunction) ForEachResult(fn func(name, typ string)) {
 
 // String returns the function signature for a Go stub
 func (f *Function) String() string {
+	if f.GoFunc.Expr == nil {
+		// should probably panic
+		return "/* no Go function */"
+	}
+
 	var builder strings.Builder
+
 	builder.WriteString("\n//go:noescape,nosplit\n")
-	if f.GoFunc.Expr != nil {
-		builder.WriteString(fmt.Sprintf("func %s(", f.GoFunc.Name))
-		paramIdx := 0
-		f.GoFunc.ForEachParam(func(name, typ string) {
-			if paramIdx > 0 {
+	builder.WriteString(fmt.Sprintf("func %s(", f.GoFunc.Name))
+	paramIdx := 0
+	f.GoFunc.ForEachParam(func(name, typ string) {
+		if paramIdx > 0 {
+			builder.WriteString(", ")
+		}
+		builder.WriteString(name)
+		builder.WriteByte(' ')
+		builder.WriteString(typ)
+		paramIdx++
+	})
+	builder.WriteString(")")
+	switch f.GoFunc.NumResults() {
+	case 0:
+	case 1:
+		builder.WriteByte(' ')
+		f.GoFunc.ForEachResult(func(_, typ string) {
+			builder.WriteString(typ)
+		})
+	default:
+		builder.WriteString(" (")
+		resultIdx := 0
+		f.GoFunc.ForEachResult(func(name, typ string) {
+			if resultIdx > 0 {
 				builder.WriteString(", ")
 			}
 			builder.WriteString(name)
 			builder.WriteByte(' ')
 			builder.WriteString(typ)
-			paramIdx++
+			resultIdx++
 		})
 		builder.WriteString(")")
-		switch f.GoFunc.NumResults() {
-		case 0:
-		case 1:
-			builder.WriteByte(' ')
-			f.GoFunc.ForEachResult(func(_, typ string) {
-				builder.WriteString(typ)
-			})
-		default:
-			builder.WriteString(" (")
-			resultIdx := 0
-			f.GoFunc.ForEachResult(func(name, typ string) {
-				if resultIdx > 0 {
-					builder.WriteString(", ")
-				}
-				builder.WriteString(name)
-				builder.WriteByte(' ')
-				builder.WriteString(typ)
-				resultIdx++
-			})
-			builder.WriteString(")")
-		}
-		builder.WriteByte('\n')
-		return builder.String()
 	}
-
-	builder.WriteString(fmt.Sprintf("func %s(", f.Name))
-	for i, param := range f.Params {
-		if i > 0 {
-			builder.WriteString(", ")
-		}
-		builder.WriteString(param.String())
-	}
-	builder.WriteString(")\n")
+	builder.WriteByte('\n')
 	return builder.String()
 }
 
@@ -149,32 +145,38 @@ func (line *Line) Compile(arch *config.Arch) string {
 
 	builder.WriteString("\t")
 
-	if line.Assembly == "ret" {
+	if line.Assembly == "ret" || line.Assembly == "retq" {
 		builder.WriteString("RET")
 		builder.WriteString("\n")
 		return builder.String()
 	}
 
-	// rewrite jumps
-	if arch != nil && arch.JumpInstr != nil {
+	// rewrite some instructions
+	if arch != nil {
 		parts := []string{line.Assembly}
 		if line.Disassembled != "" {
 			parts = append([]string{line.Disassembled}, parts...)
 		}
 		combined := strings.Join(parts, ";\t")
-		if arch.JumpInstr.MatchString(combined) {
-			match := arch.JumpInstr.FindStringSubmatch(combined)
-			reParams := map[string]int{}
-			for i, name := range arch.JumpInstr.SubexpNames() {
-				if name == "" {
-					continue
-				}
-				reParams[name] = i
-			}
-			fmt.Fprintf(&builder, "%s %s", strings.ToUpper(match[reParams["instr"]]), match[reParams["label"]])
+		if arch.JumpInstr != nil && arch.JumpInstr.MatchString(combined) {
+			reParams := getRegexpParams(arch.JumpInstr, combined)
+			fmt.Fprintf(&builder, "%s %s", strings.ToUpper(reParams["instr"]), reParams["label"])
+			builder.WriteString("\n")
+			return builder.String()
+		} else if arch.DataLoad != nil && arch.DataLoad.MatchString(combined) {
+			reParams := getRegexpParams(arch.DataLoad, combined)
+			fmt.Fprintf(&builder, "%s $%s<>(SB), %s", arch.CallOp[8], reParams["var"], reParams["register"])
 			builder.WriteString("\n")
 			return builder.String()
 		}
+	}
+
+	if len(line.Binary) == 0 && line.Disassembled != "" {
+		builder.WriteString(line.Disassembled)
+		builder.WriteString("\t //")
+		builder.WriteString(line.Assembly)
+		builder.WriteString("\n")
+		return builder.String()
 	}
 
 	// Special case for arm64, since it's a RISC architecture
@@ -222,20 +224,59 @@ func (line *Line) Compile(arch *config.Arch) string {
 	return builder.String()
 }
 
+func getRegexpParams(re *regexp.Regexp, text string) map[string]string {
+	match := re.FindStringSubmatch(text)
+	res := map[string]string{}
+	for i, name := range re.SubexpNames() {
+		if name == "" {
+			continue
+		}
+		res[name] = match[i]
+	}
+
+	return res
+}
+
 // Param represents a function parameter
 type Param struct {
 	Type      string `json:"type"`                // Type of the parameter (C type)
 	Name      string `json:"name"`                // Name of the parameter
 	IsPointer bool   `json:"isPointer,omitempty"` // Whether the parameter is a pointer
-	IsReturn  bool   `json:"isReturn,omitempty"`  // Whether the parameter is a return value
 }
 
 func (p *Param) CTypeStr() string {
 	if p.IsPointer {
 		return fmt.Sprintf("%s*", p.Type)
 	}
-	return p.Name
+	return p.Type
+}
 
+func (p *Param) CString() string {
+	if p.Name != "" {
+		return fmt.Sprintf("%s %s", p.CTypeStr(), p.Name)
+	}
+	return p.CTypeStr()
+}
+
+func (p *Param) Size() int {
+	// these are for 64-bit systems
+	if p.IsPointer {
+		return 8
+	}
+
+	switch p.Type {
+	case "byte", "int8_t", "uint8_t", "bool", "char", "unsignedchar":
+		return 1
+	case "int16_t", "uint16_t", "short", "unsignedshort":
+		return 2
+	case "int32_t", "uint32_t", "float", "int", "unsignedint":
+		return 4
+	case "int64_t", "uint64_t", "double", "long", "unsignedlong", "longlong", "unsignedlonglong":
+		// long is 4 bytes on Windows, 8 bytes elsewhere
+		return 8
+	default:
+		return 8
+	}
 }
 
 // String returns the Go string representation of a parameter
@@ -269,6 +310,8 @@ func (p *Param) String() string {
 		return fmt.Sprintf("%s int64", p.Name)
 	case "int":
 		return fmt.Sprintf("%s int32", p.Name)
+	case "bool":
+		return fmt.Sprintf("%s bool", p.Name)
 	default:
 		panic(fmt.Sprintf("gocc: unknown type %s", p.Type))
 	}

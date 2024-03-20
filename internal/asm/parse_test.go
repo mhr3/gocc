@@ -41,7 +41,7 @@ func TestParseClangObjectDump(t *testing.T) {
 	dump, err := os.ReadFile("../../fixtures/test_avx.o.txt")
 	assert.NoError(t, err)
 
-	assert.NoError(t, ParseClangObjectDump(config.AMD64(), string(dump), fn))
+	assert.NoError(t, ParseClangObjectDump(config.AMD64(), string(dump), fn, nil))
 	assert.Len(t, fn, 1)
 	assert.Len(t, fn[0].Consts, 1)
 	assert.Len(t, fn[0].Lines, 135)

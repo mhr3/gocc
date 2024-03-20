@@ -42,13 +42,24 @@ func Generate(arch *config.Arch, functions []Function) ([]byte, error) {
 		if function.GoFunc.Expr != nil {
 			name = function.GoFunc.Name
 		}
-		builder.WriteString(fmt.Sprintf("\nTEXT ·%v(SB),NOSPLIT,$0-%d\n", name, 8*len(function.Params)))
+		paramsSize := 8 * len(function.Params)
+		//for _, param := range function.Params {
+		//	paramsSize += param.Size()
+		//}
+		if function.Ret != nil {
+			//paramsSize += function.Ret.Size()
+			paramsSize += 8
+		}
+		builder.WriteString(fmt.Sprintf("\nTEXT ·%v(SB),NOSPLIT,$0-%d\n", name, paramsSize))
+		paramOffset := 0
 		for i, param := range function.Params {
-			if param.IsReturn {
-				builder.WriteString(fmt.Sprintf("\t%s $%s+%d(FP), %s\n", arch.CallOp, param.Name, i*8, arch.Registers[i]))
-			} else {
-				builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", arch.CallOp, param.Name, i*8, arch.Registers[i]))
+			loadInstr, ok := arch.CallOp[int8(param.Size())]
+			if !ok {
+				return nil, fmt.Errorf("unable to load parameter with size %d", param.Size())
 			}
+			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", loadInstr, param.Name, paramOffset, arch.Registers[i]))
+			// 8 seems to be correct for both amd64 and arm64
+			paramOffset += 8
 		}
 		for _, line := range function.Lines {
 			builder.WriteString(line.Compile(arch))
@@ -60,6 +71,7 @@ func Generate(arch *config.Arch, functions []Function) ([]byte, error) {
 
 // GenerateFile generates the Go PLAN9 assembly file
 func GenerateFile(arch *config.Arch, path string, functions []Function) error {
+	functions = ApplyTransforms(arch, functions)
 	bytes, err := Generate(arch, functions)
 	if err != nil {
 		return err
