@@ -50,6 +50,9 @@ func Generate(arch *config.Arch, functions []Function) ([]byte, error) {
 			//paramsSize += function.Ret.Size()
 			paramsSize += 8
 		}
+		if len(function.Params) > len(arch.Registers) {
+			return nil, fmt.Errorf("support for more than %d parameters is not implemented for %s", len(arch.Registers), arch.Name)
+		}
 		builder.WriteString(fmt.Sprintf("\nTEXT ·%v(SB),NOSPLIT,$0-%d\n", name, paramsSize))
 		paramOffset := 0
 		for i, param := range function.Params {

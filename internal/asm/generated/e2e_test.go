@@ -19,3 +19,9 @@ func TestByteRetFn(t *testing.T) {
 
 	assert.EqualValues(t, 38, res)
 }
+
+func TestManyParamsFn(t *testing.T) {
+	res := generated.Test_fn_6params(3, 2, 12, 4, 9, 13)
+
+	assert.Equal(t, 99, res)
+}
