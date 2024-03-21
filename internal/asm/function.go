@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -145,36 +144,12 @@ func (line *Line) Compile(arch *config.Arch) string {
 
 	builder.WriteString("\t")
 
-	if line.Assembly == "ret" || line.Assembly == "retq" {
-		builder.WriteString("RET")
-		builder.WriteString("\n")
-		return builder.String()
-	}
-
-	// rewrite some instructions
-	if arch != nil {
-		parts := []string{line.Assembly}
-		if line.Disassembled != "" {
-			parts = append([]string{line.Disassembled}, parts...)
-		}
-		combined := strings.Join(parts, ";\t")
-		if arch.JumpInstr != nil && arch.JumpInstr.MatchString(combined) {
-			reParams := getRegexpParams(arch.JumpInstr, combined)
-			fmt.Fprintf(&builder, "%s %s", strings.ToUpper(reParams["instr"]), reParams["label"])
-			builder.WriteString("\n")
-			return builder.String()
-		} else if arch.DataLoad != nil && arch.DataLoad.MatchString(combined) {
-			reParams := getRegexpParams(arch.DataLoad, combined)
-			fmt.Fprintf(&builder, "%s $%s<>(SB), %s", arch.CallOp[8], reParams["var"], reParams["register"])
-			builder.WriteString("\n")
-			return builder.String()
-		}
-	}
-
 	if len(line.Binary) == 0 && line.Disassembled != "" {
 		builder.WriteString(line.Disassembled)
-		builder.WriteString("\t //")
-		builder.WriteString(line.Assembly)
+		if line.Assembly != "" {
+			builder.WriteString("\t //")
+			builder.WriteString(line.Assembly)
+		}
 		builder.WriteString("\n")
 		return builder.String()
 	}
@@ -219,22 +194,13 @@ func (line *Line) Compile(arch *config.Arch) string {
 	}
 
 	builder.WriteString("\t// ")
+	if line.Disassembled != "" {
+		builder.WriteString(line.Disassembled)
+		builder.WriteString(";\t")
+	}
 	builder.WriteString(line.Assembly)
 	builder.WriteString("\n")
 	return builder.String()
-}
-
-func getRegexpParams(re *regexp.Regexp, text string) map[string]string {
-	match := re.FindStringSubmatch(text)
-	res := map[string]string{}
-	for i, name := range re.SubexpNames() {
-		if name == "" {
-			continue
-		}
-		res[name] = match[i]
-	}
-
-	return res
 }
 
 // Param represents a function parameter
@@ -340,10 +306,10 @@ func (c *Const) Compile(arch *config.Arch) string {
 	for _, d := range c.Lines {
 		// Write the DATA instruction.
 		switch d.Size {
-		case 1, 2:
-			fmt.Fprintf(&output, "DATA %s<>+%#04x(SB)/%d, $%#02x\n", c.Label, totalSize, d.Size, d.Value)
+		case 1:
+			fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/%d, $%#02x\n", c.Label, totalSize, d.Size, d.Value)
 		default:
-			fmt.Fprintf(&output, "DATA %s<>+%#04x(SB)/%d, $%#04x\n", c.Label, totalSize, d.Size, d.Value)
+			fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/%d, $%#04x\n", c.Label, totalSize, d.Size, d.Value)
 		}
 
 		totalSize += d.Size

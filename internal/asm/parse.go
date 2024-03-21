@@ -180,16 +180,12 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 				return fmt.Errorf("%d: unexpected objectdump line: %s, please compare assembly with objdump output", i, line)
 			}
 
-			srcLine := current.Lines[lineNumber].Assembly
 			if dec != nil {
-				switch {
-				case arch.Label.MatchString(srcLine) || strings.HasPrefix(srcLine, "ret"):
-					p9asm, err := dec.DecodeInstruction(functionName, binary)
-					if err != nil {
-						return fmt.Errorf("cannot decode instruction %q: %v", data, err)
-					}
-					current.Lines[lineNumber].Disassembled = p9asm
+				p9asm, err := dec.DecodeInstruction(functionName, binary)
+				if err != nil {
+					return fmt.Errorf("cannot decode instruction %q: %v", data, err)
 				}
+				current.Lines[lineNumber].Disassembled = p9asm
 			}
 
 			current.Lines[lineNumber].Binary = binary

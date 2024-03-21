@@ -320,11 +320,21 @@ func (d *Disasm) DecodeInstruction(symName string, binary []string) (string, err
 	symStart = sym.Addr + uint64(textIdx)
 	symEnd = symStart + uint64(len(binaryAsCode))
 
-	var assembly string
+	var (
+		assembly string
+		count    int
+	)
 
 	d.Decode(symStart, symEnd, relocs, false, func(pc, size uint64, file string, line int, text string) {
 		assembly = text
+		count++
 	})
+
+	if count != 1 {
+		//return "", fmt.Errorf("failed to decode %q, unexpected number of instructions: %d", joinedBinary, count)
+		// this happens way too often, so let's just ignore it
+		return "", nil
+	}
 
 	return assembly, nil
 }

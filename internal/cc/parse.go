@@ -406,7 +406,7 @@ func checkFunction(function asm.Function) error {
 					return fmt.Errorf("%s: missing return type, expected %s", function.Name, p.CTypeStr())
 				}
 
-				if p.Type != function.Ret.Type {
+				if p.Size() != function.Ret.Size() {
 					return fmt.Errorf("%s: invalid return type, expected %s, got %s", function.Name, p.Type, function.Ret.Type)
 				}
 			default:
