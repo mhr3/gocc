@@ -114,7 +114,7 @@ func TestUintMul(t *testing.T) {
 	input2 := []uint8{1, 2, 3, 4, 5, 6, 7, 8, 9}
 	dst := make([]uint8, 9)
 
-	uint8_avx2_mul(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&(dst)[0]), uint64(len(dst)))
+	uint8_simd_mul(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&(dst)[0]), uint64(len(dst)))
 	assert.Equal(t, []uint8{1, 4, 9, 16, 25, 36, 49, 64, 81}, dst)
 }
 

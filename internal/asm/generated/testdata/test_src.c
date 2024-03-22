@@ -13,6 +13,6 @@ uint8_t test_fn_byte_ret(int a, long b, char c) {
 }
 
 // gocc: Test_fn_6params(a,b,c,d,e,f int) int
-int64_t test_fn_6params(long a, long b, long c, long d, long e, long f) {
+long test_fn_6params(long a, long b, long c, long d, long e, long f) {
     return (c*a) + b + (f*d) + e;
 }

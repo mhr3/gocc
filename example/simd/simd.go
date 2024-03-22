@@ -12,9 +12,8 @@ import (
 
 var (
 	avx2     = cpuid.CPU.Supports(cpuid.AVX2) && cpuid.CPU.Supports(cpuid.FMA3)
-	apple    = runtime.GOARCH == "arm64" && runtime.GOOS == "darwin"
-	neon     = runtime.GOARCH == "arm64" && cpuid.CPU.Supports(cpuid.SVE)
-	hardware = avx2 || apple || neon
+	neon     = runtime.GOARCH == "arm64" && cpuid.CPU.Supports(cpuid.ASIMD)
+	hardware = avx2 || neon
 )
 
 var (

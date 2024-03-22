@@ -1,1 +1,0 @@
-test_amd64.c

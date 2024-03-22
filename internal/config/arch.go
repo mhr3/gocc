@@ -81,7 +81,7 @@ func AMD64() *Arch {
 		JumpInstr:   regexp.MustCompile(`^(?P<instr>J\w+)[^;]+;.*?[.](?P<label>\w+)$`),
 		Registers:   []string{"DI", "SI", "DX", "CX", "R8", "R9"},
 		RetRegister: "AX",
-		BuildTags:   "//go:build !noasm && amd64\n",
+		BuildTags:   "//go:build !noasm && amd64",
 		CommentCh:   "#",
 		CallOp:      map[int8]string{1: "MOVB", 2: "MOVW", 4: "MOVL", 8: "MOVQ"},
 		ClangFlags:  []string{"--target=x86_64-linux-gnu"},
@@ -130,7 +130,7 @@ func ARM64() *Arch {
 		JumpInstr:   regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`),
 		Registers:   []string{"R0", "R1", "R2", "R3", "R4", "R5", "R6", "R7"},
 		RetRegister: "R0",
-		BuildTags:   "//go:build !noasm && !darwin && arm64\n",
+		BuildTags:   "//go:build !noasm && arm64",
 		CommentCh:   "//",
 		CallOp:      map[int8]string{1: "MOVB", 2: "MOVS", 4: "MOVW", 8: "MOVD"},
 		ClangFlags:  []string{"--target=aarch64-linux-gnu"},
@@ -156,7 +156,7 @@ func SVE() *Arch {
 // AESARM, ASIMD, ASIMDDP, ASIMDHP, ASIMDRDM, ATOMICS, CRC32, DCPOP, FCMA, FP, FPHP, GPA, JSCVT, LRCPC, PMULL, SHA1, SHA2, SHA3, SHA512
 func Apple() *Arch {
 	arch := ARM64()
-	arch.BuildTags = "//go:build !noasm && darwin && arm64\n"
+	arch.BuildTags = "//go:build !noasm && arm64"
 
 	arch.SourceLabel = regexp.MustCompile(`^[Ll][a-zA-Z0-9]+(?:_\d+)?:.*$`)
 	arch.Comment = regexp.MustCompile(`^\s*;.*$`)

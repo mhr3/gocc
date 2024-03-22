@@ -17,6 +17,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/kelindar/gocc"
 	"github.com/kelindar/gocc/internal/config"
@@ -29,7 +30,9 @@ func init() {
 	command.PersistentFlags().IntP("optimize-level", "O", 0, "optimization level for clang")
 	command.PersistentFlags().StringP("arch", "a", "amd64", "target architecture to use")
 	command.PersistentFlags().StringP("package", "p", "", "go package name to use for the stubs")
+	command.PersistentFlags().StringP("suffix", "s", "", "suffix to add to the generated files")
 	command.PersistentFlags().BoolP("local", "l", false, "use local machine for compilation")
+	command.PersistentFlags().Bool("with-os-tag", false, "generate OS-specific build tags")
 }
 
 func main() {
@@ -60,14 +63,16 @@ var command = &cobra.Command{
 		// Load the architecture
 		target, _ := cmd.PersistentFlags().GetString("arch")
 		optimizeLevel, _ := cmd.PersistentFlags().GetInt("optimize-level")
-		packageName, _ := cmd.PersistentFlags().GetString("package")
 		options = append(options, fmt.Sprintf("-O%d", optimizeLevel))
+		packageName, _ := cmd.PersistentFlags().GetString("package")
+		suffix, _ := cmd.PersistentFlags().GetString("suffix")
+		withOsTag, _ := cmd.PersistentFlags().GetBool("with-os-tag")
 
 		// Compile locally or remotely
 		local, _ := cmd.PersistentFlags().GetBool("local")
 		switch local {
 		case true:
-			if err := compileLocally(target, args[0], output, packageName, options...); err != nil {
+			if err := compileLocally(target, args[0], output, suffix, packageName, withOsTag, options...); err != nil {
 				exit(err)
 			}
 		default:
@@ -87,13 +92,17 @@ func compileRemotely(target, source, outputDir, packageName string, options ...s
 	return remote.Translate()
 }
 
-func compileLocally(target, source, outputDir, packageName string, options ...string) error {
+func compileLocally(target, source, outputDir, suffix, packageName string, withOsTag bool, options ...string) error {
 	arch, err := config.For(target)
 	if err != nil {
 		exit(err)
 	}
 
-	local, err := gocc.NewLocal(arch, source, outputDir, packageName, options...)
+	if withOsTag {
+		arch.BuildTags += fmt.Sprintf(" && %s", runtime.GOOS)
+	}
+
+	local, err := gocc.NewLocal(arch, source, outputDir, suffix, packageName, options...)
 	if err != nil {
 		return err
 	}

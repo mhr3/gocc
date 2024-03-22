@@ -41,7 +41,7 @@ type Local struct {
 }
 
 // NewLocal creates a new translator that uses locally installed toolchain
-func NewLocal(arch *config.Arch, source, outputDir, packageName string, options ...string) (*Local, error) {
+func NewLocal(arch *config.Arch, source, outputDir, suffix, packageName string, options ...string) (*Local, error) {
 	sourceExt := filepath.Ext(source)
 	noExtSourcePath := source[:len(source)-len(sourceExt)]
 	noExtSourceBase := filepath.Base(noExtSourcePath)
@@ -57,7 +57,7 @@ func NewLocal(arch *config.Arch, source, outputDir, packageName string, options 
 
 	// If package name is not provided, use the directory name of the output
 	if packageName == "" {
-		filepath.Base(outputDir)
+		packageName = filepath.Base(outputDir)
 	}
 
 	return &Local{
@@ -67,8 +67,8 @@ func NewLocal(arch *config.Arch, source, outputDir, packageName string, options 
 		Source:     source,
 		Assembly:   fmt.Sprintf("%s.s", noExtSourcePath),
 		Object:     fmt.Sprintf("%s.o", noExtSourcePath),
-		GoAssembly: filepath.Join(outputDir, fmt.Sprintf("%s.s", noExtSourceBase)),
-		Go:         filepath.Join(outputDir, fmt.Sprintf("%s.go", noExtSourceBase)),
+		GoAssembly: filepath.Join(outputDir, fmt.Sprintf("%s%s.s", noExtSourceBase, suffix)),
+		Go:         filepath.Join(outputDir, fmt.Sprintf("%s%s.go", noExtSourceBase, suffix)),
 		Package:    packageName,
 		Options:    options,
 	}, nil
