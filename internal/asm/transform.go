@@ -58,7 +58,13 @@ func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
 			function.Lines[i].Binary = nil
 		} else if arch.DataLoad != nil && arch.DataLoad.MatchString(combined) {
 			reParams := getRegexpParams(arch.DataLoad, combined)
-			rewritten := fmt.Sprintf("%s $%s<>(SB), %s", arch.CallOp[8], reParams["var"], reParams["register"])
+			op := arch.CallOp[8]
+			addrMode := "$" // absolute addressing
+			if instr, ok := reParams["instr"]; ok {
+				op = instr
+				addrMode = ""
+			}
+			rewritten := fmt.Sprintf("%s %s%s<>(SB), %s", op, addrMode, reParams["var"], reParams["register"])
 			function.Lines[i].Disassembled = rewritten
 			function.Lines[i].Binary = nil
 		}
@@ -72,59 +78,11 @@ func dropStackManipulation(arch *config.Arch, function Function) Function {
 		return function
 	}
 
-	if arch.Name != "arm64" {
-		// not implemented for other architectures
-		return function
-	}
-
-	var foundPrologue, foundEpilogue bool
-
-	for i, line := range function.Lines {
-		if strings.Contains(line.Assembly, "stp") && strings.Contains(line.Assembly, "sp") {
-			foundPrologue = true
-		}
-
-		if strings.HasPrefix(line.Assembly, "ret") && i > 0 {
-			prevLine := function.Lines[i-1]
-			if strings.Contains(prevLine.Assembly, "ldp") && strings.Contains(prevLine.Assembly, "sp") {
-				foundEpilogue = true
-			}
-		}
-	}
-
-	if foundPrologue && foundEpilogue {
-		// remove them
-		newLines := make([]Line, 0, len(function.Lines))
-
-		for _, line := range function.Lines {
-			if strings.HasPrefix(line.Assembly, "stp") && strings.Contains(line.Assembly, "sp") {
-				lineCpy := line
-				lineCpy.Disassembled = "NOP"
-				lineCpy.Binary = nil
-				newLines = append(newLines, lineCpy)
-				continue
-			}
-
-			if strings.HasPrefix(line.Assembly, "mov") && strings.HasSuffix(line.Assembly, "sp") {
-				lineCpy := line
-				lineCpy.Disassembled = "NOP"
-				lineCpy.Binary = nil
-				newLines = append(newLines, lineCpy)
-				continue
-			}
-
-			if strings.HasPrefix(line.Assembly, "ldp") && strings.Contains(line.Assembly, "sp") {
-				lineCpy := line
-				lineCpy.Disassembled = "NOP"
-				lineCpy.Binary = nil
-				newLines = append(newLines, lineCpy)
-				continue
-			}
-
-			newLines = append(newLines, line)
-		}
-
-		function.Lines = newLines
+	switch arch.Name {
+	case "arm64":
+		return dropStackChangesArm64(function)
+	case "amd64":
+		return dropStackChangesAmd64(function)
 	}
 
 	return function

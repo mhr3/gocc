@@ -78,6 +78,7 @@ func AMD64() *Arch {
 		Comment:     regexp.MustCompile(`^\s*#.*$`),
 		Const:       regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
 		Label:       regexp.MustCompile(`[A-Z0-9]+_\d+`),
+		DataLoad:    regexp.MustCompile(`^(?P<instr>\w+)\s+[^;]+?(?P<register>[RXY]\d+);.*?\.(?P<var>\w+)\b`),
 		JumpInstr:   regexp.MustCompile(`^(?P<instr>J\w+)[^;]+;.*?[.](?P<label>\w+)$`),
 		Registers:   []string{"DI", "SI", "DX", "CX", "R8", "R9"},
 		RetRegister: "AX",
@@ -126,7 +127,7 @@ func ARM64() *Arch {
 		Comment:     regexp.MustCompile(`^\s*//.*$`),
 		Const:       regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
 		Label:       regexp.MustCompile(`[A-Z0-9]+_\d+`),
-		DataLoad:    regexp.MustCompile(`(?P<register>R\d+);.*?\b(?P<var>\w+)@PAGE\b`),
+		DataLoad:    regexp.MustCompile(`(?P<register>R\d+);.*?\.(?P<var>\w+)\b`),
 		JumpInstr:   regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`),
 		Registers:   []string{"R0", "R1", "R2", "R3", "R4", "R5", "R6", "R7"},
 		RetRegister: "R0",
@@ -162,6 +163,7 @@ func Apple() *Arch {
 	arch.Comment = regexp.MustCompile(`^\s*;.*$`)
 	arch.CommentCh = ";"
 	arch.Label = regexp.MustCompile(`[Ll_][a-zA-Z0-9_]+`)
+	arch.DataLoad = regexp.MustCompile(`(?P<register>R\d+);.*?\b(?P<var>\w+)@PAGE\b`)
 	arch.JumpInstr = regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`)
 
 	if runtime.GOOS != "darwin" {

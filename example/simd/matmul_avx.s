@@ -8,7 +8,7 @@ TEXT ·f32_axpy(SB), NOSPLIT, $0-32
 	MOVQ y+8(FP), SI
 	MOVQ size+16(FP), DX
 	MOVL alpha+24(FP), CX
-	BYTE $0x55                   // PUSHQ BP;	push	rbp
+	NOP                          // push	rbp
 	WORD $0x8948; BYTE $0xe5     // MOVQ SP, BP;	mov	rbp, rsp
 	LONG $0xf8e48348             // ANDQ $-0x8, SP;	and	rsp, -8
 	LONG $0x08fa8348             // CMPQ $0x8, DX;	cmp	rdx, 8
@@ -79,7 +79,7 @@ LBB0_10:
 
 LBB0_11:
 	WORD $0x8948; BYTE $0xec // MOVQ BP, SP;	mov	rsp, rbp
-	BYTE $0x5d               // POPQ BP;	pop	rbp
+	NOP                      // pop	rbp
 	WORD $0xf8c5; BYTE $0x77 // VZEROUPPER;	vzeroupper
 	RET                      // ret
 
@@ -88,7 +88,7 @@ TEXT ·f32_matmul(SB), NOSPLIT, $0-32
 	MOVQ m+8(FP), SI
 	MOVQ n+16(FP), DX
 	MOVQ dims+24(FP), CX
-	BYTE $0x55                                 // PUSHQ BP;	push	rbp
+	NOP                                        // push	rbp
 	WORD $0x8948; BYTE $0xe5                   // MOVQ SP, BP;	mov	rbp, rsp
 	WORD $0x5741                               // PUSHQ R15;	push	r15
 	WORD $0x5641                               // PUSHQ R14;	push	r14
@@ -172,7 +172,7 @@ LBB1_27:
 	WORD $0x5d41             // POPQ R13;	pop	r13
 	WORD $0x5e41             // POPQ R14;	pop	r14
 	WORD $0x5f41             // POPQ R15;	pop	r15
-	BYTE $0x5d               // POPQ BP;	pop	rbp
+	NOP                      // pop	rbp
 	WORD $0xf8c5; BYTE $0x77 // VZEROUPPER;	vzeroupper
 	RET                      // ret
 

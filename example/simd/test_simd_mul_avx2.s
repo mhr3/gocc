@@ -26,7 +26,7 @@ TEXT ·uint8_simd_mul(SB), NOSPLIT, $0-32
 	MOVQ input2+8(FP), SI
 	MOVQ output+16(FP), DX
 	MOVQ size+24(FP), CX
-	BYTE $0x55               // PUSHQ BP;	push	rbp
+	NOP                      // push	rbp
 	WORD $0x8948; BYTE $0xe5 // MOVQ SP, BP;	mov	rbp, rsp
 	LONG $0xf8e48348         // ANDQ $-0x8, SP;	and	rsp, -8
 	WORD $0xc985             // TESTL CX, CX;	test	ecx, ecx
@@ -75,7 +75,7 @@ LBB0_17:
 
 LBB0_18:
 	WORD $0x8948; BYTE $0xec // MOVQ BP, SP;	mov	rsp, rbp
-	BYTE $0x5d               // POPQ BP;	pop	rbp
+	NOP                      // pop	rbp
 	WORD $0xf8c5; BYTE $0x77 // VZEROUPPER;	vzeroupper
 	RET                      // ret
 
@@ -95,12 +95,12 @@ LBB0_3:
 	JMP  LBB0_11                               // jmp	.LBB0_11
 
 LBB0_7:
-	WORD $0xc889             // MOVL CX, AX;	mov	eax, ecx
-	WORD $0xe083; BYTE $0x7f // ANDL $0x7f, AX;	and	eax, 127
-	WORD $0x894d; BYTE $0xc1 // MOVQ R8, R9;	mov	r9, r8
-	WORD $0x2949; BYTE $0xc1 // SUBQ AX, R9;	sub	r9, rax
-	WORD $0x3145; BYTE $0xd2 // XORL R10, R10;	xor	r10d, r10d
-	QUAD $0x00000000056ffdc5 // VMOVDQA 0(IP), X0;	vmovdqa	ymm0, ymmword ptr [rip + .LCPI0_0]
+	WORD    $0xc889             // MOVL CX, AX;	mov	eax, ecx
+	WORD    $0xe083; BYTE $0x7f // ANDL $0x7f, AX;	and	eax, 127
+	WORD    $0x894d; BYTE $0xc1 // MOVQ R8, R9;	mov	r9, r8
+	WORD    $0x2949; BYTE $0xc1 // SUBQ AX, R9;	sub	r9, rax
+	WORD    $0x3145; BYTE $0xd2 // XORL R10, R10;	xor	r10d, r10d
+	VMOVDQA LCPI0_0<>(SB), X0   // vmovdqa	ymm0, ymmword ptr [rip + .LCPI0_0]
 
 LBB0_8:
 	LONG $0x6f7ea1c4; WORD $0x171c             // VMOVDQU 0(DI)(R10*1), X3;	vmovdqu	ymm3, ymmword ptr [rdi + r10]
@@ -160,12 +160,12 @@ LBB0_8:
 	JB   LBB0_14                               // jb	.LBB0_14
 
 LBB0_11:
-	WORD $0x894c; BYTE $0xc8 // MOVQ R9, AX;	mov	rax, r9
-	WORD $0x8941; BYTE $0xca // MOVL CX, R10;	mov	r10d, ecx
-	LONG $0x0fe28341         // ANDL $0xf, R10;	and	r10d, 15
-	WORD $0x894d; BYTE $0xc1 // MOVQ R8, R9;	mov	r9, r8
-	WORD $0x294d; BYTE $0xd1 // SUBQ R10, R9;	sub	r9, r10
-	QUAD $0x00000000056ffdc5 // VMOVDQA 0(IP), X0;	vmovdqa	ymm0, ymmword ptr [rip + .LCPI0_0]
+	WORD    $0x894c; BYTE $0xc8 // MOVQ R9, AX;	mov	rax, r9
+	WORD    $0x8941; BYTE $0xca // MOVL CX, R10;	mov	r10d, ecx
+	LONG    $0x0fe28341         // ANDL $0xf, R10;	and	r10d, 15
+	WORD    $0x894d; BYTE $0xc1 // MOVQ R8, R9;	mov	r9, r8
+	WORD    $0x294d; BYTE $0xd1 // SUBQ R10, R9;	sub	r9, r10
+	VMOVDQA LCPI0_0<>(SB), X0   // vmovdqa	ymm0, ymmword ptr [rip + .LCPI0_0]
 
 LBB0_12:
 	LONG $0x307de2c4; WORD $0x070c // XORB CL, 0(DI)(AX*1);	vpmovzxbw	ymm1, xmmword ptr [rdi + rax]
