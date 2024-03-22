@@ -16,3 +16,10 @@ uint8_t test_fn_byte_ret(int a, long b, char c) {
 long test_fn_6params(long a, long b, long c, long d, long e, long f) {
     return (c*a) + b + (f*d) + e;
 }
+
+// gocc: Test_fn_sq_floats(input []float32, output []float32)
+void test_fn_sq_floats(float *input, long input_length, long input_cap, float *output, long output_length, long output_cap) {
+    for (int i = 0; i < input_length; i++) {
+        output[i] = input[i] * input[i];
+    }
+}

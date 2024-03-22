@@ -25,3 +25,12 @@ func TestManyParamsFn(t *testing.T) {
 
 	assert.Equal(t, 99, res)
 }
+
+func TestFloatsFn(t *testing.T) {
+	input := []float32{1, 2, 3, 4, 5, 6, 7, 8}
+	output := make([]float32, 8)
+
+	generated.Test_fn_sq_floats(input, output)
+
+	assert.Equal(t, []float32{1, 4, 9, 16, 25, 36, 49, 64}, output)
+}
