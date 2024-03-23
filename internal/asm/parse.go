@@ -147,7 +147,7 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 			parts := strings.SplitN(data, "\t", 2)
 			splits := strings.Split(strings.TrimSpace(parts[0]), " ")
 			if len(parts) < 2 {
-				return fmt.Errorf("cannot parse instruction %q: try to increase --insn-width of objdump", data)
+				return fmt.Errorf("failed to parse objdump line %d: instruction %q (%q)", i, data, line)
 			}
 			var (
 				binary   []string

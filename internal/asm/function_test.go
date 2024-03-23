@@ -21,6 +21,52 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestParamSizes(t *testing.T) {
+	testCases := []struct {
+		Name         string
+		Fn           Function
+		ExpectedSize int
+	}{
+		{
+			Name: "3bytes+void",
+			Fn: Function{Params: []Param{
+				{Type: "char"},
+				{Type: "char"},
+				{Type: "char"},
+			}},
+			ExpectedSize: 3,
+		},
+		{
+			Name: "3bytes+ret",
+			Fn: Function{Params: []Param{
+				{Type: "char"},
+				{Type: "char"},
+				{Type: "char"},
+			},
+				Ret: &Param{Type: "char"},
+			},
+			ExpectedSize: 8,
+		},
+		{
+			Name: "3bytes+int",
+			Fn: Function{Params: []Param{
+				{Type: "char"},
+				{Type: "char"},
+				{Type: "char"},
+				{Type: "int"},
+			}},
+			ExpectedSize: 8,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			sz, _ := tc.Fn.ParamsSize(nil)
+			assert.Equal(t, tc.ExpectedSize, sz)
+		})
+	}
+}
+
 func TestLineWord(t *testing.T) {
 	line := Line{
 		Assembly: "vaddps 0x40(%rdx,%rax,4),%ymm3,%ymm3",

@@ -5,13 +5,25 @@ package generated
 
 
 //go:noescape,nosplit
-func Test_fn_void_ret(a int32, b int, c int8, res *int)
+func Test_fn_4818_0(a int32, b int, c int8, res *int)
 
 //go:noescape,nosplit
-func Test_fn_byte_ret(a int32, b int, c int8) byte
+func Test_fn_111_0(a byte, b byte, c byte)
 
 //go:noescape,nosplit
-func Test_fn_6params(a int, b int, c int, d int, e int, f int) int
+func Test_fn_111_1(a byte, b byte, c byte) byte
+
+//go:noescape,nosplit
+func Test_fn_1114_1(a byte, b byte, c byte, d int32) byte
+
+//go:noescape,nosplit
+func Test_fn_481_1(a int32, b int, c int8) byte
+
+//go:noescape,nosplit
+func Test_fn_444_4(a int32, b int32, c int32) int32
+
+//go:noescape,nosplit
+func Test_fn_888888_8(a int, b int, c int, d int, e int, f int) int
 
 //go:noescape,nosplit
 func Test_fn_sq_floats(input []float32, output []float32)

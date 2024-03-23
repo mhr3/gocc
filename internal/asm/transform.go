@@ -93,16 +93,13 @@ func storeReturnValue(arch *config.Arch, function Function) Function {
 		return function
 	}
 
-	offset := 8 * len(function.Params)
-	//for _, param := range function.Params {
-	//	offset += param.Size()
-	//}
+	offset, _ := function.ParamsSize(arch)
 	op, ok := arch.CallOp[int8(function.Ret.Size())]
 	if !ok {
 		panic(fmt.Errorf("unable to store return value with size %d", function.Ret.Size()))
 	}
 
-	// FIXME: float return values (uses XMM registers on amd64)
+	// FIXME: float return values (uses X0 register on amd64, F0 on arm64)
 	retInstr := fmt.Sprintf("%s %s, ret+%d(FP)", op, arch.RetRegister, offset)
 
 	// we need to inject a new MOV instruction to store the return value on stack

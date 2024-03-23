@@ -38,31 +38,26 @@ func Generate(arch *config.Arch, functions []Function) ([]byte, error) {
 			builder.WriteString(c.Compile(arch))
 		}
 
+		if len(function.Params) > len(arch.Registers) {
+			return nil, fmt.Errorf("support for more than %d parameters is not implemented for %s", len(arch.Registers), arch.Name)
+		}
+
 		name := function.Name
 		if function.GoFunc.Expr != nil {
 			name = function.GoFunc.Name
 		}
-		paramsSize := 8 * len(function.Params)
-		//for _, param := range function.Params {
-		//	paramsSize += param.Size()
-		//}
+		paramsSize, offsets := function.ParamsSize(arch)
+		retSize := 0
 		if function.Ret != nil {
-			//paramsSize += function.Ret.Size()
-			paramsSize += 8
+			retSize = function.Ret.Size()
 		}
-		if len(function.Params) > len(arch.Registers) {
-			return nil, fmt.Errorf("support for more than %d parameters is not implemented for %s", len(arch.Registers), arch.Name)
-		}
-		builder.WriteString(fmt.Sprintf("\nTEXT ·%v(SB),NOSPLIT,$0-%d\n", name, paramsSize))
-		paramOffset := 0
+		builder.WriteString(fmt.Sprintf("\nTEXT ·%v(SB),NOSPLIT,$0-%d\n", name, paramsSize+retSize))
 		for i, param := range function.Params {
 			loadInstr, ok := arch.CallOp[int8(param.Size())]
 			if !ok {
 				return nil, fmt.Errorf("unable to load parameter with size %d", param.Size())
 			}
-			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", loadInstr, param.Name, paramOffset, arch.Registers[i]))
-			// 8 seems to be correct for both amd64 and arm64
-			paramOffset += 8
+			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", loadInstr, param.Name, offsets[i], arch.Registers[i]))
 		}
 		for _, line := range function.Lines {
 			builder.WriteString(line.Compile(arch))

@@ -141,13 +141,13 @@ func ARM64() *Arch {
 // Neon returns a configuration for ARM64 architecture with NEON support
 func Neon() *Arch {
 	arch := ARM64()
-	arch.ClangFlags = append(arch.ClangFlags, "-mfpu=neon", "-mfloat-abi=hard")
+	// arm64 requires NEON support, no need to specify it explicitly
 	return arch
 }
 
 func SVE() *Arch {
 	arch := ARM64()
-	arch.ClangFlags = append(arch.ClangFlags, "-mfpu=sve", "-mfloat-abi=hard")
+	arch.ClangFlags = append(arch.ClangFlags, "-mfpu=sve")
 	return arch
 }
 
@@ -181,8 +181,9 @@ func Apple() *Arch {
 // FindClang resolves clang compiler to use.
 func FindClang() (string, error) {
 	return find([]string{
-		"clang-17", "clang-16", "clang-15", "clang-14",
-		"clang-13", "clang-12", "clang-11", "clang-10",
+		"clang-19", "clang-18",
+		"clang-17", "clang-16",
+		"clang-15", "clang-14",
 		"clang",
 	})
 }
@@ -190,8 +191,9 @@ func FindClang() (string, error) {
 // FindClangObjdump resolves clang disassembler to use.
 func FindClangObjdump() (string, error) {
 	return find([]string{
-		"llvm-objdump-17", "llvm-objdump-16", "llvm-objdump-15", "llvm-objdump-14",
-		"llvm-objdump-13", "llvm-objdump-12", "llvm-objdump-11", "llvm-objdump-10",
+		"llvm-objdump-19", "llvm-objdump-18",
+		"llvm-objdump-17", "llvm-objdump-16",
+		"llvm-objdump-15", "llvm-objdump-14",
 		"llvm-objdump", "objdump",
 	})
 }

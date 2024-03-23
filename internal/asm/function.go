@@ -77,6 +77,39 @@ func (f *GoFunction) ForEachResult(fn func(name, typ string)) {
 	f.iterFieldList(f.Expr.Results, fn)
 }
 
+func (f *Function) ParamsSize(arch *config.Arch) (int, []int) {
+	// based on go vet's go/analysis/passes/asmdecl/asmdecl.go
+	var sizes types.Sizes
+	if arch == nil {
+		sizes = types.SizesFor("gc", "amd64")
+	} else {
+		sizes = types.SizesFor("gc", arch.Name)
+	}
+
+	offset := 0
+	offsets := make([]int, len(f.Params))
+
+	for i, param := range f.Params {
+		t := param.EquivalentType()
+
+		align := int(sizes.Alignof(t))
+		size := int(sizes.Sizeof(t))
+		offset += -offset & (align - 1)
+
+		offsets[i] = offset
+
+		offset += size
+	}
+
+	// we calc the return size separately, but still account for it
+	if f.Ret != nil {
+		maxAlign := int(sizes.Alignof(types.Typ[types.Int64]))
+		offset += -offset & (maxAlign - 1)
+	}
+
+	return offset, offsets
+}
+
 // String returns the function signature for a Go stub
 func (f *Function) String() string {
 	if f.GoFunc.Expr == nil {
@@ -242,6 +275,26 @@ func (p *Param) Size() int {
 		return 8
 	default:
 		return 8
+	}
+}
+
+func (p *Param) EquivalentType() types.Type {
+	if p.IsPointer {
+		return types.Typ[types.UnsafePointer]
+	}
+
+	switch p.Size() {
+	case 1:
+		return types.Typ[types.Uint8]
+	case 2:
+		return types.Typ[types.Int16]
+	case 4:
+		return types.Typ[types.Int32]
+	case 8:
+		return types.Typ[types.Int64]
+	default:
+		// panic?
+		return types.Typ[types.Uintptr]
 	}
 }
 
