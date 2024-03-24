@@ -3,7 +3,7 @@
 
 #include "textflag.h"
 
-TEXT ·f32_axpy(SB), NOSPLIT, $0-32
+TEXT ·f32_axpy(SB), NOSPLIT, $0-28
 	MOVQ x+0(FP), DI
 	MOVQ y+8(FP), SI
 	MOVQ size+16(FP), DX

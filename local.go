@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/kelindar/gocc/internal/asm"
 	"github.com/kelindar/gocc/internal/cc"
@@ -32,16 +33,17 @@ type Local struct {
 	Clang      *cc.Compiler
 	ObjDump    *cc.Disassembler
 	Source     string
+	FuncSuffix string
 	Assembly   string
 	Object     string
 	GoAssembly string
-	Go         string
+	GoStub     string
 	Package    string
 	Options    []string
 }
 
 // NewLocal creates a new translator that uses locally installed toolchain
-func NewLocal(arch *config.Arch, source, outputDir, suffix, packageName string, options ...string) (*Local, error) {
+func NewLocal(arch *config.Arch, source, outputDir, suffix, functionSuffix, packageName string, options ...string) (*Local, error) {
 	sourceExt := filepath.Ext(source)
 	noExtSourcePath := source[:len(source)-len(sourceExt)]
 	noExtSourceBase := filepath.Base(noExtSourcePath)
@@ -65,10 +67,11 @@ func NewLocal(arch *config.Arch, source, outputDir, suffix, packageName string, 
 		Clang:      clang,
 		ObjDump:    objdump,
 		Source:     source,
+		FuncSuffix: functionSuffix,
 		Assembly:   fmt.Sprintf("%s.s", noExtSourcePath),
 		Object:     fmt.Sprintf("%s.o", noExtSourcePath),
 		GoAssembly: filepath.Join(outputDir, fmt.Sprintf("%s%s.s", noExtSourceBase, suffix)),
-		Go:         filepath.Join(outputDir, fmt.Sprintf("%s%s.go", noExtSourceBase, suffix)),
+		GoStub:     filepath.Join(outputDir, fmt.Sprintf("%s%s.go", noExtSourceBase, suffix)),
 		Package:    packageName,
 		Options:    options,
 	}, nil
@@ -78,11 +81,6 @@ func NewLocal(arch *config.Arch, source, outputDir, suffix, packageName string, 
 func (t *Local) Translate() error {
 	functions, err := cc.Parse(t.Source)
 	if err != nil {
-		return err
-	}
-
-	// Generate the Go stubs for the functions
-	if err := asm.GenerateGoStubs(t.Arch, t.Package, t.Go, functions); err != nil {
 		return err
 	}
 
@@ -100,8 +98,9 @@ func (t *Local) Translate() error {
 	foundMapping := false
 	// Map the machine code to the assembly one
 	for _, v := range assembly {
-		idx := slices.IndexFunc[[]asm.Function, asm.Function](functions, func(cFn asm.Function) bool {
-			return v.Name == cFn.Name || v.Name == "_"+cFn.Name
+		assemblyName := strings.TrimPrefix(v.Name, "_")
+		idx := slices.IndexFunc(functions, func(cFn asm.Function) bool {
+			return assemblyName == cFn.Name
 		})
 		if idx == -1 {
 			continue
@@ -118,12 +117,22 @@ func (t *Local) Translate() error {
 		return errors.New("cannot find mapping to machine code")
 	}
 
+	// apply the function suffix, this needs to be done after the mapping
+	for i := range functions {
+		functions[i].GoFunc.Name += t.FuncSuffix
+	}
+
+	// Generate the Go stubs for the functions
+	if err := asm.GenerateGoStubs(t.Arch, t.Package, t.GoStub, functions); err != nil {
+		return err
+	}
+
 	return asm.GenerateFile(t.Arch, t.GoAssembly, functions)
 }
 
 // Output returns the output files as a web result
 func (t *Local) Output() (*WebResult, error) {
-	goFile, err := os.ReadFile(t.Go)
+	goFile, err := os.ReadFile(t.GoStub)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +148,7 @@ func (t *Local) Output() (*WebResult, error) {
 			Body: asmFile,
 		},
 		Go: File{
-			Name: t.Go,
+			Name: t.GoStub,
 			Body: goFile,
 		},
 	}, nil

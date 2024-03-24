@@ -21,7 +21,7 @@ DATA LCPI0_0<>+0x1c(SB)/2, $0x00ff
 DATA LCPI0_0<>+0x1e(SB)/2, $0x00ff
 GLOBL LCPI0_0<>(SB), (RODATA|NOPTR), $32
 
-TEXT ·uint8_simd_mul(SB), NOSPLIT, $0-32
+TEXT ·uint8_simd_mul_avx2(SB), NOSPLIT, $0-32
 	MOVQ input1+0(FP), DI
 	MOVQ input2+8(FP), SI
 	MOVQ output+16(FP), DX

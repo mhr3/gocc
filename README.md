@@ -28,10 +28,10 @@ First, we need to install `gocc` command-line tool. This will install the `gocc`
 go install github.com/kelindar/gocc/cmd/gocc@latest
 ```
 
-Next, you can use it to compile your C code to Go assembly. For example, to compile the `matmul_avx.c` file, you can run the following command:
+Next, you can use it to compile your C code to Go assembly. For example, to compile the `matmul_avx2.c` file, you can run the following command:
 
 ```bash
-gocc matmul_avx.c --arch avx2
+gocc matmul_avx2.c --arch avx2
 ```
 
 ## Setting up locally

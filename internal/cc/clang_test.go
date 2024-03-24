@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const testSource = "../../example/matmul_avx.c"
+const testSource = "../../example/matmul_avx2.c"
 
 func TestCompiler(t *testing.T) {
 	echo, err := find([]string{"echo", "cmd /c echo", "cmd"})

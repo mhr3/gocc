@@ -148,7 +148,10 @@ func Parse(path string) ([]asm.Function, error) {
 					})
 					return nil, fmt.Errorf("%s: function cannot return void, expected %s", funcIdent.DirectDeclarator.Token.SrcStr(), expectedRet)
 				}
-				// check whether the type actually matches
+				// the return type check is done in checkFunction
+			} else if funcTypeSpec.Case != cc.TypeSpecifierVoid {
+				// the C function is returning a value, but the Go function is not
+				return nil, fmt.Errorf("%s: go function is missing a return type", goFunc.Name)
 			}
 
 			function, err := convertFunction(funcIdent, extractCReturnType(allTypeSpecs), goFunc)
@@ -158,6 +161,7 @@ func Parse(path string) ([]asm.Function, error) {
 			if err := checkFunction(function); err != nil {
 				return nil, err
 			}
+
 			functions = append(functions, function)
 		}
 	}

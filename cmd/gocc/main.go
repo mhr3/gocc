@@ -31,6 +31,7 @@ func init() {
 	command.PersistentFlags().StringP("arch", "a", "amd64", "target architecture to use")
 	command.PersistentFlags().StringP("package", "p", "", "go package name to use for the stubs")
 	command.PersistentFlags().StringP("suffix", "s", "", "suffix to add to the generated files")
+	command.PersistentFlags().String("function-suffix", "", "suffix to add to the generated functions")
 	command.PersistentFlags().BoolP("local", "l", false, "use local machine for compilation")
 	command.PersistentFlags().Bool("with-os-tag", false, "generate OS-specific build tags")
 }
@@ -66,13 +67,14 @@ var command = &cobra.Command{
 		options = append(options, fmt.Sprintf("-O%d", optimizeLevel))
 		packageName, _ := cmd.PersistentFlags().GetString("package")
 		suffix, _ := cmd.PersistentFlags().GetString("suffix")
+		functionSuffix, _ := cmd.PersistentFlags().GetString("function-suffix")
 		withOsTag, _ := cmd.PersistentFlags().GetBool("with-os-tag")
 
 		// Compile locally or remotely
 		local, _ := cmd.PersistentFlags().GetBool("local")
 		switch local {
 		case true:
-			if err := compileLocally(target, args[0], output, suffix, packageName, withOsTag, options...); err != nil {
+			if err := compileLocally(target, args[0], output, suffix, functionSuffix, packageName, withOsTag, options...); err != nil {
 				exit(err)
 			}
 		default:
@@ -92,7 +94,7 @@ func compileRemotely(target, source, outputDir, packageName string, options ...s
 	return remote.Translate()
 }
 
-func compileLocally(target, source, outputDir, suffix, packageName string, withOsTag bool, options ...string) error {
+func compileLocally(target, source, outputDir, suffix, functionSuffix, packageName string, withOsTag bool, options ...string) error {
 	arch, err := config.For(target)
 	if err != nil {
 		exit(err)
@@ -102,7 +104,7 @@ func compileLocally(target, source, outputDir, suffix, packageName string, withO
 		arch.BuildTags += fmt.Sprintf(" && %s", runtime.GOOS)
 	}
 
-	local, err := gocc.NewLocal(arch, source, outputDir, suffix, packageName, options...)
+	local, err := gocc.NewLocal(arch, source, outputDir, suffix, functionSuffix, packageName, options...)
 	if err != nil {
 		return err
 	}
