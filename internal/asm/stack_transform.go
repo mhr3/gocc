@@ -2,7 +2,7 @@ package asm
 
 import "strings"
 
-func dropStackChangesAmd64(function Function) Function {
+func checkStackAmd64(function Function) Function {
 	var foundPrologue, foundEpilogue bool
 
 	/*
@@ -61,7 +61,7 @@ func dropStackChangesAmd64(function Function) Function {
 	return function
 }
 
-func dropStackChangesArm64(function Function) Function {
+func checkStackArm64(function Function) Function {
 	var foundPrologue, foundEpilogue bool
 
 	for i, line := range function.Lines {

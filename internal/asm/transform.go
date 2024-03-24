@@ -19,7 +19,7 @@ func transformFunction(arch *config.Arch, function Function) Function {
 	// Apply the transforms
 	function = transformReturns(arch, function)
 	function = rewriteJumpsAndLoads(arch, function)
-	function = dropStackManipulation(arch, function)
+	function = checkStackManipulation(arch, function)
 	function = storeReturnValue(arch, function)
 
 	return function
@@ -61,7 +61,16 @@ func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
 			op := arch.CallOp[8]
 			addrMode := "$" // absolute addressing
 			if instr, ok := reParams["instr"]; ok {
-				op = instr
+				// sigh, why oh why do we have to do this?
+				switch {
+				case instr == "MOVDQA":
+					op = "MOVO"
+				case instr == "MOVDQU":
+					op = "MOVOU"
+				default:
+					op = instr
+				}
+
 				addrMode = ""
 			}
 			rewritten := fmt.Sprintf("%s %s%s<>(SB), %s", op, addrMode, reParams["var"], reParams["register"])
@@ -73,16 +82,16 @@ func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
 	return function
 }
 
-func dropStackManipulation(arch *config.Arch, function Function) Function {
+func checkStackManipulation(arch *config.Arch, function Function) Function {
 	if arch == nil {
 		return function
 	}
 
 	switch arch.Name {
 	case "arm64":
-		return dropStackChangesArm64(function)
+		return checkStackArm64(function)
 	case "amd64":
-		return dropStackChangesAmd64(function)
+		return checkStackAmd64(function)
 	}
 
 	return function

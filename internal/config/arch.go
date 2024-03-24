@@ -133,7 +133,7 @@ func ARM64() *Arch {
 		RetRegister: "R0",
 		BuildTags:   "//go:build !noasm && arm64",
 		CommentCh:   "//",
-		CallOp:      map[int8]string{1: "MOVB", 2: "MOVS", 4: "MOVW", 8: "MOVD"},
+		CallOp:      map[int8]string{1: "MOVB", 2: "MOVH", 4: "MOVW", 8: "MOVD"},
 		ClangFlags:  []string{"--target=aarch64-linux-gnu"},
 	}
 }
