@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <immintrin.h>
 
-// gocc: f32_axpy(x,y unsafe.Pointer, size uint64, alpha float32)
+// gocc: f32_axpy(x,y unsafe.Pointer, size int, alpha float32)
 void f32_axpy(const float *x, float *y, const uint64_t size, const float alpha) {
     __m256 a = _mm256_set1_ps(alpha);
     for (uint64_t i = 0; (i + 7) < size; i += 8) {
