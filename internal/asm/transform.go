@@ -58,7 +58,10 @@ func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
 			function.Lines[i].Binary = nil
 		} else if arch.DataLoad != nil && arch.DataLoad.MatchString(combined) {
 			reParams := getRegexpParams(arch.DataLoad, combined)
+			// FIXME: this is extremely fragile
 			op := arch.CallOp[8]
+			register := reParams["register"]
+			symbol := reParams["var"]
 			addrMode := "$" // absolute addressing
 			if instr, ok := reParams["instr"]; ok {
 				// sigh, why oh why do we have to do this?
@@ -73,7 +76,18 @@ func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
 
 				addrMode = ""
 			}
-			rewritten := fmt.Sprintf("%s %s%s<>(SB), %s", op, addrMode, reParams["var"], reParams["register"])
+			if strings.HasPrefix(register, "X") {
+				// the disassembler gets this wrong sometimes
+				switch {
+				case strings.Contains(line.Assembly, "xmm"):
+					// all good
+				case strings.Contains(line.Assembly, "ymm"):
+					register = "Y" + register[1:]
+				case strings.Contains(line.Assembly, "zmm"):
+					register = "Z" + register[1:] // does go even support this?
+				}
+			}
+			rewritten := fmt.Sprintf("%s %s%s<>(SB), %s", op, addrMode, symbol, register)
 			function.Lines[i].Disassembled = rewritten
 			function.Lines[i].Binary = nil
 		}
@@ -89,9 +103,9 @@ func checkStackManipulation(arch *config.Arch, function Function) Function {
 
 	switch arch.Name {
 	case "arm64":
-		return checkStackArm64(function)
+		return checkStackArm64(arch, function)
 	case "amd64":
-		return checkStackAmd64(function)
+		return checkStackAmd64(arch, function)
 	}
 
 	return function
@@ -109,6 +123,9 @@ func storeReturnValue(arch *config.Arch, function Function) Function {
 	}
 
 	// FIXME: float return values (uses X0 register on amd64, F0 on arm64)
+	if function.Ret.Type == "float" || function.Ret.Type == "double" {
+		panic("float returns are not supported")
+	}
 	retInstr := fmt.Sprintf("%s %s, ret+%d(FP)", op, arch.RetRegister, offset)
 
 	// we need to inject a new MOV instruction to store the return value on stack

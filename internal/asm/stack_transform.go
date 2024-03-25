@@ -1,50 +1,79 @@
 package asm
 
-import "strings"
+import (
+	"fmt"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
 
-func checkStackAmd64(function Function) Function {
-	var foundPrologue, foundEpilogue bool
+	"github.com/kelindar/gocc/internal/config"
+)
+
+func checkStackAmd64(arch *config.Arch, function Function) Function {
+	var (
+		unrecognizedInstrs int
+		extraStack         int
+	)
 
 	/*
-		BYTE $0x55               // PUSHQ BP;	pushq	%rbp
-		WORD $0x8948; BYTE $0xe5 // MOVQ SP, BP;	movq	%rsp, %rbp
-		LONG $0xf8e48348         // ANDQ $-0x8, SP;	andq	$-8, %rsp
-		WORD $0xaf0f; BYTE $0xfa // IMULL DX, DI;	imull	%edx, %edi
-		WORD $0x6348; BYTE $0xc7 // MOVSXD DI, AX;	movslq	%edi, %rax
-		WORD $0x0148; BYTE $0xf0 // ADDQ SI, AX;	addq	%rsi, %rax
-		WORD $0x8948; BYTE $0x01 // MOVQ AX, 0(CX);	movq	%rax, (%rcx)
-		WORD $0x8948; BYTE $0xec // MOVQ BP, SP;	movq	%rbp, %rsp
-		BYTE $0x5d               // POPQ BP;	popq	%rbp
+		BYTE $0x55               // pushq	%rbp
+		WORD $0x8948; BYTE $0xe5 // movq	%rsp, %rbp
+		LONG $0xf8e48348         // andq	$-8, %rsp
+		WORD $0xaf0f; BYTE $0xfa // imull	%edx, %edi
+		WORD $0x6348; BYTE $0xc7 // movslq	%edi, %rax
+		WORD $0x0148; BYTE $0xf0 // addq	%rsi, %rax
+		WORD $0x8948; BYTE $0x01 // movq	%rax, (%rcx)
+		WORD $0x8948; BYTE $0xec // movq	%rbp, %rsp
+		BYTE $0x5d               // popq	%rbp
 		RET                      // retq
 	*/
+	spInstruction := regexp.MustCompile(`\brsp\b`)
+	stackAllocIdx := -1
 
 	for i, line := range function.Lines {
-		if strings.HasPrefix(line.Assembly, "push") && strings.HasSuffix(line.Assembly, "rbp") {
-			foundPrologue = true
+		if !spInstruction.MatchString(line.Assembly) {
+			continue
 		}
 
-		if strings.HasPrefix(line.Assembly, "ret") && i > 0 {
-			for j := i - 1; j >= 0; j-- {
-				prevLine := function.Lines[j]
-				if strings.HasPrefix(prevLine.Assembly, "pop") && strings.HasSuffix(prevLine.Assembly, "rbp") {
-					foundEpilogue = true
-					break
+		if strings.HasPrefix(line.Assembly, "mov") && strings.Contains(line.Assembly, "rbp") {
+			// moving SP to BP and back
+			continue
+		}
+		if strings.HasPrefix(line.Assembly, "and") {
+			// stack alignment
+			continue
+		}
+		if strings.HasPrefix(line.Assembly, "sub") {
+			parts := strings.Fields(line.Assembly)
+			operand := parts[len(parts)-1]
+			if n, err := strconv.Atoi(operand); err == nil {
+				if extraStack != 0 {
+					panic("failed to analyze stack operations")
 				}
+				extraStack = n
+				stackAllocIdx = i
 			}
 		}
 
-		if foundPrologue && foundEpilogue {
-			break
-		}
+		unrecognizedInstrs++
 	}
 
-	if foundPrologue && foundEpilogue {
+	if unrecognizedInstrs > 0 {
+		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", function.Name)
+	}
+
+	if unrecognizedInstrs == 0 {
 		// remove them
 		newLines := make([]Line, 0, len(function.Lines))
 
 		for _, line := range function.Lines {
-			if strings.HasPrefix(line.Assembly, "push") && strings.HasSuffix(line.Assembly, "rbp") ||
-				strings.HasPrefix(line.Assembly, "pop") && strings.HasSuffix(line.Assembly, "rbp") {
+			asm := line.Assembly
+			if strings.HasPrefix(asm, "push") && strings.HasSuffix(asm, "rbp") ||
+				strings.HasPrefix(asm, "pop") && strings.HasSuffix(asm, "rbp") ||
+				strings.HasPrefix(asm, "mov") && (strings.HasSuffix(asm, "rsp") || strings.HasSuffix(asm, "rbp")) ||
+				strings.HasPrefix(asm, "and") && strings.Contains(asm, "rsp") {
+				// we need to drop all of these
 				lineCpy := line
 				lineCpy.Disassembled = "NOP"
 				lineCpy.Binary = nil
@@ -56,27 +85,95 @@ func checkStackAmd64(function Function) Function {
 		}
 
 		function.Lines = newLines
+	} else {
+		// go really doesn't like messing with SP, so we have two options:
+		// 1) skip instructions that change it
+		// 2) copy SP to BP and rewrite any instructions working with SP
+		//    to refer to BP instead
+
+		// we still need to remove the prologue/epilogue instructions
+		newLines := make([]Line, 0, len(function.Lines))
+		pushOffsetStart := extraStack
+		pushOffsetStart += -pushOffsetStart & (15)
+		pushOffset := pushOffsetStart
+		maxOffset := pushOffset
+
+		for i, line := range function.Lines {
+			asm := line.Assembly
+			if stackAllocIdx == i ||
+				strings.HasPrefix(asm, "push") && strings.HasSuffix(asm, "rbp") ||
+				strings.HasPrefix(asm, "pop") && strings.HasSuffix(asm, "rbp") ||
+				strings.HasPrefix(asm, "mov") && (strings.HasSuffix(asm, "rsp") || strings.HasSuffix(asm, "rbp")) {
+				// we need to drop all of these
+				lineCpy := line
+				lineCpy.Disassembled = "NOP"
+				lineCpy.Binary = nil
+				newLines = append(newLines, lineCpy)
+				continue
+			}
+
+			if strings.HasPrefix(asm, "lea") {
+				parts := strings.Fields(asm)
+				if len(parts) > 1 && strings.HasPrefix(parts[1], "rsp") {
+					// writing into rsp, drop
+					lineCpy := line
+					lineCpy.Disassembled = "NOP"
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				}
+			}
+
+			if strings.HasPrefix(asm, "push") {
+				// rewrite to moves and hope they're not dynamic
+				parts := strings.Fields(line.Disassembled)
+				instr := fmt.Sprintf("%s %s, %d(SP)", arch.CallOp[8], parts[1], pushOffset)
+				pushOffset += 8
+				if pushOffset > maxOffset {
+					maxOffset = pushOffset
+				}
+				lineCpy := line
+				lineCpy.Disassembled = instr
+				lineCpy.Binary = nil
+				newLines = append(newLines, lineCpy)
+				continue
+			}
+			if strings.HasPrefix(asm, "pop") {
+				parts := strings.Fields(line.Disassembled)
+				pushOffset -= 8
+				instr := fmt.Sprintf("%s %d(SP), %s", arch.CallOp[8], pushOffset, parts[1])
+				if pushOffset < pushOffsetStart {
+					panic("unable to rewrite push/pop instructions")
+				}
+				lineCpy := line
+				lineCpy.Disassembled = instr
+				lineCpy.Binary = nil
+				newLines = append(newLines, lineCpy)
+				continue
+			}
+
+			// we're keeping the SP alignment instruction, hopefully that's ok
+
+			newLines = append(newLines, line)
+		}
+
+		function.Lines = newLines
+		function.LocalsSize = maxOffset
 	}
 
 	return function
 }
 
-func checkStackArm64(function Function) Function {
+func checkStackArm64(arch *config.Arch, function Function) Function {
 	var foundPrologue, foundEpilogue bool
 
-	for i, line := range function.Lines {
+	for _, line := range function.Lines {
 		if strings.HasPrefix(line.Assembly, "stp") && strings.Contains(line.Assembly, "sp") {
 			foundPrologue = true
 		}
 
-		if strings.HasPrefix(line.Assembly, "ret") && i > 0 {
-			for j := i - 1; j >= 0; j-- {
-				prevLine := function.Lines[j]
-				if strings.HasPrefix(prevLine.Assembly, "ldp") && strings.Contains(prevLine.Assembly, "sp") {
-					foundEpilogue = true
-					break
-				}
-			}
+		if strings.HasPrefix(line.Assembly, "ldp") && strings.Contains(line.Assembly, "sp") {
+			foundEpilogue = true
 		}
 
 		if foundPrologue && foundEpilogue {

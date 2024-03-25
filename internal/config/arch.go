@@ -78,14 +78,14 @@ func AMD64() *Arch {
 		Comment:     regexp.MustCompile(`^\s*#.*$`),
 		Const:       regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
 		Label:       regexp.MustCompile(`[A-Z0-9]+_\d+`),
-		DataLoad:    regexp.MustCompile(`^(?P<instr>\w+)\s+[^;]+?(?P<register>[RXY]\d+);.*?\.(?P<var>\w+)\b`),
+		DataLoad:    regexp.MustCompile(`^(?P<instr>\w+)\s+[^;]+?(?P<register>\b[RXY]\d+);.*?\.(?P<var>\w+)\b`),
 		JumpInstr:   regexp.MustCompile(`^(?P<instr>J\w+)[^;]+;.*?[.](?P<label>\w+)$`),
 		Registers:   []string{"DI", "SI", "DX", "CX", "R8", "R9"},
 		RetRegister: "AX",
 		BuildTags:   "//go:build !noasm && amd64",
 		CommentCh:   "#",
 		CallOp:      map[int8]string{1: "MOVB", 2: "MOVW", 4: "MOVL", 8: "MOVQ"},
-		ClangFlags:  []string{"--target=x86_64-linux-gnu"},
+		ClangFlags:  []string{"--target=x86_64-linux-gnu", "-masm=intel"},
 		//Disassembler: []string{"--insn-width", "16"},
 	}
 
@@ -101,14 +101,14 @@ func AMD64() *Arch {
 // Avx2 returns a configuration for AMD64 architecture with AVX2 support
 func Avx2() *Arch {
 	arch := AMD64()
-	arch.ClangFlags = append(arch.ClangFlags, "-masm=intel", "-mavx2", "-mfma")
+	arch.ClangFlags = append(arch.ClangFlags, "-mavx2", "-mfma")
 	return arch
 }
 
 // Avx512 returns a configuration for AMD64 architecture with AVX512 support
 func Avx512() *Arch {
 	arch := AMD64()
-	arch.ClangFlags = append(arch.ClangFlags, "-masm=intel", "-mavx", "-mfma", "-mavx512f", "-mavx512dq")
+	arch.ClangFlags = append(arch.ClangFlags, "-mavx", "-mfma", "-mavx512f", "-mavx512dq")
 	return arch
 }
 
@@ -127,7 +127,7 @@ func ARM64() *Arch {
 		Comment:     regexp.MustCompile(`^\s*//.*$`),
 		Const:       regexp.MustCompile(`^\s+\.(byte|short|long|int|quad)\s+(-?\d+).+$`),
 		Label:       regexp.MustCompile(`[A-Z0-9]+_\d+`),
-		DataLoad:    regexp.MustCompile(`(?P<register>R\d+);.*?\.(?P<var>\w+)\b`),
+		DataLoad:    regexp.MustCompile(`(?P<register>\bR\d+);.*?\.(?P<var>\w+)\b`),
 		JumpInstr:   regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`),
 		Registers:   []string{"R0", "R1", "R2", "R3", "R4", "R5", "R6", "R7"},
 		RetRegister: "R0",
@@ -157,13 +157,12 @@ func SVE() *Arch {
 // AESARM, ASIMD, ASIMDDP, ASIMDHP, ASIMDRDM, ATOMICS, CRC32, DCPOP, FCMA, FP, FPHP, GPA, JSCVT, LRCPC, PMULL, SHA1, SHA2, SHA3, SHA512
 func Apple() *Arch {
 	arch := ARM64()
-	arch.BuildTags = "//go:build !noasm && arm64"
 
 	arch.SourceLabel = regexp.MustCompile(`^[Ll][a-zA-Z0-9]+(?:_\d+)?:.*$`)
 	arch.Comment = regexp.MustCompile(`^\s*;.*$`)
 	arch.CommentCh = ";"
 	arch.Label = regexp.MustCompile(`[Ll_][a-zA-Z0-9_]+`)
-	arch.DataLoad = regexp.MustCompile(`(?P<register>R\d+);.*?\b(?P<var>\w+)@PAGE\b`)
+	arch.DataLoad = regexp.MustCompile(`(?P<register>\bR\d+);.*?\b(?P<var>\w+)@PAGE\b`)
 	arch.JumpInstr = regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`)
 
 	if runtime.GOOS != "darwin" {

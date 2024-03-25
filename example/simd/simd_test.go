@@ -32,7 +32,7 @@ func BenchmarkAXPY(b *testing.B) {
 			f32_axpy(
 				unsafe.Pointer(&x[0]),
 				unsafe.Pointer(&y[0]),
-				4, 3.0,
+				len(x), 3.0,
 			)
 		}
 	})

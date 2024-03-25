@@ -41,13 +41,14 @@ type GoFunction struct {
 // ------------------------------------- Function -------------------------------------
 
 type Function struct {
-	Name     string  `json:"name"`
-	Position int     `json:"position"`
-	Params   []Param `json:"params"`
-	Consts   []Const `json:"consts,omitempty"`
-	Lines    []Line  `json:"lines"`
-	Ret      *Param  `json:"return,omitempty"`
-	GoFunc   GoFunction
+	Name       string  `json:"name"`
+	Position   int     `json:"position"`
+	Params     []Param `json:"params"`
+	Consts     []Const `json:"consts,omitempty"`
+	Lines      []Line  `json:"lines"`
+	LocalsSize int     `json:"localsSize,omitempty"`
+	Ret        *Param  `json:"return,omitempty"`
+	GoFunc     GoFunction
 }
 
 func (f *GoFunction) NumResults() int {
@@ -119,7 +120,7 @@ func (f *Function) String() string {
 
 	var builder strings.Builder
 
-	builder.WriteString("\n//go:noescape,nosplit\n")
+	builder.WriteString("\n//go:noescape\n")
 	builder.WriteString(fmt.Sprintf("func %s(", f.GoFunc.Name))
 	paramIdx := 0
 	f.GoFunc.ForEachParam(func(name, typ string) {
