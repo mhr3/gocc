@@ -12,8 +12,10 @@ import (
 
 func checkStackAmd64(arch *config.Arch, function Function) Function {
 	var (
-		unrecognizedInstrs int
-		extraStack         int
+		rewriteRequired bool
+		numPushes       int
+		extraStack      int
+		stackAllocIdx   = -1
 	)
 
 	/*
@@ -29,41 +31,40 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 		RET                      // retq
 	*/
 	spInstruction := regexp.MustCompile(`\brsp\b`)
-	stackAllocIdx := -1
 
 	for i, line := range function.Lines {
-		if !spInstruction.MatchString(line.Assembly) {
-			continue
-		}
-
-		if strings.HasPrefix(line.Assembly, "mov") && strings.Contains(line.Assembly, "rbp") {
-			// moving SP to BP and back
-			continue
-		}
-		if strings.HasPrefix(line.Assembly, "and") {
-			// stack alignment
-			continue
-		}
-		if strings.HasPrefix(line.Assembly, "sub") {
-			parts := strings.Fields(line.Assembly)
-			operand := parts[len(parts)-1]
-			if n, err := strconv.Atoi(operand); err == nil {
-				if extraStack != 0 {
-					panic("failed to analyze stack operations")
-				}
-				extraStack = n
-				stackAllocIdx = i
+		if spInstruction.MatchString(line.Assembly) {
+			if strings.HasPrefix(line.Assembly, "mov") && strings.Contains(line.Assembly, "rbp") {
+				// moving SP to BP and back
+				continue
 			}
+			if strings.HasPrefix(line.Assembly, "and") {
+				// stack alignment
+				// FIXME: this basically grows the stack, should adjust for it
+				continue
+			}
+			if strings.HasPrefix(line.Assembly, "sub") {
+				// allocating stack space
+				parts := strings.Fields(line.Assembly)
+				operand := parts[len(parts)-1]
+				if n, err := strconv.Atoi(operand); err == nil {
+					if extraStack != 0 {
+						panic("failed to analyze stack operations")
+					}
+					extraStack = n
+					stackAllocIdx = i
+				}
+			}
+			rewriteRequired = true
+			continue
 		}
-
-		unrecognizedInstrs++
+		if strings.HasPrefix(line.Assembly, "push") && !strings.Contains(line.Assembly, "rbp") {
+			rewriteRequired = true
+			numPushes++
+		}
 	}
 
-	if unrecognizedInstrs > 0 {
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", function.Name)
-	}
-
-	if unrecognizedInstrs == 0 {
+	if !rewriteRequired {
 		// remove them
 		newLines := make([]Line, 0, len(function.Lines))
 
@@ -86,6 +87,7 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 
 		function.Lines = newLines
 	} else {
+		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", function.Name)
 		// go really doesn't like messing with SP, so we have two options:
 		// 1) skip instructions that change it
 		// 2) copy SP to BP and rewrite any instructions working with SP
@@ -94,7 +96,7 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 		// we still need to remove the prologue/epilogue instructions
 		newLines := make([]Line, 0, len(function.Lines))
 		pushOffsetStart := extraStack
-		pushOffsetStart += -pushOffsetStart & (15)
+		//pushOffsetStart += -pushOffsetStart & (15)
 		pushOffset := pushOffsetStart
 		maxOffset := pushOffset
 
@@ -152,7 +154,8 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 				continue
 			}
 
-			// we're keeping the SP alignment instruction, hopefully that's ok
+			// FIXME: we're keeping the SP alignment instruction, won't work if the stack isn't aligned
+			// although should be ok if we fit into the red zone
 
 			newLines = append(newLines, line)
 		}
