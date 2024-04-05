@@ -126,3 +126,44 @@ func newTestMatrix(r, c int) *Matrix {
 	}
 	return &mx
 }
+
+func uint8_mul_go(input1, input2, output []uint8) {
+	for i := range input1 {
+		output[i] = input1[i] * input2[i]
+	}
+}
+
+func BenchmarkUintMul(b *testing.B) {
+	for _, size := range []int{1, 15, 44, 100, 10000} {
+
+		b.Run(fmt.Sprintf("%d-std", size), func(b *testing.B) {
+			input1 := make([]uint8, size)
+			input2 := make([]uint8, size)
+			output := make([]uint8, size)
+
+			for i := 0; i < size; i++ {
+				input1[i] = uint8(i)
+				input2[i] = uint8(i)
+			}
+
+			for i := 0; i < b.N; i++ {
+				uint8_mul_go(input1, input2, output)
+			}
+		})
+
+		b.Run(fmt.Sprintf("%d-asm", size), func(b *testing.B) {
+			input1 := make([]uint8, size)
+			input2 := make([]uint8, size)
+			output := make([]uint8, size)
+
+			for i := 0; i < size; i++ {
+				input1[i] = uint8(i)
+				input2[i] = uint8(i)
+			}
+
+			for i := 0; i < b.N; i++ {
+				uint8_simd_mul(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&output[0]), uint64(size))
+			}
+		})
+	}
+}

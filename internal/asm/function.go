@@ -178,12 +178,33 @@ func (line *Line) Compile(arch *config.Arch) string {
 
 	builder.WriteString("\t")
 
+	asmParts := strings.Fields(line.Assembly)
+	if len(asmParts) > 0 && line.Disassembled != "" {
+		// do the instructions match?
+		inst := strings.ToUpper(asmParts[0])
+		dInst := line.Disassembled
+		dIdx := strings.IndexByte(line.Disassembled, ' ')
+		if dIdx > 0 {
+			dInst = line.Disassembled[:dIdx]
+		}
+
+		switch {
+		case inst == dInst:
+			if strings.Contains(line.Assembly, "ymm") || strings.Contains(line.Assembly, "zmm") {
+				// disassembler gets this wrong
+				break
+			}
+			// we'll trust the disassembler
+			line.Binary = nil
+		case inst == "MOV" && strings.HasPrefix(dInst, "MOV"):
+			// we'll trust the disassembler
+			line.Binary = nil
+		}
+	}
+
 	if len(line.Binary) == 0 && line.Disassembled != "" {
 		builder.WriteString(line.Disassembled)
-		if line.Assembly != "" {
-			builder.WriteString("\t //")
-			builder.WriteString(line.Assembly)
-		}
+		addInstructionComment(&builder, &Line{Assembly: line.Assembly, Disassembled: "<--"})
 		builder.WriteString("\n")
 		return builder.String()
 	}
@@ -192,12 +213,8 @@ func (line *Line) Compile(arch *config.Arch) string {
 	if arch != nil && arch.Name == "arm64" && len(line.Binary) == 4 {
 		builder.WriteString(fmt.Sprintf("WORD $0x%v%v%v%v",
 			line.Binary[3], line.Binary[2], line.Binary[1], line.Binary[0]))
-		builder.WriteString("\t// ")
-		if line.Disassembled != "" {
-			builder.WriteString(line.Disassembled)
-			builder.WriteString(";\t")
-		}
-		builder.WriteString(line.Assembly)
+
+		addInstructionComment(&builder, line)
 		builder.WriteString("\n")
 		return builder.String()
 	}
@@ -227,14 +244,20 @@ func (line *Line) Compile(arch *config.Arch) string {
 		}
 	}
 
-	builder.WriteString("\t// ")
-	if line.Disassembled != "" {
-		builder.WriteString(line.Disassembled)
-		builder.WriteString(";\t")
-	}
-	builder.WriteString(line.Assembly)
+	addInstructionComment(&builder, line)
 	builder.WriteString("\n")
 	return builder.String()
+}
+
+func addInstructionComment(builder *strings.Builder, line *Line) {
+	if line.Disassembled != "" && line.Assembly != "" {
+		fmt.Fprintf(builder, "\t// %-36s // %s", line.Disassembled, line.Assembly)
+	} else if line.Disassembled != "" {
+		builder.WriteString("\t// ")
+		builder.WriteString(line.Disassembled)
+	} else if line.Assembly != "" {
+		fmt.Fprintf(builder, "\t// %-36s // %s", "?", line.Assembly)
+	}
 }
 
 // Param represents a function parameter

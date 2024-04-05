@@ -18,6 +18,7 @@ package cc
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -46,17 +47,28 @@ func NewCompiler(arch *config.Arch) (*Compiler, error) {
 // compile compiles the C source file to assembly and then to object.
 func (c *Compiler) Compile(source, assembly, object string, args ...string) error {
 	args = append(args, "-mno-red-zone", "-mstackrealign", "-mllvm", "-inline-threshold=1000",
-		"-fno-asynchronous-unwind-tables", "-fno-exceptions", "-fno-rtti", "-ffast-math")
+		"-fno-asynchronous-unwind-tables", "-fno-exceptions", "-fno-rtti", "-ffast-math", "-Wno-unused-command-line-argument")
 	args = append(args, c.arch.ClangFlags...)
 
+	compileOutput, err := runCommand(c.clang, append([]string{"-S", "-c", source, "-o", assembly}, args...)...)
 	// Compile to assembly first
-	if _, err := runCommand(c.clang, append([]string{"-S", "-c", source, "-o", assembly}, args...)...); err != nil {
+	if err != nil {
 		return err
+	}
+	if compileOutput != "" {
+		fmt.Fprintln(os.Stderr, compileOutput)
 	}
 
 	// Use clang to compile to object
-	_, err := runCommand(c.clang, append([]string{"-c", assembly, "-o", object}, args...)...)
-	return err
+	objOutput, err := runCommand(c.clang, append([]string{"-c", assembly, "-o", object}, args...)...)
+	if err != nil {
+		return err
+	}
+	if objOutput != "" {
+		fmt.Fprintln(os.Stderr, objOutput)
+	}
+
+	return nil
 }
 
 // runCommand runs a command and extract its output.

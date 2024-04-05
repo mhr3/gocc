@@ -98,10 +98,17 @@ func (t *Local) Translate() error {
 	foundMapping := false
 	// Map the machine code to the assembly one
 	for _, v := range assembly {
-		assemblyName := strings.TrimPrefix(v.Name, "_")
+		assemblyName := v.Name
 		idx := slices.IndexFunc(functions, func(cFn asm.Function) bool {
 			return assemblyName == cFn.Name
 		})
+		if idx == -1 {
+			// try one more time without the underscore prefix
+			assemblyName := strings.TrimPrefix(assemblyName, "_")
+			idx = slices.IndexFunc(functions, func(cFn asm.Function) bool {
+				return assemblyName == cFn.Name
+			})
+		}
 		if idx == -1 {
 			continue
 		}

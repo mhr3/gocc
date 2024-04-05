@@ -54,6 +54,8 @@ func For(arch string) (*Arch, error) {
 		return Apple(), nil
 	case "neon":
 		return Neon(), nil
+	case "sve":
+		return SVE(), nil
 	case "avx2":
 		return Avx2(), nil
 	case "avx512":
@@ -147,7 +149,7 @@ func Neon() *Arch {
 
 func SVE() *Arch {
 	arch := ARM64()
-	arch.ClangFlags = append(arch.ClangFlags, "-mfpu=sve")
+	arch.ClangFlags = append(arch.ClangFlags, "-march=armv8.2-a+sve", "-mfpu=sve")
 	return arch
 }
 
