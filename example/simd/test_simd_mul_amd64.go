@@ -17,3 +17,8 @@ func uint8_simd_mul(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.
 	}
 	uint8_simd_mul_sse(input1, input2, output, size)
 }
+
+// just to make compiling tests easier
+func uint8_simd_mul_sve(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+	panic("not implemented")
+}

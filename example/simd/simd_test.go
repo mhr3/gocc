@@ -6,6 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/sys/cpu"
 )
 
 /*
@@ -110,12 +111,44 @@ func TestMatmul(t *testing.T) {
 }
 
 func TestUintMul(t *testing.T) {
-	input1 := []uint8{1, 2, 3, 4, 5, 6, 7, 8, 9}
-	input2 := []uint8{1, 2, 3, 4, 5, 6, 7, 8, 9}
-	dst := make([]uint8, 9)
+	for _, sz := range []int{1, 15, 44, 100, 10000} {
+		t.Run(fmt.Sprintf("%d-simd", sz), func(t *testing.T) {
+			input1, input2, dst := prepareTestUint8Input(sz)
 
-	uint8_simd_mul(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&(dst)[0]), uint64(len(dst)))
-	assert.Equal(t, []uint8{1, 4, 9, 16, 25, 36, 49, 64, 81}, dst)
+			uint8_simd_mul(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&dst[0]), uint64(sz))
+
+			expected := make([]uint8, sz)
+			uint8_mul_go(input1, input2, expected)
+			assert.Equal(t, expected, dst)
+		})
+
+		t.Run(fmt.Sprintf("%d-sve", sz), func(t *testing.T) {
+			if !cpu.ARM64.HasSVE {
+				t.Skip("SVE not supported")
+			}
+
+			input1, input2, dst := prepareTestUint8Input(sz)
+
+			uint8_simd_mul_sve(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&dst[0]), uint64(sz))
+
+			expected := make([]uint8, sz)
+			uint8_mul_go(input1, input2, expected)
+			assert.Equal(t, expected, dst)
+		})
+	}
+}
+
+func prepareTestUint8Input(sz int) ([]uint8, []uint8, []uint8) {
+	input1 := make([]uint8, sz)
+	input2 := make([]uint8, sz)
+	dst := make([]uint8, sz)
+
+	for i := 0; i < sz; i++ {
+		input1[i] = uint8(i)
+		input2[i] = uint8(i)
+	}
+
+	return input1, input2, dst
 }
 
 // newTestMatrix creates a new matrix
@@ -134,35 +167,33 @@ func uint8_mul_go(input1, input2, output []uint8) {
 }
 
 func BenchmarkUintMul(b *testing.B) {
-	for _, size := range []int{1, 15, 44, 100, 10000} {
-
+	sizes := []int{1, 15, 44, 100, 10000, 64 * 1024}
+	for _, size := range sizes {
 		b.Run(fmt.Sprintf("%d-std", size), func(b *testing.B) {
-			input1 := make([]uint8, size)
-			input2 := make([]uint8, size)
-			output := make([]uint8, size)
-
-			for i := 0; i < size; i++ {
-				input1[i] = uint8(i)
-				input2[i] = uint8(i)
-			}
+			input1, input2, output := prepareTestUint8Input(size)
 
 			for i := 0; i < b.N; i++ {
 				uint8_mul_go(input1, input2, output)
 			}
 		})
 
-		b.Run(fmt.Sprintf("%d-asm", size), func(b *testing.B) {
-			input1 := make([]uint8, size)
-			input2 := make([]uint8, size)
-			output := make([]uint8, size)
-
-			for i := 0; i < size; i++ {
-				input1[i] = uint8(i)
-				input2[i] = uint8(i)
-			}
+		b.Run(fmt.Sprintf("%d-simd", size), func(b *testing.B) {
+			input1, input2, output := prepareTestUint8Input(size)
 
 			for i := 0; i < b.N; i++ {
 				uint8_simd_mul(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&output[0]), uint64(size))
+			}
+		})
+
+		b.Run(fmt.Sprintf("%d-sve", size), func(b *testing.B) {
+			if !cpu.ARM64.HasSVE {
+				b.Skip("SVE not supported")
+			}
+
+			input1, input2, output := prepareTestUint8Input(size)
+
+			for i := 0; i < b.N; i++ {
+				uint8_simd_mul_sve(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&output[0]), uint64(size))
 			}
 		})
 	}
