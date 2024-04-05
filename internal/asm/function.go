@@ -193,6 +193,9 @@ func (line *Line) Compile(arch *config.Arch) string {
 			if strings.Contains(line.Assembly, "ymm") || strings.Contains(line.Assembly, "zmm") {
 				// disassembler gets this wrong
 				break
+			} else if inst == "FMUL" {
+				// there's no FMUL somehow
+				break
 			}
 			// we'll trust the disassembler
 			line.Binary = nil

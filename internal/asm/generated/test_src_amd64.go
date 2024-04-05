@@ -17,6 +17,9 @@ func Test_fn_111_1(a byte, b byte, c byte) byte
 func Test_fn_1114_1(a byte, b byte, c byte, d int32) byte
 
 //go:noescape
+func Test_fn_282_2(a int16, b int, c int16) int16
+
+//go:noescape
 func Test_fn_481_1(a int32, b int, c int8) byte
 
 //go:noescape

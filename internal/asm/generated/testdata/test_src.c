@@ -22,6 +22,11 @@ uint8_t test_fn_1114_1(uint8_t a, uint8_t b, uint8_t c, int d) {
     return (c*a) + b + d;
 }
 
+// gocc: Test_fn_282_2(a int16, b int, c int16) int16
+short test_fn_282_2(short a, long b, short c) {
+    return (c*a) + b;
+}
+
 // gocc: Test_fn_481_1(a int32, b int, c int8) byte
 uint8_t test_fn_481_1(int a, long b, char c) {
     return (c*a) + b;

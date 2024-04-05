@@ -20,6 +20,12 @@ func TestByteRetFn(t *testing.T) {
 	assert.EqualValues(t, 38, res)
 }
 
+func TestInt16RetFn(t *testing.T) {
+	res := generated.Test_fn_282_2(3, 2, 12)
+
+	assert.EqualValues(t, 38, res)
+}
+
 func TestInt32RetFn(t *testing.T) {
 	res := generated.Test_fn_444_4(3, 2, 12)
 
