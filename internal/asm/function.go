@@ -178,38 +178,6 @@ func (line *Line) Compile(arch *config.Arch) string {
 
 	builder.WriteString("\t")
 
-	asmParts := strings.Fields(line.Assembly)
-	if len(asmParts) > 0 && line.Disassembled != "" {
-		// do the instructions match?
-		inst := strings.ToUpper(asmParts[0])
-		dInst := line.Disassembled
-		dIdx := strings.IndexByte(line.Disassembled, ' ')
-		if dIdx > 0 {
-			dInst = line.Disassembled[:dIdx]
-		}
-
-		switch {
-		case inst == dInst:
-			if strings.Contains(line.Assembly, "ymm") || strings.Contains(line.Assembly, "zmm") {
-				// disassembler gets this wrong
-				break
-			} else if inst == "FMUL" || inst == "CMOVAE" {
-				// these no exist
-				break
-			} else if inst == "MOVDQA" || inst == "MOVDQU" {
-				// should be disassembled as MOVO and MOVOU
-				break
-			} else if strings.HasPrefix(inst, "MOVSX") || strings.HasPrefix(inst, "MOVZX") {
-				break
-			}
-			// we'll trust the disassembler
-			line.Binary = nil
-		case inst == "MOV" && strings.HasPrefix(dInst, "MOV"):
-			// we'll trust the disassembler
-			line.Binary = nil
-		}
-	}
-
 	if len(line.Binary) == 0 && line.Disassembled != "" {
 		builder.WriteString(line.Disassembled)
 		addInstructionComment(&builder, &Line{Assembly: line.Assembly, Disassembled: "<--"})

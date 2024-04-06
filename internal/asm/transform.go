@@ -22,10 +22,13 @@ func transformFunction(arch *config.Arch, function Function) Function {
 	function = checkStackManipulation(arch, function)
 	function = storeReturnValue(arch, function)
 
+	// weird type of transform, but we'll keep it here for now
+	function = removeBinaryInstructions(arch, function)
+
 	return function
 }
 
-func transformReturns(arch *config.Arch, function Function) Function {
+func transformReturns(_ *config.Arch, function Function) Function {
 	for i := 0; i < len(function.Lines); i++ {
 		line := function.Lines[i]
 		if strings.HasPrefix(line.Assembly, "ret") {
@@ -106,6 +109,21 @@ func checkStackManipulation(arch *config.Arch, function Function) Function {
 		return checkStackArm64(arch, function)
 	case "amd64":
 		return checkStackAmd64(arch, function)
+	}
+
+	return function
+}
+
+func removeBinaryInstructions(arch *config.Arch, function Function) Function {
+	if arch == nil {
+		return function
+	}
+
+	switch arch.Name {
+	case "amd64":
+		return removeBinaryInstructionsAmd64(arch, function)
+	case "arm64":
+		return removeBinaryInstructionsArm64(arch, function)
 	}
 
 	return function
