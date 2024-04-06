@@ -9,7 +9,7 @@ TEXT ·uint8_simd_mul_sve(SB), NOSPLIT, $0-32
 	MOVD output+16(FP), R2
 	MOVD size+24(FP), R3
 	NOP                      // <--                                  // stp	x29, x30, [sp, #-16]!
-	WORD $0x7100047f         // CMPW $1, R3                          // cmp	w3, #1
+	CMPW $1, R3              // <--                                  // cmp	w3, #1
 	NOP                      // <--                                  // mov	x29, sp
 	BLT  LBB0_5              // <--                                  // b.lt	.LBB0_5
 	AND  $4294967295, R3, R8 // <--                                  // and	x8, x3, #0xffffffff
@@ -28,7 +28,7 @@ LBB0_4:
 	WORD $0x38401589 // MOVBU.P 1(R12), R9                   // ldrb	w9, [x12], #1
 	WORD $0x3840156d // MOVBU.P 1(R11), R13                  // ldrb	w13, [x11], #1
 	SUBS $1, R8, R8  // <--                                  // subs	x8, x8, #1
-	WORD $0x1b097da9 // MULW R9, R13, R9                     // mul	w9, w13, w9
+	MULW R9, R13, R9 // <--                                  // mul	w9, w13, w9
 	WORD $0x38001549 // MOVB.P R9, 1(R10)                    // strb	w9, [x10], #1
 	BNE  LBB0_4      // <--                                  // b.ne	.LBB0_4
 
