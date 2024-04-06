@@ -3,6 +3,7 @@ package simd
 import (
 	"fmt"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
@@ -111,30 +112,39 @@ func TestMatmul(t *testing.T) {
 }
 
 func TestUintMul(t *testing.T) {
+	checkResult := func(input1, input2, result []uint8) {
+		t.Helper()
+		expected := make([]uint8, len(input1))
+		uint8_mul_go(input1, input2, expected)
+		assert.Equal(t, expected, result)
+	}
+
+	cases := []struct {
+		Name      string
+		Fn        func(unsafe.Pointer, unsafe.Pointer, unsafe.Pointer, uint64)
+		Supported bool
+	}{
+		{"simd", uint8_simd_mul, true},
+		{"sse", uint8_simd_mul_sse, cpu.X86.HasSSE2},
+		{"avx2", uint8_simd_mul_avx2, cpu.X86.HasAVX2},
+		{"avx512", uint8_simd_mul_avx512, cpu.X86.HasAVX512F},
+		{"neon", uint8_simd_mul_neon, cpu.ARM64.HasASIMD},
+		{"sve", uint8_simd_mul_sve, cpu.ARM64.HasSVE},
+	}
+
 	for _, sz := range []int{1, 15, 44, 100, 10000} {
-		t.Run(fmt.Sprintf("%d-simd", sz), func(t *testing.T) {
-			input1, input2, dst := prepareTestUint8Input(sz)
+		for _, c := range cases {
+			t.Run(fmt.Sprintf("%d-%s", sz, c.Name), func(t *testing.T) {
+				if !c.Supported {
+					t.Skipf("%s not supported", c.Name)
+				}
+				input1, input2, dst := prepareTestUint8Input(sz)
 
-			uint8_simd_mul(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&dst[0]), uint64(sz))
+				c.Fn(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&dst[0]), uint64(sz))
 
-			expected := make([]uint8, sz)
-			uint8_mul_go(input1, input2, expected)
-			assert.Equal(t, expected, dst)
-		})
-
-		t.Run(fmt.Sprintf("%d-sve", sz), func(t *testing.T) {
-			if !cpu.ARM64.HasSVE {
-				t.Skip("SVE not supported")
-			}
-
-			input1, input2, dst := prepareTestUint8Input(sz)
-
-			uint8_simd_mul_sve(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&dst[0]), uint64(sz))
-
-			expected := make([]uint8, sz)
-			uint8_mul_go(input1, input2, expected)
-			assert.Equal(t, expected, dst)
-		})
+				checkResult(input1, input2, dst)
+			})
+		}
 	}
 }
 
@@ -167,34 +177,45 @@ func uint8_mul_go(input1, input2, output []uint8) {
 }
 
 func BenchmarkUintMul(b *testing.B) {
+	cases := []struct {
+		Name      string
+		Fn        func(unsafe.Pointer, unsafe.Pointer, unsafe.Pointer, uint64)
+		Supported bool
+	}{
+		{"simd", uint8_simd_mul, true},
+		{"sse", uint8_simd_mul_sse, cpu.X86.HasSSE2},
+		{"avx2", uint8_simd_mul_avx2, cpu.X86.HasAVX2},
+		{"avx512", uint8_simd_mul_avx512, cpu.X86.HasAVX512F},
+		{"neon", uint8_simd_mul_neon, cpu.ARM64.HasASIMD},
+		{"sve", uint8_simd_mul_sve, cpu.ARM64.HasSVE},
+	}
+
 	sizes := []int{1, 15, 44, 100, 10000, 64 * 1024}
 	for _, size := range sizes {
-		b.Run(fmt.Sprintf("%d-std", size), func(b *testing.B) {
+		b.Run(fmt.Sprintf("go-%d", size), func(b *testing.B) {
 			input1, input2, output := prepareTestUint8Input(size)
 
+			startTime := time.Now()
 			for i := 0; i < b.N; i++ {
 				uint8_mul_go(input1, input2, output)
 			}
+			b.ReportMetric(float64(b.N*size)/float64(time.Since(startTime).Microseconds()), "MB/s")
 		})
 
-		b.Run(fmt.Sprintf("%d-simd", size), func(b *testing.B) {
-			input1, input2, output := prepareTestUint8Input(size)
+		for _, c := range cases {
+			b.Run(fmt.Sprintf("%s-%d", c.Name, size), func(b *testing.B) {
+				if !c.Supported {
+					b.Skipf("%s not supported", c.Name)
+				}
 
-			for i := 0; i < b.N; i++ {
-				uint8_simd_mul(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&output[0]), uint64(size))
-			}
-		})
+				input1, input2, output := prepareTestUint8Input(size)
 
-		b.Run(fmt.Sprintf("%d-sve", size), func(b *testing.B) {
-			if !cpu.ARM64.HasSVE {
-				b.Skip("SVE not supported")
-			}
-
-			input1, input2, output := prepareTestUint8Input(size)
-
-			for i := 0; i < b.N; i++ {
-				uint8_simd_mul_sve(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&output[0]), uint64(size))
-			}
-		})
+				startTime := time.Now()
+				for i := 0; i < b.N; i++ {
+					c.Fn(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&output[0]), uint64(size))
+				}
+				b.ReportMetric(float64(b.N*size)/float64(time.Since(startTime).Microseconds()), "MB/s")
+			})
+		}
 	}
 }

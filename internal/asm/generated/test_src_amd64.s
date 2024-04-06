@@ -4,20 +4,20 @@
 #include "textflag.h"
 
 TEXT ·Test_fn_4818_0(SB), NOSPLIT, $0-32
-	MOVL   a+0(FP), DI
-	MOVQ   b+8(FP), SI
-	MOVB   c+16(FP), DX
-	MOVQ   res+24(FP), CX
-	NOP                        // <--                                  // push	rbp
-	NOP                        // <--                                  // mov	rbp, rsp
-	NOP                        // <--                                  // and	rsp, -8
-	WORD   $0xaf0f; BYTE $0xfa // IMULL DX, DI                         // imul	edi, edx
-	MOVSXD DI, AX              // <--                                  // movsxd	rax, edi
-	WORD   $0x0148; BYTE $0xf0 // ADDQ SI, AX                          // add	rax, rsi
-	MOVQ   AX, 0(CX)           // <--                                  // mov	qword ptr [rcx], rax
-	NOP                        // <--                                  // mov	rsp, rbp
-	NOP                        // <--                                  // pop	rbp
-	RET                        // <--                                  // ret
+	MOVL a+0(FP), DI
+	MOVQ b+8(FP), SI
+	MOVBLZX c+16(FP), DX
+	MOVQ res+24(FP), CX
+	NOP                      // <--                                  // push	rbp
+	NOP                      // <--                                  // mov	rbp, rsp
+	NOP                      // <--                                  // and	rsp, -8
+	WORD $0xaf0f; BYTE $0xfa // IMULL DX, DI                         // imul	edi, edx
+	WORD $0x6348; BYTE $0xc7 // MOVSXD DI, AX                        // movsxd	rax, edi
+	WORD $0x0148; BYTE $0xf0 // ADDQ SI, AX                          // add	rax, rsi
+	MOVQ AX, 0(CX)           // <--                                  // mov	qword ptr [rcx], rax
+	NOP                      // <--                                  // mov	rsp, rbp
+	NOP                      // <--                                  // pop	rbp
+	RET                      // <--                                  // ret
 
 TEXT ·Test_fn_111_0(SB), NOSPLIT, $0-3
 	MOVB a+0(FP), DI

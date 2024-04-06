@@ -193,8 +193,13 @@ func (line *Line) Compile(arch *config.Arch) string {
 			if strings.Contains(line.Assembly, "ymm") || strings.Contains(line.Assembly, "zmm") {
 				// disassembler gets this wrong
 				break
-			} else if inst == "FMUL" {
-				// there's no FMUL somehow
+			} else if inst == "FMUL" || inst == "CMOVAE" {
+				// these no exist
+				break
+			} else if inst == "MOVDQA" || inst == "MOVDQU" {
+				// should be disassembled as MOVO and MOVOU
+				break
+			} else if strings.HasPrefix(inst, "MOVSX") || strings.HasPrefix(inst, "MOVZX") {
 				break
 			}
 			// we'll trust the disassembler
