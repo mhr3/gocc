@@ -24,7 +24,7 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 				switch {
 				case strings.Contains(line.Disassembled, "(SB)"):
 					// definitely not
-				case inst == "CMP" || inst == "TEST" || inst == "SUB":
+				case inst == "CMP" || inst == "TEST" || inst == "ADD" || inst == "SUB":
 					// operands can be reversed, skip
 				case inst == dInst:
 					if strings.Contains(line.Assembly, "ymm") || strings.Contains(line.Assembly, "zmm") {

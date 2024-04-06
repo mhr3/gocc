@@ -9,9 +9,9 @@ TEXT ·Test_fn_4818_0(SB), NOSPLIT, $0-32
 	MOVB c+16(FP), R2
 	MOVD res+24(FP), R3
 	NOP                  // <--                                  // stp	x29, x30, [sp, #-16]!
-	WORD $0x12001c48     // ANDW $255, R2, R8                    // and	w8, w2, #0xff
+	ANDW $255, R2, R8    // <--                                  // and	w8, w2, #0xff
 	NOP                  // <--                                  // mov	x29, sp
-	WORD $0x1b007d08     // MULW R0, R8, R8                      // mul	w8, w8, w0
+	MULW R0, R8, R8      // <--                                  // mul	w8, w8, w0
 	ADD  R8.SXTW, R1, R8 // <--                                  // add	x8, x1, w8, sxtw
 	WORD $0xf9000068     // MOVD R8, (R3)                        // str	x8, [x3]
 	NOP                  // <--                                  // ldp	x29, x30, [sp], #16
@@ -27,66 +27,66 @@ TEXT ·Test_fn_111_0(SB), NOSPLIT, $0-3
 	RET              // <--                                  // ret
 
 TEXT ·Test_fn_111_1(SB), NOSPLIT, $0-9
-	MOVB a+0(FP), R0
-	MOVB b+1(FP), R1
-	MOVB c+2(FP), R2
-	NOP                // <--                                  // stp	x29, x30, [sp, #-16]!
-	NOP                // <--                                  // mov	x29, sp
-	WORD $0x1b000440   // MADDW R0, R1, R2, R0                 // madd	w0, w2, w0, w1
-	NOP                // <--                                  // ldp	x29, x30, [sp], #16
-	MOVB R0, ret+8(FP) // <--
-	RET                // <--                                  // ret
+	MOVB  a+0(FP), R0
+	MOVB  b+1(FP), R1
+	MOVB  c+2(FP), R2
+	NOP                  // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                  // <--                                  // mov	x29, sp
+	MADDW R0, R1, R2, R0 // <--                                  // madd	w0, w2, w0, w1
+	NOP                  // <--                                  // ldp	x29, x30, [sp], #16
+	MOVB  R0, ret+8(FP)  // <--
+	RET                  // <--                                  // ret
 
 TEXT ·Test_fn_1114_1(SB), NOSPLIT, $0-9
-	MOVB a+0(FP), R0
-	MOVB b+1(FP), R1
-	MOVB c+2(FP), R2
-	MOVW d+4(FP), R3
-	NOP                // <--                                  // stp	x29, x30, [sp, #-16]!
-	WORD $0x12001c48   // ANDW $255, R2, R8                    // and	w8, w2, #0xff
-	WORD $0x12001c09   // ANDW $255, R0, R9                    // and	w9, w0, #0xff
-	WORD $0x0b21006a   // ADDW R1.UXTB, R3, R10                // add	w10, w3, w1, uxtb
-	NOP                // <--                                  // mov	x29, sp
-	WORD $0x1b092900   // MADDW R9, R10, R8, R0                // madd	w0, w8, w9, w10
-	NOP                // <--                                  // ldp	x29, x30, [sp], #16
-	MOVB R0, ret+8(FP) // <--
-	RET                // <--                                  // ret
+	MOVB  a+0(FP), R0
+	MOVB  b+1(FP), R1
+	MOVB  c+2(FP), R2
+	MOVW  d+4(FP), R3
+	NOP                    // <--                                  // stp	x29, x30, [sp, #-16]!
+	ANDW  $255, R2, R8     // <--                                  // and	w8, w2, #0xff
+	ANDW  $255, R0, R9     // <--                                  // and	w9, w0, #0xff
+	ADDW  R1.UXTB, R3, R10 // <--                                  // add	w10, w3, w1, uxtb
+	NOP                    // <--                                  // mov	x29, sp
+	MADDW R9, R10, R8, R0  // <--                                  // madd	w0, w8, w9, w10
+	NOP                    // <--                                  // ldp	x29, x30, [sp], #16
+	MOVB  R0, ret+8(FP)    // <--
+	RET                    // <--                                  // ret
 
 TEXT ·Test_fn_282_2(SB), NOSPLIT, $0-26
-	MOVH a+0(FP), R0
-	MOVD b+8(FP), R1
-	MOVH c+16(FP), R2
-	NOP                 // <--                                  // stp	x29, x30, [sp, #-16]!
-	WORD $0x12003c08    // ANDW $65535, R0, R8                  // and	w8, w0, #0xffff
-	WORD $0x12003c49    // ANDW $65535, R2, R9                  // and	w9, w2, #0xffff
-	NOP                 // <--                                  // mov	x29, sp
-	WORD $0x1b080520    // MADDW R8, R1, R9, R0                 // madd	w0, w9, w8, w1
-	NOP                 // <--                                  // ldp	x29, x30, [sp], #16
-	MOVH R0, ret+24(FP) // <--
-	RET                 // <--                                  // ret
+	MOVH  a+0(FP), R0
+	MOVD  b+8(FP), R1
+	MOVH  c+16(FP), R2
+	NOP                  // <--                                  // stp	x29, x30, [sp, #-16]!
+	ANDW  $65535, R0, R8 // <--                                  // and	w8, w0, #0xffff
+	ANDW  $65535, R2, R9 // <--                                  // and	w9, w2, #0xffff
+	NOP                  // <--                                  // mov	x29, sp
+	MADDW R8, R1, R9, R0 // <--                                  // madd	w0, w9, w8, w1
+	NOP                  // <--                                  // ldp	x29, x30, [sp], #16
+	MOVH  R0, ret+24(FP) // <--
+	RET                  // <--                                  // ret
 
 TEXT ·Test_fn_481_1(SB), NOSPLIT, $0-25
-	MOVW a+0(FP), R0
-	MOVD b+8(FP), R1
-	MOVB c+16(FP), R2
-	NOP                 // <--                                  // stp	x29, x30, [sp, #-16]!
-	WORD $0x12001c48    // ANDW $255, R2, R8                    // and	w8, w2, #0xff
-	NOP                 // <--                                  // mov	x29, sp
-	WORD $0x1b000500    // MADDW R0, R1, R8, R0                 // madd	w0, w8, w0, w1
-	NOP                 // <--                                  // ldp	x29, x30, [sp], #16
-	MOVB R0, ret+24(FP) // <--
-	RET                 // <--                                  // ret
+	MOVW  a+0(FP), R0
+	MOVD  b+8(FP), R1
+	MOVB  c+16(FP), R2
+	NOP                  // <--                                  // stp	x29, x30, [sp, #-16]!
+	ANDW  $255, R2, R8   // <--                                  // and	w8, w2, #0xff
+	NOP                  // <--                                  // mov	x29, sp
+	MADDW R0, R1, R8, R0 // <--                                  // madd	w0, w8, w0, w1
+	NOP                  // <--                                  // ldp	x29, x30, [sp], #16
+	MOVB  R0, ret+24(FP) // <--
+	RET                  // <--                                  // ret
 
 TEXT ·Test_fn_444_4(SB), NOSPLIT, $0-20
-	MOVW a+0(FP), R0
-	MOVW b+4(FP), R1
-	MOVW c+8(FP), R2
-	NOP                 // <--                                  // stp	x29, x30, [sp, #-16]!
-	NOP                 // <--                                  // mov	x29, sp
-	WORD $0x1b000440    // MADDW R0, R1, R2, R0                 // madd	w0, w2, w0, w1
-	NOP                 // <--                                  // ldp	x29, x30, [sp], #16
-	MOVW R0, ret+16(FP) // <--
-	RET                 // <--                                  // ret
+	MOVW  a+0(FP), R0
+	MOVW  b+4(FP), R1
+	MOVW  c+8(FP), R2
+	NOP                  // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                  // <--                                  // mov	x29, sp
+	MADDW R0, R1, R2, R0 // <--                                  // madd	w0, w2, w0, w1
+	NOP                  // <--                                  // ldp	x29, x30, [sp], #16
+	MOVW  R0, ret+16(FP) // <--
+	RET                  // <--                                  // ret
 
 TEXT ·Test_fn_888888_8(SB), NOSPLIT, $0-56
 	MOVD a+0(FP), R0
@@ -145,11 +145,11 @@ LBB8_6:
 	ADD R10, R0, R10 // <--                                  // add	x10, x0, x10
 
 LBB8_7:
-	WORD $0xbc404540 // FMOVS.P 4(R10), F0                   // ldr	s0, [x10], #4
-	SUBS $1, R8, R8  // <--                                  // subs	x8, x8, #1
-	WORD $0x1e200800 // FMULS F0, F0, F0                     // fmul	s0, s0, s0
-	WORD $0xbc004520 // FMOVS.P F0, 4(R9)                    // str	s0, [x9], #4
-	BNE  LBB8_7      // <--                                  // b.ne	.LBB8_7
+	WORD  $0xbc404540 // FMOVS.P 4(R10), F0                   // ldr	s0, [x10], #4
+	SUBS  $1, R8, R8  // <--                                  // subs	x8, x8, #1
+	FMULS F0, F0, F0  // <--                                  // fmul	s0, s0, s0
+	WORD  $0xbc004520 // FMOVS.P F0, 4(R9)                    // str	s0, [x9], #4
+	BNE   LBB8_7      // <--                                  // b.ne	.LBB8_7
 
 LBB8_8:
 	NOP // <--                                  // ldp	x29, x30, [sp], #16
