@@ -28,6 +28,10 @@ func uint8_simd_mul_sve(input1 unsafe.Pointer, input2 unsafe.Pointer, output uns
 	panic("not implemented")
 }
 
+func uint8_simd_mul_sve_manual(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+	panic("not implemented")
+}
+
 func uint8_simd_mul_neon(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
 	panic("not implemented")
 }

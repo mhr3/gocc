@@ -130,6 +130,7 @@ func TestUintMul(t *testing.T) {
 		{"avx512", uint8_simd_mul_avx512, cpu.X86.HasAVX512F},
 		{"neon", uint8_simd_mul_neon, cpu.ARM64.HasASIMD},
 		{"sve", uint8_simd_mul_sve, cpu.ARM64.HasSVE},
+		{"sve-intrinsics", uint8_simd_mul_sve_manual, cpu.ARM64.HasSVE},
 	}
 
 	for _, sz := range []int{1, 15, 44, 100, 10000} {
@@ -182,12 +183,13 @@ func BenchmarkUintMul(b *testing.B) {
 		Fn        func(unsafe.Pointer, unsafe.Pointer, unsafe.Pointer, uint64)
 		Supported bool
 	}{
-		{"simd", uint8_simd_mul, true},
+		//{"simd", uint8_simd_mul, true},
 		{"sse", uint8_simd_mul_sse, cpu.X86.HasSSE2},
 		{"avx2", uint8_simd_mul_avx2, cpu.X86.HasAVX2},
 		{"avx512", uint8_simd_mul_avx512, cpu.X86.HasAVX512F},
 		{"neon", uint8_simd_mul_neon, cpu.ARM64.HasASIMD},
 		{"sve", uint8_simd_mul_sve, cpu.ARM64.HasSVE},
+		{"sve-intrinsics", uint8_simd_mul_sve_manual, cpu.ARM64.HasSVE},
 	}
 
 	sizes := []int{1, 15, 44, 100, 10000, 64 * 1024}
