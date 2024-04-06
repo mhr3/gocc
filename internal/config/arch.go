@@ -118,7 +118,7 @@ func Avx512() *Arch {
 
 // ARM64 returns a configuration for ARM64 architecture
 func ARM64() *Arch {
-	return &Arch{
+	arch := &Arch{
 		Name:        "arm64",
 		Attribute:   regexp.MustCompile(`^\s+\..+$`),
 		Function:    regexp.MustCompile(`^\w+:.*$`),
@@ -136,8 +136,10 @@ func ARM64() *Arch {
 		BuildTags:   "//go:build !noasm && arm64",
 		CommentCh:   "//",
 		CallOp:      map[int8]string{1: "MOVB", 2: "MOVH", 4: "MOVW", 8: "MOVD"},
-		ClangFlags:  []string{"--target=aarch64-linux-gnu"},
+		ClangFlags:  []string{"--target=aarch64-linux-gnu", "-ffixed-x18"},
 	}
+
+	return arch
 }
 
 // Neon returns a configuration for ARM64 architecture with NEON support
@@ -168,6 +170,7 @@ func Apple() *Arch {
 	arch.JumpInstr = regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`)
 
 	if runtime.GOOS != "darwin" {
+		// Cross-compiling
 		arch.ClangFlags = []string{"--target=aarch64-apple-darwin", "--sysroot=/usr/osxcross/SDK/MacOSX11.3.sdk/"}
 		return arch
 	}
