@@ -2,50 +2,50 @@
 
 #include "textflag.h"
 
-TEXT ·index_nonascii(SB),NOSPLIT,$0-24
-	MOVD data_base+0(FP), R0
-	MOVD data_len+8(FP), R1
-	MOVD $ret+16(FP), R2
-	MOVD $0, R8
+TEXT ·index_nonascii(SB), NOSPLIT, $0-24
+	MOVD  data_base+0(FP), R0
+	MOVD  data_len+8(FP), R1
+	MOVD  $ret+16(FP), R2
+	MOVD  $0, R8
 	VMOVI $128, V0.B16
 
 LBB0_1:
-	ADD $16, R8, R9
-	CMP R1, R9
-	BHI LBB0_4
-	WORD $0x3ce86801 // ldr	q1, [x0, x8]
+	ADD  $16, R8, R9
+	CMP  R1, R9
+	BHI  LBB0_4
+	WORD $0x3ce86801            // ldr	q1, [x0, x8]
 	VAND V0.B16, V1.B16, V2.B16
-	WORD $0x6e30a842 // VUMAXV V2.B16, V2
-	WORD $0x1e26004a // fmov	w10, s2
+	WORD $0x6e30a842            // VUMAXV V2.B16, V2
+	WORD $0x1e26004a            // fmov	w10, s2
 	MOVD R9, R8
-	CBZ R10, LBB0_1
-	SUB $16, R9, R8
-	WORD $0x6f07e7e0 // VMOVI $-1, V0.D2
-	WORD $0x4e203420 // VCMGT V0.B16, V1.B16, V0.B16
+	CBZ  R10, LBB0_1
+	SUB  $16, R9, R8
+	WORD $0x6f07e7e0            // VMOVI $-1, V0.D2
+	WORD $0x4e203420            // VCMGT V0.B16, V1.B16, V0.B16
 
-    VMOVQ $0x0807060504030201, $0x100F0E0D0C0B0A09, V1
-	VORR V1.B16, V0.B16, V0.B16
-	WORD $0x6e31a800 // VUMINV V0.B16, V0
-	WORD $0x1e260009 // fmov	w9, s0
-	B LBB0_7
+	VMOVQ $0x0807060504030201, $0x100F0E0D0C0B0A09, V1
+	VORR  V1.B16, V0.B16, V0.B16
+	WORD  $0x6e31a800                                  // VUMINV V0.B16, V0
+	WORD  $0x1e260009                                  // fmov	w9, s0
+	B     LBB0_7
 
 LBB0_4:
-	ORR $8, R8, R9
-	CMP R1, R9
-	BHI LBB0_10
-	WORD $0xfc686800 // ldr	d0, [x0, x8]
+	ORR   $8, R8, R9
+	CMP   R1, R9
+	BHI   LBB0_10
+	WORD  $0xfc686800         // ldr	d0, [x0, x8]
 	VMOVI $128, V1.B8
-	VAND V1.B8, V0.B8, V1.B8
-	WORD $0x2e30a821 // VUMAXV V1.B8, V1
-	WORD $0x1e26002a // fmov	w10, s1
-	CBZW R10, LBB0_9
-	WORD $0x6f07e7e1 // VMOVI $-1, V1.D2
-	WORD $0x0e213400 // VCMGT V1.B8, V0.B8, V0.B8
+	VAND  V1.B8, V0.B8, V1.B8
+	WORD  $0x2e30a821         // VUMAXV V1.B8, V1
+	WORD  $0x1e26002a         // fmov	w10, s1
+	CBZW  R10, LBB0_9
+	WORD  $0x6f07e7e1         // VMOVI $-1, V1.D2
+	WORD  $0x0e213400         // VCMGT V1.B8, V0.B8, V0.B8
 
-    VMOVD $0x0807060504030201, V1
-	VORR V1.B8, V0.B8, V0.B8
-	WORD $0x2e31a800 // VUMINV V0.B8, V0
-	WORD $0x1e260009 // fmov	w9, s0
+	VMOVD $0x0807060504030201, V1
+	VORR  V1.B8, V0.B8, V0.B8
+	WORD  $0x2e31a800             // VUMINV V0.B8, V0
+	WORD  $0x1e260009             // fmov	w9, s0
 
 LBB0_7:
 	ADD R9, R8, R8
@@ -63,11 +63,11 @@ LBB0_10:
 	BHS LBB0_13
 
 LBB0_11:
-	WORD $0x38e86809 // ldrsb	w9, [x0, x8]
+	WORD $0x38e86809     // ldrsb	w9, [x0, x8]
 	TBNZ $31, R9, LBB0_8
-	ADD $1, R8, R8
-	CMP R8, R1
-	BNE LBB0_11
+	ADD  $1, R8, R8
+	CMP  R8, R1
+	BNE  LBB0_11
 
 LBB0_13:
 	MOVD $-1, R8
