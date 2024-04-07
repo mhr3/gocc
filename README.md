@@ -9,7 +9,9 @@
 
 This utility transpiles C code to Go assembly. It uses the LLVM toolchain to compile C code to assembly and machine code and generates Go assembly from it, as well as the corresponding Go stubs. This is useful for certain features such as using intrinsics, which are not supported by the Go ecosystem.
 Generated Go assembly will try to use at little binary codes as possible, making the output more suitable
-for tuning, or to give you a starting point if there's an issue with the generated code.  
+for tuning, or to give you a starting point, but do note that not everything can be expressed in Plan9
+assembly plus the disassembly process is sometimes buggy (which is the reason why some instructions will
+still use binary).
 
 ## Features
 
@@ -21,7 +23,7 @@ for tuning, or to give you a starting point if there's an issue with the generat
 
 ## Setting up locally
 
-Before you use gocc, you need to install the LLVM toolchain. On Ubuntu, you can do it with the following commands:
+Before you use gocc, you need to install the LLVM toolchain. On Ubuntu, you can do it with the following commands (LLVM 15 was used the most during development of gocc):
 
 ```bash
 sudo apt install build-essential
