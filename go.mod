@@ -8,6 +8,7 @@ require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/imroc/req/v3 v3.42.3
 	github.com/klauspost/asmfmt v1.3.2
+	github.com/segmentio/asm v1.2.0
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.3
 	golang.org/x/arch v0.10.0
