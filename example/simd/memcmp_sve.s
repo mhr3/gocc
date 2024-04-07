@@ -10,9 +10,9 @@ TEXT ·memcmp_sve(SB), NOSPLIT, $0-56
 	MOVD y+24(FP), R3
 	MOVD y_len+32(FP), R4
 	MOVD y_cap+40(FP), R5
-	NOP                   // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                   // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	CMP  R4, R1           // <--                                  // cmp	x1, x4
-	NOP                   // <--                                  // mov	x29, sp
+	NOP                   // (skipped)                            // mov	x29, sp
 	BNE  LBB0_7           // <--                                  // b.ne	.LBB0_7
 	CBZ  R1, LBB0_5       // <--                                  // cbz	x1, .LBB0_5
 	MOVD ZR, R8           // <--                                  // mov	x8, xzr
@@ -29,7 +29,7 @@ LBB0_3:
 
 LBB0_5:
 	MOVD ZR, R0         // <--                                  // mov	x0, xzr
-	NOP                 // <--                                  // ldp	x29, x30, [sp], #16
+	NOP                 // (skipped)                            // ldp	x29, x30, [sp], #16
 	MOVD R0, ret+48(FP) // <--
 	RET                 // <--                                  // ret
 
@@ -43,6 +43,6 @@ LBB0_6:
 LBB0_7:
 	MOVD $-1, R8        // <--                                  // mov	x8, #-1
 	CNEG HS, R8, R0     // <--                                  // cneg	x0, x8, hs
-	NOP                 // <--                                  // ldp	x29, x30, [sp], #16
+	NOP                 // (skipped)                            // ldp	x29, x30, [sp], #16
 	MOVD R0, ret+48(FP) // <--
 	RET                 // <--                                  // ret

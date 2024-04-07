@@ -180,7 +180,11 @@ func (line *Line) Compile(arch *config.Arch) string {
 
 	if len(line.Binary) == 0 && line.Disassembled != "" {
 		builder.WriteString(line.Disassembled)
-		addInstructionComment(&builder, &Line{Assembly: line.Assembly, Disassembled: "<--"})
+		comment := "<--"
+		if line.Disassembled == "NOP" {
+			comment = "(skipped)"
+		}
+		addInstructionComment(&builder, &Line{Assembly: line.Assembly, Disassembled: comment})
 		builder.WriteString("\n")
 		return builder.String()
 	}

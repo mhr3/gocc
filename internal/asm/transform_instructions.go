@@ -24,7 +24,12 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 				switch {
 				case strings.Contains(line.Disassembled, "(SB)"):
 					// definitely not
-				case inst == "CMP" || inst == "TEST" || inst == "ADD" || inst == "SUB":
+				case inst == "ADD" || inst == "SUB":
+					// only some variants are ok
+					if len(dInst) == len(inst)+1 && strings.HasPrefix(dInst, inst) && strings.HasSuffix(dInst, "Q") {
+						line.Binary = nil
+					}
+				case inst == "CMP" || inst == "TEST":
 					// operands can be reversed, skip
 				case inst == dInst:
 					if strings.Contains(line.Assembly, "ymm") || strings.Contains(line.Assembly, "zmm") {
@@ -40,7 +45,7 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 					} else if strings.HasPrefix(inst, "MOVSX") || strings.HasPrefix(inst, "MOVZX") {
 						break
 					}
-					// we'll trust the disassembler
+					// otherwise trust the disassembler
 					line.Binary = nil
 				case inst == "MOV" && strings.HasPrefix(dInst, "MOV"):
 					// we'll trust the disassembler

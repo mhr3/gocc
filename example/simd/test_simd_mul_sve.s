@@ -8,8 +8,8 @@ TEXT ·uint8_simd_mul_sve_manual(SB), NOSPLIT, $0-32
 	MOVD input2+8(FP), R1
 	MOVD output+16(FP), R2
 	MOVD size+24(FP), R3
-	NOP                    // <--                                  // stp	x29, x30, [sp, #-16]!
-	NOP                    // <--                                  // mov	x29, sp
+	NOP                    // (skipped)                            // stp	x29, x30, [sp, #-16]!
+	NOP                    // (skipped)                            // mov	x29, sp
 	CBZ  R3, LBB0_3        // <--                                  // cbz	x3, .LBB0_3
 	MOVD ZR, R8            // <--                                  // mov	x8, xzr
 	WORD $0x04bf5029       // ?                                    // rdvl	x9, #1
@@ -25,5 +25,5 @@ LBB0_2:
 	BCC  LBB0_2      // <--                                  // b.lo	.LBB0_2
 
 LBB0_3:
-	NOP // <--                                  // ldp	x29, x30, [sp], #16
+	NOP // (skipped)                            // ldp	x29, x30, [sp], #16
 	RET // <--                                  // ret

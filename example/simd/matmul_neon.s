@@ -8,9 +8,9 @@ TEXT ·f32_axpy(SB), NOSPLIT, $0-28
 	MOVD y+8(FP), R1
 	MOVD size+16(FP), R2
 	MOVW alpha+24(FP), R3
-	NOP                   // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                   // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	CMP  $4, R2           // <--                                  // cmp	x2, #4
-	NOP                   // <--                                  // mov	x29, sp
+	NOP                   // (skipped)                            // mov	x29, sp
 	BCC  LBB0_3           // <--                                  // b.lo	.LBB0_3
 	MOVW $3, R8           // <--                                  // mov	w8, #3
 	MOVD R0, R9           // <--                                  // mov	x9, x0
@@ -46,7 +46,7 @@ LBB0_6:
 	BNE    LBB0_6         // <--                                  // b.ne	.LBB0_6
 
 LBB0_7:
-	NOP // <--                                  // ldp	x29, x30, [sp], #16
+	NOP // (skipped)                            // ldp	x29, x30, [sp], #16
 	RET // <--                                  // ret
 
 TEXT ·f32_matmul(SB), NOSPLIT, $0-32
@@ -54,9 +54,9 @@ TEXT ·f32_matmul(SB), NOSPLIT, $0-32
 	MOVD  m+8(FP), R1
 	MOVD  n+16(FP), R2
 	MOVD  dims+24(FP), R3
-	NOP                        // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                        // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	ANDS  $65535, R3, R8       // <--                                  // ands	x8, x3, #0xffff
-	NOP                        // <--                                  // mov	x29, sp
+	NOP                        // (skipped)                            // mov	x29, sp
 	BEQ   LBB1_25              // <--                                  // b.eq	.LBB1_25
 	LSR   $48, R3, R10         // <--                                  // lsr	x10, x3, #48
 	TST   $844424930131968, R3 // <--                                  // tst	x3, #0x3000000000000
@@ -186,5 +186,5 @@ LBB1_22:
 	BNE  LBB1_20       // <--                                  // b.ne	.LBB1_20
 
 LBB1_25:
-	NOP // <--                                  // ldp	x29, x30, [sp], #16
+	NOP // (skipped)                            // ldp	x29, x30, [sp], #16
 	RET // <--                                  // ret

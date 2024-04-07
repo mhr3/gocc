@@ -8,32 +8,32 @@ TEXT ·Test_fn_4818_0(SB), NOSPLIT, $0-32
 	MOVD b+8(FP), R1
 	MOVB c+16(FP), R2
 	MOVD res+24(FP), R3
-	NOP                  // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                  // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	ANDW $255, R2, R8    // <--                                  // and	w8, w2, #0xff
-	NOP                  // <--                                  // mov	x29, sp
+	NOP                  // (skipped)                            // mov	x29, sp
 	MULW R0, R8, R8      // <--                                  // mul	w8, w8, w0
 	ADD  R8.SXTW, R1, R8 // <--                                  // add	x8, x1, w8, sxtw
 	WORD $0xf9000068     // MOVD R8, (R3)                        // str	x8, [x3]
-	NOP                  // <--                                  // ldp	x29, x30, [sp], #16
+	NOP                  // (skipped)                            // ldp	x29, x30, [sp], #16
 	RET                  // <--                                  // ret
 
 TEXT ·Test_fn_111_0(SB), NOSPLIT, $0-3
 	MOVB a+0(FP), R0
 	MOVB b+1(FP), R1
 	MOVB c+2(FP), R2
-	NOP              // <--                                  // stp	x29, x30, [sp, #-16]!
-	NOP              // <--                                  // mov	x29, sp
-	NOP              // <--                                  // ldp	x29, x30, [sp], #16
+	NOP              // (skipped)                            // stp	x29, x30, [sp, #-16]!
+	NOP              // (skipped)                            // mov	x29, sp
+	NOP              // (skipped)                            // ldp	x29, x30, [sp], #16
 	RET              // <--                                  // ret
 
 TEXT ·Test_fn_111_1(SB), NOSPLIT, $0-9
 	MOVB  a+0(FP), R0
 	MOVB  b+1(FP), R1
 	MOVB  c+2(FP), R2
-	NOP                  // <--                                  // stp	x29, x30, [sp, #-16]!
-	NOP                  // <--                                  // mov	x29, sp
+	NOP                  // (skipped)                            // stp	x29, x30, [sp, #-16]!
+	NOP                  // (skipped)                            // mov	x29, sp
 	MADDW R0, R1, R2, R0 // <--                                  // madd	w0, w2, w0, w1
-	NOP                  // <--                                  // ldp	x29, x30, [sp], #16
+	NOP                  // (skipped)                            // ldp	x29, x30, [sp], #16
 	MOVB  R0, ret+8(FP)  // <--
 	RET                  // <--                                  // ret
 
@@ -42,13 +42,13 @@ TEXT ·Test_fn_1114_1(SB), NOSPLIT, $0-9
 	MOVB  b+1(FP), R1
 	MOVB  c+2(FP), R2
 	MOVW  d+4(FP), R3
-	NOP                    // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                    // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	ANDW  $255, R2, R8     // <--                                  // and	w8, w2, #0xff
 	ANDW  $255, R0, R9     // <--                                  // and	w9, w0, #0xff
 	ADDW  R1.UXTB, R3, R10 // <--                                  // add	w10, w3, w1, uxtb
-	NOP                    // <--                                  // mov	x29, sp
+	NOP                    // (skipped)                            // mov	x29, sp
 	MADDW R9, R10, R8, R0  // <--                                  // madd	w0, w8, w9, w10
-	NOP                    // <--                                  // ldp	x29, x30, [sp], #16
+	NOP                    // (skipped)                            // ldp	x29, x30, [sp], #16
 	MOVB  R0, ret+8(FP)    // <--
 	RET                    // <--                                  // ret
 
@@ -56,12 +56,12 @@ TEXT ·Test_fn_282_2(SB), NOSPLIT, $0-26
 	MOVH  a+0(FP), R0
 	MOVD  b+8(FP), R1
 	MOVH  c+16(FP), R2
-	NOP                  // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                  // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	ANDW  $65535, R0, R8 // <--                                  // and	w8, w0, #0xffff
 	ANDW  $65535, R2, R9 // <--                                  // and	w9, w2, #0xffff
-	NOP                  // <--                                  // mov	x29, sp
+	NOP                  // (skipped)                            // mov	x29, sp
 	MADDW R8, R1, R9, R0 // <--                                  // madd	w0, w9, w8, w1
-	NOP                  // <--                                  // ldp	x29, x30, [sp], #16
+	NOP                  // (skipped)                            // ldp	x29, x30, [sp], #16
 	MOVH  R0, ret+24(FP) // <--
 	RET                  // <--                                  // ret
 
@@ -69,11 +69,11 @@ TEXT ·Test_fn_481_1(SB), NOSPLIT, $0-25
 	MOVW  a+0(FP), R0
 	MOVD  b+8(FP), R1
 	MOVB  c+16(FP), R2
-	NOP                  // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                  // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	ANDW  $255, R2, R8   // <--                                  // and	w8, w2, #0xff
-	NOP                  // <--                                  // mov	x29, sp
+	NOP                  // (skipped)                            // mov	x29, sp
 	MADDW R0, R1, R8, R0 // <--                                  // madd	w0, w8, w0, w1
-	NOP                  // <--                                  // ldp	x29, x30, [sp], #16
+	NOP                  // (skipped)                            // ldp	x29, x30, [sp], #16
 	MOVB  R0, ret+24(FP) // <--
 	RET                  // <--                                  // ret
 
@@ -81,10 +81,10 @@ TEXT ·Test_fn_444_4(SB), NOSPLIT, $0-20
 	MOVW  a+0(FP), R0
 	MOVW  b+4(FP), R1
 	MOVW  c+8(FP), R2
-	NOP                  // <--                                  // stp	x29, x30, [sp, #-16]!
-	NOP                  // <--                                  // mov	x29, sp
+	NOP                  // (skipped)                            // stp	x29, x30, [sp, #-16]!
+	NOP                  // (skipped)                            // mov	x29, sp
 	MADDW R0, R1, R2, R0 // <--                                  // madd	w0, w2, w0, w1
-	NOP                  // <--                                  // ldp	x29, x30, [sp], #16
+	NOP                  // (skipped)                            // ldp	x29, x30, [sp], #16
 	MOVW  R0, ret+16(FP) // <--
 	RET                  // <--                                  // ret
 
@@ -95,12 +95,12 @@ TEXT ·Test_fn_888888_8(SB), NOSPLIT, $0-56
 	MOVD d+24(FP), R3
 	MOVD e+32(FP), R4
 	MOVD f+40(FP), R5
-	NOP                 // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                 // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	MADD R0, R1, R2, R8 // <--                                  // madd	x8, x2, x0, x1
-	NOP                 // <--                                  // mov	x29, sp
+	NOP                 // (skipped)                            // mov	x29, sp
 	ADD  R4, R8, R8     // <--                                  // add	x8, x8, x4
 	MADD R3, R8, R5, R0 // <--                                  // madd	x0, x5, x3, x8
-	NOP                 // <--                                  // ldp	x29, x30, [sp], #16
+	NOP                 // (skipped)                            // ldp	x29, x30, [sp], #16
 	MOVD R0, ret+48(FP) // <--
 	RET                 // <--                                  // ret
 
@@ -111,9 +111,9 @@ TEXT ·Test_fn_sq_floats(SB), NOSPLIT, $0-48
 	MOVD output+24(FP), R3
 	MOVD output_len+32(FP), R4
 	MOVD output_cap+40(FP), R5
-	NOP                        // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                        // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	CMP  $1, R1                // <--                                  // cmp	x1, #1
-	NOP                        // <--                                  // mov	x29, sp
+	NOP                        // (skipped)                            // mov	x29, sp
 	BLT  LBB8_8                // <--                                  // b.lt	.LBB8_8
 	MOVD ZR, R8                // <--                                  // mov	x8, xzr
 	CMP  $8, R1                // <--                                  // cmp	x1, #8
@@ -152,5 +152,5 @@ LBB8_7:
 	BNE   LBB8_7      // <--                                  // b.ne	.LBB8_7
 
 LBB8_8:
-	NOP // <--                                  // ldp	x29, x30, [sp], #16
+	NOP // (skipped)                            // ldp	x29, x30, [sp], #16
 	RET // <--                                  // ret

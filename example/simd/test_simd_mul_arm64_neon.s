@@ -8,9 +8,9 @@ TEXT ·uint8_simd_mul_neon(SB), NOSPLIT, $0-32
 	MOVD input2+8(FP), R1
 	MOVD output+16(FP), R2
 	MOVD size+24(FP), R3
-	NOP                      // <--                                  // stp	x29, x30, [sp, #-16]!
+	NOP                      // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	CMPW $1, R3              // <--                                  // cmp	w3, #1
-	NOP                      // <--                                  // mov	x29, sp
+	NOP                      // (skipped)                            // mov	x29, sp
 	BLT  LBB0_5              // <--                                  // b.lt	.LBB0_5
 	AND  $4294967295, R3, R8 // <--                                  // and	x8, x3, #0xffffffff
 	CMP  $8, R8              // <--                                  // cmp	x8, #8
@@ -32,7 +32,7 @@ LBB0_4:
 	BNE  LBB0_4      // <--                                  // b.ne	.LBB0_4
 
 LBB0_5:
-	NOP // <--                                  // ldp	x29, x30, [sp], #16
+	NOP // (skipped)                            // ldp	x29, x30, [sp], #16
 	RET // <--                                  // ret
 
 LBB0_6:
