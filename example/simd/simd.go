@@ -4,16 +4,15 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"runtime"
 	"unsafe"
 
-	"github.com/klauspost/cpuid/v2"
+	"golang.org/x/sys/cpu"
 )
 
 var (
-	avx2     = cpuid.CPU.Supports(cpuid.AVX2) && cpuid.CPU.Supports(cpuid.FMA3)
-	neon     = runtime.GOARCH == "arm64" && cpuid.CPU.Supports(cpuid.ASIMD)
-	hardware = avx2 || neon
+	avx2           = cpu.X86.HasAVX2 && cpu.X86.HasFMA
+	neon           = cpu.ARM64.HasASIMD
+	useAccelerated = avx2 || neon
 )
 
 var (
@@ -25,7 +24,7 @@ var (
 // Matmul multiplies matrix M by N and writes the result into dst
 func Matmul(dst, m, n *Matrix) {
 	switch {
-	case hardware:
+	case useAccelerated:
 		f32_matmul(unsafe.Pointer(&dst.Data[0]), unsafe.Pointer(&m.Data[0]), unsafe.Pointer(&n.Data[0]),
 			dimensionsOf(m.Rows, m.Cols, n.Rows, n.Cols),
 		)

@@ -1,7 +1,9 @@
 package simd
 
 import (
+	"bytes"
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 	"unsafe"
@@ -94,6 +96,10 @@ func TestMatmulNative(t *testing.T) {
 	y := []float32{5, 6, 7, 8}
 	o := make([]float32, 4)
 
+	if !useAccelerated {
+		t.Skip("hardware acceleration is not available")
+	}
+
 	f32_matmul(
 		unsafe.Pointer(&o[0]), unsafe.Pointer(&x[0]), unsafe.Pointer(&y[0]),
 		dimensionsOf(2, 2, 2, 2),
@@ -146,6 +152,30 @@ func TestUintMul(t *testing.T) {
 				checkResult(input1, input2, dst)
 			})
 		}
+	}
+}
+
+func TestMemcmp(t *testing.T) {
+	sizes := []int{1, 15, 44, 100, 10000, 64 * 1024}
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("%d", size), func(t *testing.T) {
+			if !cpu.ARM64.HasSVE {
+				t.Skip("SVE not supported")
+			}
+			input1, input2, _ := prepareTestUint8Input(size)
+
+			resSve := memcmp_sve(input1, input2)
+			resGo := bytes.Compare(input1, input2)
+
+			assert.Equal(t, resGo, resSve)
+
+			input1[rand.Intn(size)] = byte(rand.Int())
+
+			resSve = memcmp_sve(input1, input2)
+			resGo = bytes.Compare(input1, input2)
+
+			assert.Equal(t, resGo, resSve)
+		})
 	}
 }
 
@@ -219,5 +249,33 @@ func BenchmarkUintMul(b *testing.B) {
 				b.ReportMetric(float64(b.N*size)/float64(time.Since(startTime).Microseconds()), "MB/s")
 			})
 		}
+	}
+}
+
+func BenchmarkMemcpy(b *testing.B) {
+	sizes := []int{1, 15, 44, 100, 10000, 64 * 1024}
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("go-%d", size), func(b *testing.B) {
+			input1, input2, _ := prepareTestUint8Input(size)
+
+			startTime := time.Now()
+			for i := 0; i < b.N; i++ {
+				bytes.Compare(input1, input2)
+			}
+			b.ReportMetric(float64(b.N*size)/float64(time.Since(startTime).Microseconds()), "MB/s")
+		})
+
+		b.Run(fmt.Sprintf("sve-%d", size), func(b *testing.B) {
+			if !cpu.ARM64.HasSVE {
+				b.Skip("SVE not supported")
+			}
+			input1, input2, _ := prepareTestUint8Input(size)
+
+			startTime := time.Now()
+			for i := 0; i < b.N; i++ {
+				memcmp_sve(input1, input2)
+			}
+			b.ReportMetric(float64(b.N*size)/float64(time.Since(startTime).Microseconds()), "MB/s")
+		})
 	}
 }
