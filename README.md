@@ -7,36 +7,21 @@
 
 ## GOCC: Compile C to Go Assembly
 
-This utility transpiles C code to Go assembly. It uses the LLVM toolchain to compile C code to assembly and machine code and generates Go assembly from it, as well as the corresponding Go stubs. This is useful for certain features such as using intrinsics, which are not supported by the Go ecosystem. The example folder includes matrix multiplication using intrinsics compiled to ARM Linux, x86_x64 and Apple Silicon.
+This utility transpiles C code to Go assembly. It uses the LLVM toolchain to compile C code to assembly and machine code and generates Go assembly from it, as well as the corresponding Go stubs. This is useful for certain features such as using intrinsics, which are not supported by the Go ecosystem.
+Generated Go assembly will try to use at little binary codes as possible, making the output more suitable
+for tuning, or to give you a starting point if there's an issue with the generated code.  
 
 ## Features
 
-- Remote compilation using a docker container with all toolchains (including Apple Silicon) pre-installed.
 - Only requires `clang` and `objdump` to be installed in order to compile.
 - Auto-detects the appropriate version of `clang` and `objdump` to use.
 - Supports cross-compilation.
 - Auto-generates Go stubs for the C functions by parsing C code.
 - Automatically formats go assembly using `asmfmt`.
 
-## Using Remotely (default)
-
-The easiest way to use this tool is to use it remotely. This will use a docker container with all the toolchains pre-installed. This is the default mode of operation and requires no additional setup. The only requirement is to have `go` installed on your machine.
-
-First, we need to install `gocc` command-line tool. This will install the `gocc` command in your `$GOPATH/bin` folder, or `$GOBIN`. Make sure to add it to your `$PATH` variable as well.
-
-```
-go install github.com/kelindar/gocc/cmd/gocc@latest
-```
-
-Next, you can use it to compile your C code to Go assembly. For example, to compile the `matmul_avx2.c` file, you can run the following command:
-
-```bash
-gocc matmul_avx2.c --arch avx2
-```
-
 ## Setting up locally
 
-Before you use it, you need to install the LLVM toolchain. On Ubuntu, you can do it with the following commands:
+Before you use gocc, you need to install the LLVM toolchain. On Ubuntu, you can do it with the following commands:
 
 ```bash
 sudo apt install build-essential
@@ -49,14 +34,24 @@ For cross-compilation you will also need to install the appropriate toolchain. F
 sudo apt install -qy binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 ```
 
+On macOS, you'll need to install Xcode, which includes clang and other build essentials:
+
+```bash
+xcode-select --install
+```
+
+The `example` folder includes matrix multiplication using intrinsics compiled for amd64 and arm64, as well
+as an example that only uses clang's auto-vectorization. See the `example/gen.sh` script to see how gocc
+can be invoked.
+
 ## Limitations
 
 This tool does not support most of the C features, it's not a replacement for C/Go. If you are using this for production code, make sure to test the generated code thoroughly. Also, this is not meant to be general-purpose tool, but rather a tool for solving my own problems of speeding up certain routines.
 
 - Only supports C code that can be compiled by `clang`.
 - Does not support C++ code or templates for now.
-- Does not support call statements, thus require you to inline your C functions
-- Currently limited to 4 arguments per function and must be 64-bit.
+- Does not support call statements, thus requires you to inline your C functions
+- Currently limited to 6 arguments per function.
 
 ## Resources
 
