@@ -1,6 +1,7 @@
 package gocc
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,6 +59,7 @@ func NewRemote(target string, source, outputDir, packageName string, options ...
 
 // Translate translates the source file to Go assembly
 func (t *Remote) Translate() error {
+	return errors.New("remote backend is not supported")
 	if _, err := cc.Parse(t.Source); err != nil {
 		return err
 	}
