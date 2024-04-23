@@ -62,7 +62,7 @@ func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
 		} else if arch.DataLoad != nil && arch.DataLoad.MatchString(combined) {
 			reParams := getRegexpParams(arch.DataLoad, combined)
 			// FIXME: this is extremely fragile
-			op := arch.CallOp[8]
+			op := arch.MovInstr[8]
 			register := reParams["register"]
 			symbol := reParams["var"]
 			addrMode := "$" // absolute addressing
@@ -135,7 +135,7 @@ func storeReturnValue(arch *config.Arch, function Function) Function {
 	}
 
 	offset, _ := function.ParamsSize(arch)
-	op, ok := arch.CallOp[int8(function.Ret.Size())]
+	op, ok := arch.MovInstr[int8(function.Ret.Size())]
 	if !ok {
 		panic(fmt.Errorf("unable to store return value with size %d", function.Ret.Size()))
 	}

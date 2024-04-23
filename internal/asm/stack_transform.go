@@ -132,7 +132,7 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 			if strings.HasPrefix(asm, "push") {
 				// rewrite to moves and hope they're not dynamic
 				parts := strings.Fields(line.Disassembled)
-				instr := fmt.Sprintf("%s %s, %d(SP)", arch.CallOp[8], parts[1], pushOffset)
+				instr := fmt.Sprintf("%s %s, %d(SP)", arch.MovInstr[8], parts[1], pushOffset)
 				pushOffset += 8
 				if pushOffset > maxOffset {
 					maxOffset = pushOffset
@@ -146,7 +146,7 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 			if strings.HasPrefix(asm, "pop") {
 				parts := strings.Fields(line.Disassembled)
 				pushOffset -= 8
-				instr := fmt.Sprintf("%s %d(SP), %s", arch.CallOp[8], pushOffset, parts[1])
+				instr := fmt.Sprintf("%s %d(SP), %s", arch.MovInstr[8], pushOffset, parts[1])
 				if pushOffset < pushOffsetStart {
 					panic("unable to rewrite push/pop instructions")
 				}

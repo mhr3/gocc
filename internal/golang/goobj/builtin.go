@@ -30,7 +30,7 @@ func BuiltinIdx(name string, abi int) int {
 	return i
 }
 
-//go:generate go run mkbuiltin.go
+// DISABLED!!! //go:generate go run mkbuiltin.go
 
 var builtinMap map[string]int
 

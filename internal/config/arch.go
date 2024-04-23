@@ -38,7 +38,8 @@ type Arch struct {
 	RetRegister  string          // Register for return values
 	BuildTags    string          // Golang build tags
 	CommentCh    string          // Assembly comment character
-	CallOp       map[int8]string // Call instruction to use to move the params onto the stack
+	MovInstr     map[int8]string // Instruction to use to load/store for various sizes
+	LoadInstr    map[int8]string // Instruction for loading registers (optional)
 	Disassembler []string        // Disassembler to use and flags
 	ClangFlags   []string        // Flags for clang
 }
@@ -88,7 +89,8 @@ func AMD64() *Arch {
 		RetRegister: "AX",
 		BuildTags:   "//go:build !noasm && amd64",
 		CommentCh:   "#",
-		CallOp:      map[int8]string{1: "MOVB", 2: "MOVW", 4: "MOVL", 8: "MOVQ"},
+		MovInstr:    map[int8]string{1: "MOVB", 2: "MOVW", 4: "MOVL", 8: "MOVQ"},
+		LoadInstr:   map[int8]string{1: "MOVBQZX", 2: "MOVWQZX", 4: "MOVLQZX", 8: "MOVQ"},
 		ClangFlags:  []string{"--target=x86_64-linux-gnu", "-masm=intel"},
 		//Disassembler: []string{"--insn-width", "16"},
 	}
@@ -137,7 +139,7 @@ func ARM64() *Arch {
 		RetRegister: "R0",
 		BuildTags:   "//go:build !noasm && arm64",
 		CommentCh:   "//",
-		CallOp:      map[int8]string{1: "MOVB", 2: "MOVH", 4: "MOVW", 8: "MOVD"},
+		MovInstr:    map[int8]string{1: "MOVB", 2: "MOVH", 4: "MOVW", 8: "MOVD"},
 		ClangFlags:  []string{"--target=aarch64-linux-gnu", "-ffixed-x18", "-ffixed-x27", "-ffixed-x28"},
 	}
 
