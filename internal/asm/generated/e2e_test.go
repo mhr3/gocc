@@ -32,6 +32,18 @@ func TestInt32RetFn(t *testing.T) {
 	assert.EqualValues(t, 38, res)
 }
 
+func TestIntFloatMixedFn(t *testing.T) {
+	res := generated.Test_fn_44F4F8_4(3, 2, 12, 4)
+
+	assert.EqualValues(t, 42, res)
+}
+
+func TestDoubleRetFn(t *testing.T) {
+	res := generated.Test_fn_F4F4F8_F8(3, 2, 12)
+
+	assert.EqualValues(t, 38, res)
+}
+
 func TestManyParamsFn(t *testing.T) {
 	res := generated.Test_fn_888888_8(3, 2, 12, 4, 9, 13)
 

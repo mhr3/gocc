@@ -88,6 +88,36 @@ TEXT ·Test_fn_444_4(SB), NOSPLIT, $0-20
 	MOVW  R0, ret+16(FP) // <--
 	RET                  // <--                                  // ret
 
+TEXT ·Test_fn_44F4F8_4(SB), NOSPLIT, $0-28
+	MOVW   a+0(FP), R0
+	MOVW   b+4(FP), R1
+	FMOVS  c+8(FP), F0
+	FMOVD  d+16(FP), F1
+	NOP                   // (skipped)                            // stp	x29, x30, [sp, #-16]!
+	WORD   $0x1e220002    // SCVTFWS R0, F2                       // scvtf	s2, w0
+	WORD   $0x1e220023    // SCVTFWS R1, F3                       // scvtf	s3, w1
+	NOP                   // (skipped)                            // mov	x29, sp
+	FMADDS F0, F3, F2, F0 // <--                                  // fmadd	s0, s2, s0, s3
+	WORD   $0x1e22c000    // FCVTSD F0, F0                        // fcvt	d0, s0
+	FADDD  F1, F0, F0     // <--                                  // fadd	d0, d0, d1
+	WORD   $0x1e780000    // FCVTZSDW F0, R0                      // fcvtzs	w0, d0
+	NOP                   // (skipped)                            // ldp	x29, x30, [sp], #16
+	MOVW   R0, ret+24(FP) // <--
+	RET                   // <--                                  // ret
+
+TEXT ·Test_fn_F4F4F8_F8(SB), NOSPLIT, $0-24
+	FMOVS  a+0(FP), F0
+	FMOVS  b+4(FP), F1
+	FMOVD  c+8(FP), F2
+	NOP                   // (skipped)                            // stp	x29, x30, [sp, #-16]!
+	WORD   $0x1e22c000    // FCVTSD F0, F0                        // fcvt	d0, s0
+	WORD   $0x1e22c021    // FCVTSD F1, F1                        // fcvt	d1, s1
+	NOP                   // (skipped)                            // mov	x29, sp
+	FMADDD F2, F1, F0, F0 // <--                                  // fmadd	d0, d0, d2, d1
+	NOP                   // (skipped)                            // ldp	x29, x30, [sp], #16
+	FMOVD  F0, ret+16(FP) // <--
+	RET                   // <--                                  // ret
+
 TEXT ·Test_fn_888888_8(SB), NOSPLIT, $0-56
 	MOVD a+0(FP), R0
 	MOVD b+8(FP), R1
@@ -114,19 +144,19 @@ TEXT ·Test_fn_sq_floats(SB), NOSPLIT, $0-48
 	NOP                        // (skipped)                            // stp	x29, x30, [sp, #-16]!
 	CMP  $1, R1                // <--                                  // cmp	x1, #1
 	NOP                        // (skipped)                            // mov	x29, sp
-	BLT  LBB8_8                // <--                                  // b.lt	.LBB8_8
+	BLT  LBB10_8               // <--                                  // b.lt	.LBB10_8
 	MOVD ZR, R8                // <--                                  // mov	x8, xzr
 	CMP  $8, R1                // <--                                  // cmp	x1, #8
-	BCC  LBB8_6                // <--                                  // b.lo	.LBB8_6
+	BCC  LBB10_6               // <--                                  // b.lo	.LBB10_6
 	SUB  R0, R3, R9            // <--                                  // sub	x9, x3, x0
 	CMP  $32, R9               // <--                                  // cmp	x9, #32
-	BCC  LBB8_6                // <--                                  // b.lo	.LBB8_6
+	BCC  LBB10_6               // <--                                  // b.lo	.LBB10_6
 	AND  $-8, R1, R8           // <--                                  // and	x8, x1, #0xfffffffffffffff8
 	ADD  $16, R0, R9           // <--                                  // add	x9, x0, #16
 	ADD  $16, R3, R10          // <--                                  // add	x10, x3, #16
 	MOVD R8, R11               // <--                                  // mov	x11, x8
 
-LBB8_4:
+LBB10_4:
 	WORD $0xad7f8520   // FLDPQ -16(R9), (F0, F1)              // ldp	q0, q1, [x9, #-16]
 	ADD  $32, R9, R9   // <--                                  // add	x9, x9, #32
 	SUBS $8, R11, R11  // <--                                  // subs	x11, x11, #8
@@ -134,23 +164,23 @@ LBB8_4:
 	WORD $0x6e21dc21   // FMUL V1.S4, V1.S4, V1.S4             // fmul	v1.4s, v1.4s, v1.4s
 	WORD $0xad3f8540   // FSTPQ (F0, F1), -16(R10)             // stp	q0, q1, [x10, #-16]
 	ADD  $32, R10, R10 // <--                                  // add	x10, x10, #32
-	BNE  LBB8_4        // <--                                  // b.ne	.LBB8_4
+	BNE  LBB10_4       // <--                                  // b.ne	.LBB10_4
 	CMP  R1, R8        // <--                                  // cmp	x8, x1
-	BEQ  LBB8_8        // <--                                  // b.eq	.LBB8_8
+	BEQ  LBB10_8       // <--                                  // b.eq	.LBB10_8
 
-LBB8_6:
+LBB10_6:
 	LSL $2, R8, R10  // <--                                  // lsl	x10, x8, #2
 	SUB R8, R1, R8   // <--                                  // sub	x8, x1, x8
 	ADD R10, R3, R9  // <--                                  // add	x9, x3, x10
 	ADD R10, R0, R10 // <--                                  // add	x10, x0, x10
 
-LBB8_7:
+LBB10_7:
 	WORD  $0xbc404540 // FMOVS.P 4(R10), F0                   // ldr	s0, [x10], #4
 	SUBS  $1, R8, R8  // <--                                  // subs	x8, x8, #1
 	FMULS F0, F0, F0  // <--                                  // fmul	s0, s0, s0
 	WORD  $0xbc004520 // FMOVS.P F0, 4(R9)                    // str	s0, [x9], #4
-	BNE   LBB8_7      // <--                                  // b.ne	.LBB8_7
+	BNE   LBB10_7     // <--                                  // b.ne	.LBB10_7
 
-LBB8_8:
+LBB10_8:
 	NOP // (skipped)                            // ldp	x29, x30, [sp], #16
 	RET // <--                                  // ret

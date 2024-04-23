@@ -24,6 +24,8 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 				switch {
 				case strings.Contains(line.Disassembled, "(SB)"):
 					// definitely not
+				case strings.HasPrefix(inst, "CVT"):
+					// nope
 				case inst == "ADD" || inst == "SUB":
 					// only some variants are ok
 					if len(dInst) == len(inst)+1 && strings.HasPrefix(dInst, inst) && strings.HasSuffix(dInst, "Q") {

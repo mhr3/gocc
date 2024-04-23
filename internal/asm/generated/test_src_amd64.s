@@ -4,104 +4,142 @@
 #include "textflag.h"
 
 TEXT ·Test_fn_4818_0(SB), NOSPLIT, $0-32
-	MOVL  a+0(FP), DI
-	MOVQ  b+8(FP), SI
-	MOVB  c+16(FP), DX
-	MOVQ  res+24(FP), CX
-	NOP                       // (skipped)                            // push	rbp
-	NOP                       // (skipped)                            // mov	rbp, rsp
-	NOP                       // (skipped)                            // and	rsp, -8
-	IMULL DX, DI              // <--                                  // imul	edi, edx
-	WORD  $0x6348; BYTE $0xc7 // MOVSXD DI, AX                        // movsxd	rax, edi
-	ADDQ  SI, AX              // <--                                  // add	rax, rsi
-	MOVQ  AX, 0(CX)           // <--                                  // mov	qword ptr [rcx], rax
-	NOP                       // (skipped)                            // mov	rsp, rbp
-	NOP                       // (skipped)                            // pop	rbp
-	RET                       // <--                                  // ret
+	MOVLQZX a+0(FP), DI
+	MOVQ    b+8(FP), SI
+	MOVBQZX c+16(FP), DX
+	MOVQ    res+24(FP), CX
+	NOP                         // (skipped)                            // push	rbp
+	NOP                         // (skipped)                            // mov	rbp, rsp
+	NOP                         // (skipped)                            // and	rsp, -8
+	IMULL   DX, DI              // <--                                  // imul	edi, edx
+	WORD    $0x6348; BYTE $0xc7 // MOVSXD DI, AX                        // movsxd	rax, edi
+	ADDQ    SI, AX              // <--                                  // add	rax, rsi
+	MOVQ    AX, 0(CX)           // <--                                  // mov	qword ptr [rcx], rax
+	NOP                         // (skipped)                            // mov	rsp, rbp
+	NOP                         // (skipped)                            // pop	rbp
+	RET                         // <--                                  // ret
 
 TEXT ·Test_fn_111_0(SB), NOSPLIT, $0-3
-	MOVB a+0(FP), DI
-	MOVB b+1(FP), SI
-	MOVB c+2(FP), DX
-	NOP              // (skipped)                            // push	rbp
-	NOP              // (skipped)                            // mov	rbp, rsp
-	NOP              // (skipped)                            // and	rsp, -8
-	NOP              // (skipped)                            // mov	rsp, rbp
-	NOP              // (skipped)                            // pop	rbp
-	RET              // <--                                  // ret
+	MOVBQZX a+0(FP), DI
+	MOVBQZX b+1(FP), SI
+	MOVBQZX c+2(FP), DX
+	NOP                 // (skipped)                            // push	rbp
+	NOP                 // (skipped)                            // mov	rbp, rsp
+	NOP                 // (skipped)                            // and	rsp, -8
+	NOP                 // (skipped)                            // mov	rsp, rbp
+	NOP                 // (skipped)                            // pop	rbp
+	RET                 // <--                                  // ret
 
 TEXT ·Test_fn_111_1(SB), NOSPLIT, $0-9
-	MOVB a+0(FP), DI
-	MOVB b+1(FP), SI
-	MOVB c+2(FP), DX
-	NOP                      // (skipped)                            // push	rbp
-	NOP                      // (skipped)                            // mov	rbp, rsp
-	NOP                      // (skipped)                            // and	rsp, -8
-	MOVL DX, AX              // <--                                  // mov	eax, edx
-	MULL DI                  // <--                                  // mul	dil
-	WORD $0x0040; BYTE $0xf0 // ADDL SI, AL                          // add	al, sil
-	NOP                      // (skipped)                            // mov	rsp, rbp
-	NOP                      // (skipped)                            // pop	rbp
-	MOVB AX, ret+8(FP)       // <--
-	RET                      // <--                                  // ret
+	MOVBQZX a+0(FP), DI
+	MOVBQZX b+1(FP), SI
+	MOVBQZX c+2(FP), DX
+	NOP                         // (skipped)                            // push	rbp
+	NOP                         // (skipped)                            // mov	rbp, rsp
+	NOP                         // (skipped)                            // and	rsp, -8
+	MOVL    DX, AX              // <--                                  // mov	eax, edx
+	MULL    DI                  // <--                                  // mul	dil
+	WORD    $0x0040; BYTE $0xf0 // ADDL SI, AL                          // add	al, sil
+	NOP                         // (skipped)                            // mov	rsp, rbp
+	NOP                         // (skipped)                            // pop	rbp
+	MOVB    AX, ret+8(FP)       // <--
+	RET                         // <--                                  // ret
 
 TEXT ·Test_fn_1114_1(SB), NOSPLIT, $0-9
-	MOVB  a+0(FP), DI
-	MOVB  b+1(FP), SI
-	MOVB  c+2(FP), DX
-	MOVL  d+4(FP), CX
-	NOP                   // (skipped)                            // push	rbp
-	NOP                   // (skipped)                            // mov	rbp, rsp
-	NOP                   // (skipped)                            // and	rsp, -8
-	IMULL DX, DI          // <--                                  // imul	edi, edx
-	LEAL  0(SI)(CX*1), AX // <--                                  // lea	eax, [rsi + rcx]
-	WORD  $0xf801         // ADDL DI, AX                          // add	eax, edi
-	NOP                   // (skipped)                            // mov	rsp, rbp
-	NOP                   // (skipped)                            // pop	rbp
-	MOVB  AX, ret+8(FP)   // <--
-	RET                   // <--                                  // ret
+	MOVBQZX a+0(FP), DI
+	MOVBQZX b+1(FP), SI
+	MOVBQZX c+2(FP), DX
+	MOVLQZX d+4(FP), CX
+	NOP                     // (skipped)                            // push	rbp
+	NOP                     // (skipped)                            // mov	rbp, rsp
+	NOP                     // (skipped)                            // and	rsp, -8
+	IMULL   DX, DI          // <--                                  // imul	edi, edx
+	LEAL    0(SI)(CX*1), AX // <--                                  // lea	eax, [rsi + rcx]
+	WORD    $0xf801         // ADDL DI, AX                          // add	eax, edi
+	NOP                     // (skipped)                            // mov	rsp, rbp
+	NOP                     // (skipped)                            // pop	rbp
+	MOVB    AX, ret+8(FP)   // <--
+	RET                     // <--                                  // ret
 
 TEXT ·Test_fn_282_2(SB), NOSPLIT, $0-26
-	MOVW  a+0(FP), DI
-	MOVQ  b+8(FP), SI
-	MOVW  c+16(FP), DX
-	NOP                   // (skipped)                            // push	rbp
-	NOP                   // (skipped)                            // mov	rbp, rsp
-	NOP                   // (skipped)                            // and	rsp, -8
-	IMULL DX, DI          // <--                                  // imul	edi, edx
-	LEAL  0(SI)(DI*1), AX // <--                                  // lea	eax, [rsi + rdi]
-	NOP                   // (skipped)                            // mov	rsp, rbp
-	NOP                   // (skipped)                            // pop	rbp
-	MOVW  AX, ret+24(FP)  // <--
-	RET                   // <--                                  // ret
+	MOVWQZX a+0(FP), DI
+	MOVQ    b+8(FP), SI
+	MOVWQZX c+16(FP), DX
+	NOP                     // (skipped)                            // push	rbp
+	NOP                     // (skipped)                            // mov	rbp, rsp
+	NOP                     // (skipped)                            // and	rsp, -8
+	IMULL   DX, DI          // <--                                  // imul	edi, edx
+	LEAL    0(SI)(DI*1), AX // <--                                  // lea	eax, [rsi + rdi]
+	NOP                     // (skipped)                            // mov	rsp, rbp
+	NOP                     // (skipped)                            // pop	rbp
+	MOVW    AX, ret+24(FP)  // <--
+	RET                     // <--                                  // ret
 
 TEXT ·Test_fn_481_1(SB), NOSPLIT, $0-25
-	MOVL  a+0(FP), DI
-	MOVQ  b+8(FP), SI
-	MOVB  c+16(FP), DX
-	NOP                   // (skipped)                            // push	rbp
-	NOP                   // (skipped)                            // mov	rbp, rsp
-	NOP                   // (skipped)                            // and	rsp, -8
-	IMULL DX, DI          // <--                                  // imul	edi, edx
-	LEAL  0(SI)(DI*1), AX // <--                                  // lea	eax, [rsi + rdi]
-	NOP                   // (skipped)                            // mov	rsp, rbp
-	NOP                   // (skipped)                            // pop	rbp
-	MOVB  AX, ret+24(FP)  // <--
-	RET                   // <--                                  // ret
+	MOVLQZX a+0(FP), DI
+	MOVQ    b+8(FP), SI
+	MOVBQZX c+16(FP), DX
+	NOP                     // (skipped)                            // push	rbp
+	NOP                     // (skipped)                            // mov	rbp, rsp
+	NOP                     // (skipped)                            // and	rsp, -8
+	IMULL   DX, DI          // <--                                  // imul	edi, edx
+	LEAL    0(SI)(DI*1), AX // <--                                  // lea	eax, [rsi + rdi]
+	NOP                     // (skipped)                            // mov	rsp, rbp
+	NOP                     // (skipped)                            // pop	rbp
+	MOVB    AX, ret+24(FP)  // <--
+	RET                     // <--                                  // ret
 
 TEXT ·Test_fn_444_4(SB), NOSPLIT, $0-20
-	MOVL  a+0(FP), DI
-	MOVL  b+4(FP), SI
-	MOVL  c+8(FP), DX
-	NOP                   // (skipped)                            // push	rbp
-	NOP                   // (skipped)                            // mov	rbp, rsp
-	NOP                   // (skipped)                            // and	rsp, -8
-	IMULL DX, DI          // <--                                  // imul	edi, edx
-	LEAL  0(DI)(SI*1), AX // <--                                  // lea	eax, [rdi + rsi]
-	NOP                   // (skipped)                            // mov	rsp, rbp
-	NOP                   // (skipped)                            // pop	rbp
-	MOVL  AX, ret+16(FP)  // <--
-	RET                   // <--                                  // ret
+	MOVLQZX a+0(FP), DI
+	MOVLQZX b+4(FP), SI
+	MOVLQZX c+8(FP), DX
+	NOP                     // (skipped)                            // push	rbp
+	NOP                     // (skipped)                            // mov	rbp, rsp
+	NOP                     // (skipped)                            // and	rsp, -8
+	IMULL   DX, DI          // <--                                  // imul	edi, edx
+	LEAL    0(DI)(SI*1), AX // <--                                  // lea	eax, [rdi + rsi]
+	NOP                     // (skipped)                            // mov	rsp, rbp
+	NOP                     // (skipped)                            // pop	rbp
+	MOVL    AX, ret+16(FP)  // <--
+	RET                     // <--                                  // ret
+
+TEXT ·Test_fn_44F4F8_4(SB), NOSPLIT, $0-28
+	MOVLQZX a+0(FP), DI
+	MOVLQZX b+4(FP), SI
+	MOVSS   c+8(FP), X0
+	MOVSD   d+16(FP), X1
+	NOP                    // (skipped)                            // push	rbp
+	NOP                    // (skipped)                            // mov	rbp, rsp
+	NOP                    // (skipped)                            // and	rsp, -8
+	LONG    $0xd72a0ff3    // CVTSI2SSL DI, X2                     // cvtsi2ss	xmm2, edi
+	LONG    $0xde2a0ff3    // CVTSI2SSL SI, X3                     // cvtsi2ss	xmm3, esi
+	MULSS   X0, X2         // <--                                  // mulss	xmm2, xmm0
+	ADDSS   X2, X3         // <--                                  // addss	xmm3, xmm2
+	XORPS   X0, X0         // <--                                  // xorps	xmm0, xmm0
+	LONG    $0xc35a0ff3    // CVTSS2SD X3, X0                      // cvtss2sd	xmm0, xmm3
+	ADDSD   X1, X0         // <--                                  // addsd	xmm0, xmm1
+	LONG    $0xc02c0ff2    // CVTTSD2SIL X0, AX                    // cvttsd2si	eax, xmm0
+	NOP                    // (skipped)                            // mov	rsp, rbp
+	NOP                    // (skipped)                            // pop	rbp
+	MOVL    AX, ret+24(FP) // <--
+	RET                    // <--                                  // ret
+
+TEXT ·Test_fn_F4F4F8_F8(SB), NOSPLIT, $0-24
+	MOVSS a+0(FP), X0
+	MOVSS b+4(FP), X1
+	MOVSD c+8(FP), X2
+	NOP                  // (skipped)                            // push	rbp
+	NOP                  // (skipped)                            // mov	rbp, rsp
+	NOP                  // (skipped)                            // and	rsp, -8
+	LONG  $0xd85a0ff3    // CVTSS2SD X0, X3                      // cvtss2sd	xmm3, xmm0
+	MULSD X2, X3         // <--                                  // mulsd	xmm3, xmm2
+	XORPS X0, X0         // <--                                  // xorps	xmm0, xmm0
+	LONG  $0xc15a0ff3    // CVTSS2SD X1, X0                      // cvtss2sd	xmm0, xmm1
+	ADDSD X3, X0         // <--                                  // addsd	xmm0, xmm3
+	NOP                  // (skipped)                            // mov	rsp, rbp
+	NOP                  // (skipped)                            // pop	rbp
+	MOVSD X0, ret+16(FP) // <--
+	RET                  // <--                                  // ret
 
 TEXT ·Test_fn_888888_8(SB), NOSPLIT, $0-56
 	MOVQ  a+0(FP), DI
@@ -134,29 +172,29 @@ TEXT ·Test_fn_sq_floats(SB), NOSPLIT, $0-48
 	NOP                        // (skipped)                            // mov	rbp, rsp
 	NOP                        // (skipped)                            // and	rsp, -8
 	WORD $0x8548; BYTE $0xf6   // TESTQ SI, SI                         // test	rsi, rsi
-	JLE  LBB8_14               // <--                                  // jle	.LBB8_14
+	JLE  LBB10_14              // <--                                  // jle	.LBB10_14
 	XORL AX, AX                // <--                                  // xor	eax, eax
 	CMPQ SI, $0x8              // <--                                  // cmp	rsi, 8
-	JB   LBB8_10               // <--                                  // jb	.LBB8_10
+	JB   LBB10_10              // <--                                  // jb	.LBB10_10
 	MOVQ CX, DX                // <--                                  // mov	rdx, rcx
 	SUBQ DI, DX                // <--                                  // sub	rdx, rdi
 	LONG $0x20fa8348           // CMPQ DX, $test_fn_111_0(SB)          // cmp	rdx, 32
-	JB   LBB8_10               // <--                                  // jb	.LBB8_10
+	JB   LBB10_10              // <--                                  // jb	.LBB10_10
 	LEAQ -0x8(SI), AX          // <--                                  // lea	rax, [rsi - 8]
 	MOVQ AX, R8                // <--                                  // mov	r8, rax
 	SHRQ $0x3, R8              // <--                                  // shr	r8, 3
 	INCQ R8                    // <--                                  // inc	r8
 	CMPQ AX, $0x8              // <--                                  // cmp	rax, 8
-	JAE  LBB8_5                // <--                                  // jae	.LBB8_5
+	JAE  LBB10_5               // <--                                  // jae	.LBB10_5
 	XORL DX, DX                // <--                                  // xor	edx, edx
-	JMP  LBB8_7                // <--                                  // jmp	.LBB8_7
+	JMP  LBB10_7               // <--                                  // jmp	.LBB10_7
 
-LBB8_5:
+LBB10_5:
 	MOVQ R8, AX    // <--                                  // mov	rax, r8
 	ANDQ $-0x2, AX // <--                                  // and	rax, -2
 	XORL DX, DX    // <--                                  // xor	edx, edx
 
-LBB8_6:
+LBB10_6:
 	MOVUPS 0(DI)(DX*4), X0    // <--                                  // movups	xmm0, xmmword ptr [rdi + 4*rdx]
 	MOVUPS 0x10(DI)(DX*4), X1 // <--                                  // movups	xmm1, xmmword ptr [rdi + 4*rdx + 16]
 	MULPS  X0, X0             // <--                                  // mulps	xmm0, xmm0
@@ -171,13 +209,13 @@ LBB8_6:
 	MOVUPS X1, 0x30(CX)(DX*4) // <--                                  // movups	xmmword ptr [rcx + 4*rdx + 48], xmm1
 	ADDQ   $0x10, DX          // <--                                  // add	rdx, 16
 	ADDQ   $-0x2, AX          // <--                                  // add	rax, -2
-	JNE    LBB8_6             // <--                                  // jne	.LBB8_6
+	JNE    LBB10_6            // <--                                  // jne	.LBB10_6
 
-LBB8_7:
+LBB10_7:
 	MOVQ   SI, AX             // <--                                  // mov	rax, rsi
 	ANDQ   $-0x8, AX          // <--                                  // and	rax, -8
 	LONG   $0x01c0f641        // TESTL $0x1, R8                       // test	r8b, 1
-	JE     LBB8_9             // <--                                  // je	.LBB8_9
+	JE     LBB10_9            // <--                                  // je	.LBB10_9
 	MOVUPS 0(DI)(DX*4), X0    // <--                                  // movups	xmm0, xmmword ptr [rdi + 4*rdx]
 	MOVUPS 0x10(DI)(DX*4), X1 // <--                                  // movups	xmm1, xmmword ptr [rdi + 4*rdx + 16]
 	MULPS  X0, X0             // <--                                  // mulps	xmm0, xmm0
@@ -185,31 +223,31 @@ LBB8_7:
 	MOVUPS X0, 0(CX)(DX*4)    // <--                                  // movups	xmmword ptr [rcx + 4*rdx], xmm0
 	MOVUPS X1, 0x10(CX)(DX*4) // <--                                  // movups	xmmword ptr [rcx + 4*rdx + 16], xmm1
 
-LBB8_9:
-	CMPQ AX, SI  // <--                                  // cmp	rax, rsi
-	JE   LBB8_14 // <--                                  // je	.LBB8_14
+LBB10_9:
+	CMPQ AX, SI   // <--                                  // cmp	rax, rsi
+	JE   LBB10_14 // <--                                  // je	.LBB10_14
 
-LBB8_10:
+LBB10_10:
 	MOVQ AX, DX   // <--                                  // mov	rdx, rax
 	NOTQ DX       // <--                                  // not	rdx
 	ADDQ SI, DX   // <--                                  // add	rdx, rsi
 	MOVQ SI, R8   // <--                                  // mov	r8, rsi
 	ANDQ $0x3, R8 // <--                                  // and	r8, 3
-	JE   LBB8_12  // <--                                  // je	.LBB8_12
+	JE   LBB10_12 // <--                                  // je	.LBB10_12
 
-LBB8_11:
+LBB10_11:
 	MOVSS 0(DI)(AX*4), X0 // <--                                  // movss	xmm0, dword ptr [rdi + 4*rax]
 	MULSS X0, X0          // <--                                  // mulss	xmm0, xmm0
 	MOVSS X0, 0(CX)(AX*4) // <--                                  // movss	dword ptr [rcx + 4*rax], xmm0
 	INCQ  AX              // <--                                  // inc	rax
 	DECQ  R8              // <--                                  // dec	r8
-	JNE   LBB8_11         // <--                                  // jne	.LBB8_11
+	JNE   LBB10_11        // <--                                  // jne	.LBB10_11
 
-LBB8_12:
+LBB10_12:
 	CMPQ DX, $0x3 // <--                                  // cmp	rdx, 3
-	JB   LBB8_14  // <--                                  // jb	.LBB8_14
+	JB   LBB10_14 // <--                                  // jb	.LBB10_14
 
-LBB8_13:
+LBB10_13:
 	MOVSS 0(DI)(AX*4), X0   // <--                                  // movss	xmm0, dword ptr [rdi + 4*rax]
 	MULSS X0, X0            // <--                                  // mulss	xmm0, xmm0
 	MOVSS X0, 0(CX)(AX*4)   // <--                                  // movss	dword ptr [rcx + 4*rax], xmm0
@@ -224,9 +262,9 @@ LBB8_13:
 	MOVSS X0, 0xc(CX)(AX*4) // <--                                  // movss	dword ptr [rcx + 4*rax + 12], xmm0
 	ADDQ  $0x4, AX          // <--                                  // add	rax, 4
 	CMPQ  SI, AX            // <--                                  // cmp	rsi, rax
-	JNE   LBB8_13           // <--                                  // jne	.LBB8_13
+	JNE   LBB10_13          // <--                                  // jne	.LBB10_13
 
-LBB8_14:
+LBB10_14:
 	NOP // (skipped)                            // mov	rsp, rbp
 	NOP // (skipped)                            // pop	rbp
 	RET // <--                                  // ret

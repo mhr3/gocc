@@ -4,24 +4,24 @@
 #include "textflag.h"
 
 TEXT ·f32_axpy(SB), NOSPLIT, $0-28
-	MOVQ x+0(FP), DI
-	MOVQ y+8(FP), SI
-	MOVQ size+16(FP), DX
-	MOVL alpha+24(FP), CX
-	NOP                          // (skipped)                            // push	rbp
-	NOP                          // (skipped)                            // mov	rbp, rsp
-	NOP                          // (skipped)                            // and	rsp, -8
-	CMPQ DX, $0x8                // <--                                  // cmp	rdx, 8
-	JB   LBB0_5                  // <--                                  // jb	.LBB0_5
-	LONG $0x187de2c4; BYTE $0xc8 // SBBL CL, AL                          // vbroadcastss	ymm1, xmm0
-	LEAQ -0x8(DX), CX            // <--                                  // lea	rcx, [rdx - 8]
-	MOVQ CX, AX                  // <--                                  // mov	rax, rcx
-	SHRQ $0x3, AX                // <--                                  // shr	rax, 3
-	INCQ AX                      // <--                                  // inc	rax
-	CMPQ CX, $0x8                // <--                                  // cmp	rcx, 8
-	JAE  LBB0_12                 // <--                                  // jae	.LBB0_12
-	XORL CX, CX                  // <--                                  // xor	ecx, ecx
-	JMP  LBB0_3                  // <--                                  // jmp	.LBB0_3
+	MOVQ  x+0(FP), DI
+	MOVQ  y+8(FP), SI
+	MOVQ  size+16(FP), DX
+	MOVSS alpha+24(FP), X0
+	NOP                           // (skipped)                            // push	rbp
+	NOP                           // (skipped)                            // mov	rbp, rsp
+	NOP                           // (skipped)                            // and	rsp, -8
+	CMPQ  DX, $0x8                // <--                                  // cmp	rdx, 8
+	JB    LBB0_5                  // <--                                  // jb	.LBB0_5
+	LONG  $0x187de2c4; BYTE $0xc8 // SBBL CL, AL                          // vbroadcastss	ymm1, xmm0
+	LEAQ  -0x8(DX), CX            // <--                                  // lea	rcx, [rdx - 8]
+	MOVQ  CX, AX                  // <--                                  // mov	rax, rcx
+	SHRQ  $0x3, AX                // <--                                  // shr	rax, 3
+	INCQ  AX                      // <--                                  // inc	rax
+	CMPQ  CX, $0x8                // <--                                  // cmp	rcx, 8
+	JAE   LBB0_12                 // <--                                  // jae	.LBB0_12
+	XORL  CX, CX                  // <--                                  // xor	ecx, ecx
+	JMP   LBB0_3                  // <--                                  // jmp	.LBB0_3
 
 LBB0_12:
 	MOVQ AX, R8    // <--                                  // mov	r8, rax

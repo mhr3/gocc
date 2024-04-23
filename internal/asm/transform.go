@@ -135,16 +135,18 @@ func storeReturnValue(arch *config.Arch, function Function) Function {
 	}
 
 	offset, _ := function.ParamsSize(arch)
-	op, ok := arch.MovInstr[int8(function.Ret.Size())]
+	retSz := int8(function.Ret.Size())
+	op, ok := arch.MovInstr[retSz]
 	if !ok {
 		panic(fmt.Errorf("unable to store return value with size %d", function.Ret.Size()))
 	}
 
-	// FIXME: float return values (uses X0 register on amd64, F0 on arm64)
-	if function.Ret.Type == "float" || function.Ret.Type == "double" {
-		panic("float returns are not supported")
+	retRegister := arch.RetRegister
+	if function.Ret.IsFloatingPoint() {
+		op = arch.MovFPInstr[retSz]
+		retRegister = arch.FloatRegisters[0]
 	}
-	retInstr := fmt.Sprintf("%s %s, ret+%d(FP)", op, arch.RetRegister, offset)
+	retInstr := fmt.Sprintf("%s %s, ret+%d(FP)", op, retRegister, offset)
 
 	// we need to inject a new MOV instruction to store the return value on stack
 	for i := 0; i < len(function.Lines); i++ {

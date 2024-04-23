@@ -26,6 +26,12 @@ func Test_fn_481_1(a int32, b int, c int8) byte
 func Test_fn_444_4(a int32, b int32, c int32) int32
 
 //go:noescape
+func Test_fn_44F4F8_4(a int32, b int32, c float32, d float64) int32
+
+//go:noescape
+func Test_fn_F4F4F8_F8(a float32, b float32, c float64) float64
+
+//go:noescape
 func Test_fn_888888_8(a int, b int, c int, d int, e int, f int) int
 
 //go:noescape

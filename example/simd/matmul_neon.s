@@ -4,17 +4,17 @@
 #include "textflag.h"
 
 TEXT ·f32_axpy(SB), NOSPLIT, $0-28
-	MOVD x+0(FP), R0
-	MOVD y+8(FP), R1
-	MOVD size+16(FP), R2
-	MOVW alpha+24(FP), R3
-	NOP                   // (skipped)                            // stp	x29, x30, [sp, #-16]!
-	CMP  $4, R2           // <--                                  // cmp	x2, #4
-	NOP                   // (skipped)                            // mov	x29, sp
-	BCC  LBB0_3           // <--                                  // b.lo	.LBB0_3
-	MOVW $3, R8           // <--                                  // mov	w8, #3
-	MOVD R0, R9           // <--                                  // mov	x9, x0
-	MOVD R1, R10          // <--                                  // mov	x10, x1
+	MOVD  x+0(FP), R0
+	MOVD  y+8(FP), R1
+	MOVD  size+16(FP), R2
+	FMOVS alpha+24(FP), F0
+	NOP                    // (skipped)                            // stp	x29, x30, [sp, #-16]!
+	CMP   $4, R2           // <--                                  // cmp	x2, #4
+	NOP                    // (skipped)                            // mov	x29, sp
+	BCC   LBB0_3           // <--                                  // b.lo	.LBB0_3
+	MOVW  $3, R8           // <--                                  // mov	w8, #3
+	MOVD  R0, R9           // <--                                  // mov	x9, x0
+	MOVD  R1, R10          // <--                                  // mov	x10, x1
 
 LBB0_2:
 	WORD $0x3dc00141 // FMOVQ (R10), F1                      // ldr	q1, [x10]

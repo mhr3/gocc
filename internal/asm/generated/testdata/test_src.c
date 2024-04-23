@@ -37,6 +37,16 @@ int test_fn_444_4(int a, int b, int c) {
     return (c*a) + b;
 }
 
+// gocc: Test_fn_44F4F8_4(a int32, b int32, c float32, d float64) int32
+int test_fn_44F4F8_4(int a, int b, float c, double d) {
+    return (c*a) + b + d;
+}
+
+// gocc: Test_fn_F4F4F8_F8(a, b float32, c float64) float64
+double test_fn_F4F4F8_F8(float a, float b, double c) {
+    return (c*a) + b;
+}
+
 // gocc: Test_fn_888888_8(a,b,c,d,e,f int) int
 long test_fn_888888_8(long a, long b, long c, long d, long e, long f) {
     return (c*a) + b + (f*d) + e;

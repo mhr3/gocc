@@ -44,8 +44,22 @@ func Generate(arch *config.Arch, functions []Function) ([]byte, error) {
 			builder.WriteString(c.Compile(arch))
 		}
 
-		if len(function.Params) > len(arch.Registers) {
-			return nil, fmt.Errorf("support for more than %d parameters is not implemented for %s", len(arch.Registers), arch.Name)
+		{
+			genericParams := 0
+			floatParams := 0
+			for _, param := range function.Params {
+				if param.IsFloatingPoint() {
+					floatParams++
+				} else {
+					genericParams++
+				}
+			}
+			if genericParams > len(arch.Registers) {
+				return nil, fmt.Errorf("support for more than %d generic parameters is not implemented for %s", len(arch.Registers), arch.Name)
+			}
+			if floatParams > len(arch.FloatRegisters) {
+				return nil, fmt.Errorf("support for more than %d floating point parameters is not implemented for %s", len(arch.FloatRegisters), arch.Name)
+			}
 		}
 
 		name := function.Name
@@ -62,12 +76,22 @@ func Generate(arch *config.Arch, functions []Function) ([]byte, error) {
 			textAttrs = "0"
 		}
 		builder.WriteString(fmt.Sprintf("\nTEXT ·%s(SB),%s,$%d-%d\n", name, textAttrs, function.LocalsSize, paramsSize+retSize))
+		genRegIdx, floatRegIdx := 0, 0
 		for i, param := range function.Params {
-			loadInstr, ok := loadInstructions[int8(param.Size())]
+			pSz := int8(param.Size())
+			loadInstr, ok := loadInstructions[pSz]
 			if !ok {
-				return nil, fmt.Errorf("unable to load parameter with size %d", param.Size())
+				return nil, fmt.Errorf("unable to load parameter with size %d", pSz)
 			}
-			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", loadInstr, param.Name, offsets[i], arch.Registers[i]))
+			targetRegister := arch.Registers[genRegIdx]
+			if param.IsFloatingPoint() {
+				loadInstr = arch.MovFPInstr[pSz]
+				targetRegister = arch.FloatRegisters[floatRegIdx]
+				floatRegIdx++
+			} else {
+				genRegIdx++
+			}
+			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", loadInstr, param.Name, offsets[i], targetRegister))
 		}
 		for _, line := range function.Lines {
 			builder.WriteString(line.Compile(arch))

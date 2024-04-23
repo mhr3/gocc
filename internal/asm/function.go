@@ -282,6 +282,19 @@ func (p *Param) Size() int {
 	}
 }
 
+func (p *Param) IsFloatingPoint() bool {
+	if p.IsPointer {
+		return false
+	}
+
+	switch p.Type {
+	case "float", "double":
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Param) EquivalentType() types.Type {
 	if p.IsPointer {
 		return types.Typ[types.UnsafePointer]

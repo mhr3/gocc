@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"testing"
 	"time"
 	"unsafe"
@@ -76,6 +77,21 @@ func BenchmarkMatmul(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestAxpy(t *testing.T) {
+	if runtime.GOARCH == "amd64" && !cpu.X86.HasAVX2 {
+		t.Skip("hardware acceleration is not available")
+	}
+
+	in1, in2 := newTestMatrix(1, 256), newTestMatrix(1, 256)
+	out1, out2 := newTestMatrix(1, 256), newTestMatrix(1, 256)
+
+	axpy(in1.Data, out1.Data, 3)
+	f32_axpy(&in2.Data[0], &out2.Data[0], len(in2.Data), 3)
+
+	assert.Equal(t, in1.Data, in2.Data)
+	assert.Equal(t, out1.Data, out2.Data)
 }
 
 func TestGenericMatmul(t *testing.T) {
