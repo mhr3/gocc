@@ -29,7 +29,7 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 					if len(dInst) == len(inst)+1 && strings.HasPrefix(dInst, inst) && strings.HasSuffix(dInst, "Q") {
 						line.Binary = nil
 					}
-				case inst == "CMP" || inst == "TEST":
+				case inst == "TEST":
 					// operands can be reversed, skip
 				case inst == dInst:
 					if strings.Contains(line.Assembly, "ymm") || strings.Contains(line.Assembly, "zmm") {
