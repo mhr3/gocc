@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <arm_neon.h>
 
-// gocc: f32_axpy(x,y unsafe.Pointer, size int, alpha float32)
+// gocc: f32_axpy(x,y *float32, size int, alpha float32)
 void f32_axpy(const float *x, float *y, const uint64_t size, const float alpha) {
     float32x4_t alpha_vec = vdupq_n_f32(alpha);
     for (uint64_t i = 0; (i + 3) < size; i += 4) {
@@ -23,7 +23,7 @@ void f32_axpy(const float *x, float *y, const uint64_t size, const float alpha) 
     }
 }
 
-// gocc: f32_matmul(dst, m, n unsafe.Pointer, dims uint64)
+// gocc: f32_matmul(dst, m, n *float32, dims uint64)
 void f32_matmul(float *dst, float *m, float *n, uint64_t dims) {
     uint64_t mr = dims & 0xFFFF;
     uint64_t mc = (dims >> 16) & 0xFFFF;

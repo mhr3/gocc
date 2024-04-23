@@ -3,10 +3,9 @@
 
 package simd
 
-import "unsafe"
 
 //go:noescape
-func f32_axpy(x unsafe.Pointer, y unsafe.Pointer, size int, alpha float32)
+func f32_axpy(x *float32, y *float32, size int, alpha float32)
 
 //go:noescape
-func f32_matmul(dst unsafe.Pointer, m unsafe.Pointer, n unsafe.Pointer, dims uint64)
+func f32_matmul(dst *float32, m *float32, n *float32, dims uint64)

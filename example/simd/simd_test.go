@@ -18,14 +18,14 @@ BenchmarkAXPY/std-24         	287770197	         4.048 ns/op	       0 B/op	     
 BenchmarkAXPY/asm-24         	422536102	         2.870 ns/op	       0 B/op	       0 allocs/op
 */
 func BenchmarkAXPY(b *testing.B) {
-	x := []float32{2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2}
-	y := []float32{3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3}
+	x := newTestMatrix(1, 256)
+	y := newTestMatrix(1, 256)
 
 	b.Run("std", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			axpy(x, y, 3)
+			axpy(x.Data, y.Data, 3)
 		}
 	})
 
@@ -33,11 +33,7 @@ func BenchmarkAXPY(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			f32_axpy(
-				unsafe.Pointer(&x[0]),
-				unsafe.Pointer(&y[0]),
-				len(x), 3.0,
-			)
+			f32_axpy(unsafe.SliceData(x.Data), unsafe.SliceData(y.Data), len(x.Data), 3.0)
 		}
 	})
 }
@@ -74,7 +70,7 @@ func BenchmarkMatmul(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				f32_matmul(
-					unsafe.Pointer(&o.Data[0]), unsafe.Pointer(&m.Data[0]), unsafe.Pointer(&n.Data[0]),
+					unsafe.SliceData(o.Data), unsafe.SliceData(m.Data), unsafe.SliceData(n.Data),
 					dimensionsOf(m.Rows, m.Cols, n.Rows, n.Cols),
 				)
 			}
@@ -101,7 +97,7 @@ func TestMatmulNative(t *testing.T) {
 	}
 
 	f32_matmul(
-		unsafe.Pointer(&o[0]), unsafe.Pointer(&x[0]), unsafe.Pointer(&y[0]),
+		unsafe.SliceData(o), unsafe.SliceData(x), unsafe.SliceData(y),
 		dimensionsOf(2, 2, 2, 2),
 	)
 

@@ -25,7 +25,7 @@ var (
 func Matmul(dst, m, n *Matrix) {
 	switch {
 	case useAccelerated:
-		f32_matmul(unsafe.Pointer(&dst.Data[0]), unsafe.Pointer(&m.Data[0]), unsafe.Pointer(&n.Data[0]),
+		f32_matmul(unsafe.SliceData(dst.Data), unsafe.SliceData(m.Data), unsafe.SliceData(n.Data),
 			dimensionsOf(m.Rows, m.Cols, n.Rows, n.Cols),
 		)
 	default:
