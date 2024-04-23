@@ -5,14 +5,12 @@
 package simd
 
 import (
-	"unsafe"
-
 	"golang.org/x/sys/cpu"
 )
 
 var useSVE = cpu.ARM64.HasSVE
 
-func uint8_simd_mul(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+func uint8_simd_mul(input1 *byte, input2 *byte, output *byte, size uint64) {
 	if useSVE {
 		uint8_simd_mul_sve(input1, input2, output, size)
 		return
@@ -21,14 +19,14 @@ func uint8_simd_mul(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.
 }
 
 // just to make compiling tests easier
-func uint8_simd_mul_avx2(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+func uint8_simd_mul_avx2(input1 *byte, input2 *byte, output *byte, size uint64) {
 	panic("not implemented")
 }
 
-func uint8_simd_mul_avx512(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+func uint8_simd_mul_avx512(input1 *byte, input2 *byte, output *byte, size uint64) {
 	panic("not implemented")
 }
 
-func uint8_simd_mul_sse(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+func uint8_simd_mul_sse(input1 *byte, input2 *byte, output *byte, size uint64) {
 	panic("not implemented")
 }

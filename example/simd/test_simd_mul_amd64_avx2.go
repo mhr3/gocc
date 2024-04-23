@@ -3,7 +3,6 @@
 
 package simd
 
-import "unsafe"
 
 //go:noescape
-func uint8_simd_mul_avx2(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64)
+func uint8_simd_mul_avx2(input1 *byte, input2 *byte, output *byte, size uint64)

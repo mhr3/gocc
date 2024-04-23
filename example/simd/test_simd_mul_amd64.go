@@ -3,8 +3,6 @@
 package simd
 
 import (
-	"unsafe"
-
 	"golang.org/x/sys/cpu"
 )
 
@@ -13,7 +11,7 @@ var (
 	useAVX512 = cpu.X86.HasAVX512
 )
 
-func uint8_simd_mul(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+func uint8_simd_mul(input1 *byte, input2 *byte, output *byte, size uint64) {
 	if useAVX512 {
 		uint8_simd_mul_avx512(input1, input2, output, size)
 	} else if useAVX2 {
@@ -24,18 +22,18 @@ func uint8_simd_mul(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.
 }
 
 // just to make compiling tests easier
-func uint8_simd_mul_sve(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+func uint8_simd_mul_sve(input1 *byte, input2 *byte, output *byte, size uint64) {
 	panic("not implemented")
 }
 
-func uint8_simd_mul_sve2(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+func uint8_simd_mul_sve2(input1 *byte, input2 *byte, output *byte, size uint64) {
 	panic("not implemented")
 }
 
-func uint8_simd_mul_sve_manual(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+func uint8_simd_mul_sve_manual(input1 *byte, input2 *byte, output *byte, size uint64) {
 	panic("not implemented")
 }
 
-func uint8_simd_mul_neon(input1 unsafe.Pointer, input2 unsafe.Pointer, output unsafe.Pointer, size uint64) {
+func uint8_simd_mul_neon(input1 *byte, input2 *byte, output *byte, size uint64) {
 	panic("not implemented")
 }

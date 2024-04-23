@@ -127,7 +127,7 @@ func TestUintMul(t *testing.T) {
 
 	cases := []struct {
 		Name      string
-		Fn        func(unsafe.Pointer, unsafe.Pointer, unsafe.Pointer, uint64)
+		Fn        func(*byte, *byte, *byte, uint64)
 		Supported bool
 	}{
 		{"simd", uint8_simd_mul, true},
@@ -148,7 +148,7 @@ func TestUintMul(t *testing.T) {
 				}
 				input1, input2, dst := prepareTestUint8Input(sz)
 
-				c.Fn(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&dst[0]), uint64(sz))
+				c.Fn(unsafe.SliceData(input1), unsafe.SliceData(input2), unsafe.SliceData(dst), uint64(sz))
 
 				checkResult(input1, input2, dst)
 			})
@@ -211,7 +211,7 @@ func uint8_mul_go(input1, input2, output []uint8) {
 func BenchmarkUintMul(b *testing.B) {
 	cases := []struct {
 		Name      string
-		Fn        func(unsafe.Pointer, unsafe.Pointer, unsafe.Pointer, uint64)
+		Fn        func(*byte, *byte, *byte, uint64)
 		Supported bool
 	}{
 		//{"simd", uint8_simd_mul, true},
@@ -246,7 +246,7 @@ func BenchmarkUintMul(b *testing.B) {
 
 				startTime := time.Now()
 				for i := 0; i < b.N; i++ {
-					c.Fn(unsafe.Pointer(&input1[0]), unsafe.Pointer(&input2[0]), unsafe.Pointer(&output[0]), uint64(size))
+					c.Fn(unsafe.SliceData(input1), unsafe.SliceData(input2), unsafe.SliceData(output), uint64(size))
 				}
 				b.ReportMetric(float64(b.N*size)/float64(time.Since(startTime).Microseconds()), "MB/s")
 			})
