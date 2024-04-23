@@ -136,6 +136,7 @@ func TestUintMul(t *testing.T) {
 		{"avx512", uint8_simd_mul_avx512, cpu.X86.HasAVX512F},
 		{"neon", uint8_simd_mul_neon, cpu.ARM64.HasASIMD},
 		{"sve", uint8_simd_mul_sve, cpu.ARM64.HasSVE},
+		{"sve2", uint8_simd_mul_sve2, cpu.ARM64.HasSVE2},
 		{"sve-intrinsics", uint8_simd_mul_sve_manual, cpu.ARM64.HasSVE},
 	}
 
@@ -219,6 +220,7 @@ func BenchmarkUintMul(b *testing.B) {
 		{"avx512", uint8_simd_mul_avx512, cpu.X86.HasAVX512F},
 		{"neon", uint8_simd_mul_neon, cpu.ARM64.HasASIMD},
 		{"sve", uint8_simd_mul_sve, cpu.ARM64.HasSVE},
+		{"sve2", uint8_simd_mul_sve2, cpu.ARM64.HasSVE2},
 		{"sve-intrinsics", uint8_simd_mul_sve_manual, cpu.ARM64.HasSVE},
 	}
 

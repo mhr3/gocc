@@ -82,8 +82,16 @@ func removeBinaryInstructionsArm64(_ *config.Arch, function Function) Function {
 				case strings.Contains(line.Disassembled, "(SB)"):
 					// definitely not
 				case inst == dInst:
-					if inst == "FMUL" {
+					skip := false
+					switch inst {
+					case "FMUL":
 						// no such instruction ???
+						skip = true
+					case "MRS":
+						skip = true
+					}
+
+					if skip {
 						break
 					}
 					line.Binary = nil

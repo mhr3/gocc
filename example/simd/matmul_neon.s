@@ -80,7 +80,7 @@ LBB1_6:
 	ADD  R15, R14, R17 // <--                                  // add	x17, x14, x15
 	MOVD R16, R3       // <--                                  // mov	x3, x16
 	MOVW $3, R4        // <--                                  // mov	w4, #3
-	WORD $0xbc717820   // FMOVS (R1)(R17<<2), F0               // ldr	s0, [x1, x17, lsl  #2]
+	WORD $0xbc717820   // FMOVS (R1)(R17<<2), F0               // ldr	s0, [x1, x17, lsl #2]
 	MOVD R0, R17       // <--                                  // mov	x17, x0
 
 LBB1_7:
@@ -131,7 +131,7 @@ LBB1_15:
 	ADD  R16, R15, R0 // <--                                  // add	x0, x15, x16
 	MOVD R13, R2      // <--                                  // mov	x2, x13
 	MOVD R11, R3      // <--                                  // mov	x3, x11
-	WORD $0xbc607820  // FMOVS (R1)(R0<<2), F0                // ldr	s0, [x1, x0, lsl  #2]
+	WORD $0xbc607820  // FMOVS (R1)(R0<<2), F0                // ldr	s0, [x1, x0, lsl #2]
 	MOVD R17, R0      // <--                                  // mov	x0, x17
 
 LBB1_16:

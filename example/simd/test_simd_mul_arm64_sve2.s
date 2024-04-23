@@ -3,7 +3,7 @@
 
 #include "textflag.h"
 
-TEXT ·uint8_simd_mul_sve(SB), NOSPLIT, $0-32
+TEXT ·uint8_simd_mul_sve2(SB), NOSPLIT, $0-32
 	MOVD input1+0(FP), R0
 	MOVD input2+8(FP), R1
 	MOVD output+16(FP), R2
@@ -68,9 +68,8 @@ LBB0_11:
 	WORD $0xa40c4021   // ?                                    // ld1b	{ z1.b }, p0/z, [x1, x12]
 	WORD $0xa40c41c2   // ?                                    // ld1b	{ z2.b }, p0/z, [x14, x12]
 	WORD $0xa40c41e3   // ?                                    // ld1b	{ z3.b }, p0/z, [x15, x12]
-	WORD $0x04100020   // ?                                    // mul	z0.b, p0/m, z0.b, z1.b
-	WORD $0x0420bc61   // ?                                    // movprfx	z1, z3
-	WORD $0x04100041   // ?                                    // mul	z1.b, p0/m, z1.b, z2.b
+	WORD $0x04206020   // ?                                    // mul	z0.b, z1.b, z0.b
+	WORD $0x04226061   // ?                                    // mul	z1.b, z3.b, z2.b
 	WORD $0xe40c4040   // ?                                    // st1b	{ z0.b }, p0, [x2, x12]
 	WORD $0xe40c4201   // ?                                    // st1b	{ z1.b }, p0, [x16, x12]
 	ADD  R11, R12, R12 // <--                                  // add	x12, x12, x11
@@ -90,7 +89,7 @@ LBB0_14:
 LBB0_15:
 	WORD $0xa42c4000   // ?                                    // ld1b	{ z0.h }, p0/z, [x0, x12]
 	WORD $0xa42c4021   // ?                                    // ld1b	{ z1.h }, p0/z, [x1, x12]
-	WORD $0x04500020   // ?                                    // mul	z0.h, p0/m, z0.h, z1.h
+	WORD $0x04606020   // ?                                    // mul	z0.h, z1.h, z0.h
 	WORD $0xe42c4040   // ?                                    // st1b	{ z0.h }, p0, [x2, x12]
 	ADD  R10, R12, R12 // <--                                  // add	x12, x12, x10
 	CMP  R12, R9       // <--                                  // cmp	x9, x12

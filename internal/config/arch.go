@@ -56,6 +56,8 @@ func For(arch string) (*Arch, error) {
 		return Neon(), nil
 	case "sve":
 		return SVE(), nil
+	case "sve2":
+		return SVE2(), nil
 	case "avx2":
 		return Avx2(), nil
 	case "avx512":
@@ -136,7 +138,7 @@ func ARM64() *Arch {
 		BuildTags:   "//go:build !noasm && arm64",
 		CommentCh:   "//",
 		CallOp:      map[int8]string{1: "MOVB", 2: "MOVH", 4: "MOVW", 8: "MOVD"},
-		ClangFlags:  []string{"--target=aarch64-linux-gnu", "-ffixed-x18"},
+		ClangFlags:  []string{"--target=aarch64-linux-gnu", "-ffixed-x18", "-ffixed-x27", "-ffixed-x28"},
 	}
 
 	return arch
@@ -152,6 +154,12 @@ func Neon() *Arch {
 func SVE() *Arch {
 	arch := ARM64()
 	arch.ClangFlags = append(arch.ClangFlags, "-march=armv8.2-a+sve", "-mfpu=sve")
+	return arch
+}
+
+func SVE2() *Arch {
+	arch := ARM64()
+	arch.ClangFlags = append(arch.ClangFlags, "-march=armv8.5-a+sve2", "-mfpu=sve2")
 	return arch
 }
 

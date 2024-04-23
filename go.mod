@@ -65,3 +65,5 @@ require (
 	modernc.org/strutil v1.2.0 // indirect
 	modernc.org/token v1.1.0 // indirect
 )
+
+replace golang.org/x/sys => github.com/mhr3/golang-sys v0.0.0-20240421150016-224806d7300f
