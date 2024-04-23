@@ -34,7 +34,7 @@ func TestParseAssembly(t *testing.T) {
 	}
 }
 
-func TestParseClangObjectDump(t *testing.T) {
+func TestParseClangObjectDumpAmd64(t *testing.T) {
 	fn, err := ParseAssembly(config.AMD64(), "../../fixtures/test_avx.s")
 	assert.NoError(t, err)
 
@@ -45,6 +45,23 @@ func TestParseClangObjectDump(t *testing.T) {
 	assert.Len(t, fn, 1)
 	assert.Len(t, fn[0].Consts, 1)
 	assert.Len(t, fn[0].Lines, 135)
+	for _, line := range fn[0].Lines {
+		assert.NotEmpty(t, line.Assembly)
+		assert.NotEmpty(t, line.Binary)
+	}
+}
+
+func TestParseClangObjectDumpArm64(t *testing.T) {
+	fn, err := ParseAssembly(config.ARM64(), "../../fixtures/test_neon.s")
+	assert.NoError(t, err)
+
+	dump, err := os.ReadFile("../../fixtures/test_neon.o.txt")
+	assert.NoError(t, err)
+
+	assert.NoError(t, ParseClangObjectDump(config.ARM64(), string(dump), fn, nil))
+	assert.Len(t, fn, 1)
+	assert.Len(t, fn[0].Consts, 0)
+	assert.Len(t, fn[0].Lines, 65)
 	for _, line := range fn[0].Lines {
 		assert.NotEmpty(t, line.Assembly)
 		assert.NotEmpty(t, line.Binary)

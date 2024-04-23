@@ -157,6 +157,9 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 			for _, s := range splits {
 				// If the binary representation is not separated with spaces, split it
 				switch {
+				case len(s) == 8:
+					// fast path for arm64
+					binary = append(binary, s[6:8], s[4:6], s[2:4], s[0:2])
 				case len(s) > 2:
 					// Iterate backwards
 					for i := len(s) - 2; i >= 0; i -= 2 {

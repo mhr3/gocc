@@ -1,0 +1,71 @@
+
+test_simd_mul.o:	file format elf64-littleaarch64
+
+Disassembly of section .text:
+
+0000000000000000 <uint8_simd_mul>:
+       0: a9bf7bfd     	stp	x29, x30, [sp, #-16]!
+       4: 7100047f     	cmp	w3, #1
+       8: 910003fd     	mov	x29, sp
+       c: 540001eb     	b.lt	0x48 <uint8_simd_mul+0x48>
+      10: 92407c68     	and	x8, x3, #0xffffffff
+      14: f100211f     	cmp	x8, #8
+      18: 540001c2     	b.hs	0x50 <uint8_simd_mul+0x50>
+      1c: aa1f03e9     	mov	x9, xzr
+      20: 8b09004a     	add	x10, x2, x9
+      24: 8b09002b     	add	x11, x1, x9
+      28: 8b09000c     	add	x12, x0, x9
+      2c: cb090108     	sub	x8, x8, x9
+      30: 38401589     	ldrb	w9, [x12], #1
+      34: 3840156d     	ldrb	w13, [x11], #1
+      38: f1000508     	subs	x8, x8, #1
+      3c: 1b097da9     	mul	w9, w13, w9
+      40: 38001549     	strb	w9, [x10], #1
+      44: 54ffff61     	b.ne	0x30 <uint8_simd_mul+0x30>
+      48: a8c17bfd     	ldp	x29, x30, [sp], #16
+      4c: d65f03c0     	ret
+      50: aa1f03e9     	mov	x9, xzr
+      54: cb00004a     	sub	x10, x2, x0
+      58: f100815f     	cmp	x10, #32
+      5c: 54fffe23     	b.lo	0x20 <uint8_simd_mul+0x20>
+      60: cb01004a     	sub	x10, x2, x1
+      64: f100815f     	cmp	x10, #32
+      68: 54fffdc3     	b.lo	0x20 <uint8_simd_mul+0x20>
+      6c: f100811f     	cmp	x8, #32
+      70: 54000062     	b.hs	0x7c <uint8_simd_mul+0x7c>
+      74: aa1f03e9     	mov	x9, xzr
+      78: 14000014     	b	0xc8 <uint8_simd_mul+0xc8>
+      7c: 9240106a     	and	x10, x3, #0x1f
+      80: 9100400b     	add	x11, x0, #16
+      84: cb0a0109     	sub	x9, x8, x10
+      88: 9100402c     	add	x12, x1, #16
+      8c: 9100404d     	add	x13, x2, #16
+      90: aa0903ee     	mov	x14, x9
+      94: ad7f8560     	ldp	q0, q1, [x11, #-16]
+      98: 9100816b     	add	x11, x11, #32
+      9c: f10081ce     	subs	x14, x14, #32
+      a0: ad7f8d82     	ldp	q2, q3, [x12, #-16]
+      a4: 9100818c     	add	x12, x12, #32
+      a8: 4e209c40     	mul	v0.16b, v2.16b, v0.16b
+      ac: 4e219c61     	mul	v1.16b, v3.16b, v1.16b
+      b0: ad3f85a0     	stp	q0, q1, [x13, #-16]
+      b4: 910081ad     	add	x13, x13, #32
+      b8: 54fffee1     	b.ne	0x94 <uint8_simd_mul+0x94>
+      bc: b4fffc6a     	cbz	x10, 0x48 <uint8_simd_mul+0x48>
+      c0: f100215f     	cmp	x10, #8
+      c4: 54fffae3     	b.lo	0x20 <uint8_simd_mul+0x20>
+      c8: 9240086a     	and	x10, x3, #0x7
+      cc: 8b09000b     	add	x11, x0, x9
+      d0: 8b0a012e     	add	x14, x9, x10
+      d4: 8b09002c     	add	x12, x1, x9
+      d8: 8b09004d     	add	x13, x2, x9
+      dc: cb0a0109     	sub	x9, x8, x10
+      e0: cb0801ce     	sub	x14, x14, x8
+      e4: fc408560     	ldr	d0, [x11], #8
+      e8: fc408581     	ldr	d1, [x12], #8
+      ec: b10021ce     	adds	x14, x14, #8
+      f0: 0e209c20     	mul	v0.8b, v1.8b, v0.8b
+      f4: fc0085a0     	str	d0, [x13], #8
+      f8: 54ffff61     	b.ne	0xe4 <uint8_simd_mul+0xe4>
+      fc: b5fff92a     	cbnz	x10, 0x20 <uint8_simd_mul+0x20>
+     100: 17ffffd2     	b	0x48 <uint8_simd_mul+0x48>
