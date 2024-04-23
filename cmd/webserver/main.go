@@ -87,7 +87,8 @@ func translate(req *gocc.WebRequest) (*gocc.WebResult, error) {
 	}
 
 	// Create a new translator
-	translator, err := gocc.NewLocal(arch, input, tmp, req.Package, req.Options...)
+	// FIXME: params for suffix & funcSuffix
+	translator, err := gocc.NewLocal(arch, input, tmp, "", "", req.Package, req.Options...)
 	if err != nil {
 		return nil, err
 	}
