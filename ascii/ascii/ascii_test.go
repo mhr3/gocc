@@ -66,7 +66,7 @@ func TestFfs(t *testing.T) {
 			t.Errorf("IsASCII(%q) = false; want true", data)
 		}
 		if res := IndexNonASCII(string(data)); res != -1 {
-			t.Errorf("IndexNonASCII(%q[%d]) = %d; want %d", data, len(data), res, -1)
+			t.Errorf("IndexNonASCII(string%q[%d]) = %d; want %d", data, len(data), res, -1)
 		}
 
 		idx := rand.Intn(i)
@@ -75,7 +75,7 @@ func TestFfs(t *testing.T) {
 			t.Errorf("IsASCII(%q) = true; want false", data)
 		}
 		if res := IndexNonASCII(string(data)); res != idx {
-			t.Errorf("IndexNonASCII(%q[%d]) = %d; want %d", data, len(data), res, idx)
+			t.Errorf("IndexNonASCII(string%q[%d]) = %d; want %d", data, len(data), res, idx)
 		}
 	}
 }
