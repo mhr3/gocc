@@ -5,4 +5,4 @@ package ascii
 
 
 //go:noescape
-func IsASCII(src string) bool
+func isAsciiAvx(src string) bool

@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <x86intrin.h>
 
-// gocc: IsASCII(src string) bool
+// gocc: isAsciiSse(src string) bool
 bool is_ascii_sse(const char *src, uint64_t len)
 {
   __m128i ma;
