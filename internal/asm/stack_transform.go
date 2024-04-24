@@ -205,22 +205,21 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 
 			if inst.Op == arm64asm.STP && len(inst.Args) > 2 && inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30 {
 				// storing the frame pointer
-				//imm, ok := inst.Args[2].(arm64asm.MemImmediate)
+				imm, ok := inst.Args[2].(arm64asm.MemImmediate)
 				// this tells us how much stack space we're using
-				offset := parts[len(parts)-1]
-				offset = strings.TrimPrefix(offset, "#")
-				offset = strings.TrimSuffix(offset, "!")
-				offset = strings.TrimSuffix(offset, "]")
-				if n, err := strconv.Atoi(offset); err == nil {
-					if baseStack != 0 {
-						// we should find this instruction only once
-						panic("failed to analyze stack operations")
-					}
-					baseStack = -n // this _must_ be negative
+				if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
+					n := immFromMemImmediate(imm)
+					baseStack = -n
 					extraStack = baseStack
 				}
-			} else if inst.Op == arm64asm.STP {
+			} else if inst.Op == arm64asm.STP && len(inst.Args) > 2 {
 				// storing registers other than frame pointer
+				imm, ok := inst.Args[2].(arm64asm.MemImmediate)
+				if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
+					n := immFromMemImmediate(imm)
+					baseStack = -n
+					extraStack = baseStack
+				}
 				// this could still be fine, as long as it's doing just callee-saved registers
 				rewriteRequired = true
 			}
@@ -341,4 +340,27 @@ func decodeArm64Line(line Line) arm64asm.Inst {
 		panic(err)
 	}
 	return inst
+}
+
+func immFromMemImmediate(imm arm64asm.MemImmediate) int {
+	// no imm.Imm :facepalm:
+	switch imm.Mode {
+	case arm64asm.AddrOffset, arm64asm.AddrPreIndex, arm64asm.AddrPostIndex:
+		s := imm.String()
+		commaIdx := strings.Index(s, ",")
+		if commaIdx == -1 {
+			return 0
+		}
+		s = s[commaIdx+1:]
+		s = strings.TrimPrefix(s, "#")
+		s = strings.TrimSuffix(s, "!")
+		s = strings.TrimSuffix(s, "]")
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return 0
+		}
+		return n
+	default:
+		return 0
+	}
 }
