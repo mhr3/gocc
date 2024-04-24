@@ -156,6 +156,10 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 				newLines = append(newLines, lineCpy)
 				continue
 			}
+			if asm == "ret" {
+				// we can encounter more pops
+				pushOffset = maxOffset
+			}
 
 			// FIXME: we're keeping the SP alignment instruction, won't work if the stack isn't aligned
 			// although should be ok if we fit into the red zone

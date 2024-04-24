@@ -26,7 +26,11 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 					// definitely not
 				case strings.HasPrefix(inst, "CVT"):
 					// nope
-				case inst == "ADD" || inst == "SUB":
+				case strings.HasPrefix(inst, "SET"):
+					// nope
+				case strings.HasPrefix(inst, "PSR"):
+					// nope
+				case inst == "ADD" || inst == "SUB" || inst == "AND" || inst == "OR":
 					// only some variants are ok
 					if len(dInst) == len(inst)+1 && strings.HasPrefix(dInst, inst) && strings.HasSuffix(dInst, "Q") {
 						line.Binary = nil
@@ -50,7 +54,10 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 					// otherwise trust the disassembler
 					line.Binary = nil
 				case inst == "MOV" && strings.HasPrefix(dInst, "MOV"):
-					// we'll trust the disassembler
+					// we'll trust the disassembler, unless it's MOVL
+					if strings.HasPrefix(dInst, "MOVL") {
+						break
+					}
 					line.Binary = nil
 				case strings.HasPrefix(dInst, inst) && len(dInst) == len(inst)+1:
 					// we'll trust the disassembler
