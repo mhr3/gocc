@@ -4,7 +4,7 @@
 
 // The function returns true (1) if all chars passed in src are
 // 7-bit values (0x00..0x7F). Otherwise, it returns false (0).
-// gocc: IsASCII(src string) bool
+// gocc: isAsciiAvx(src string) bool
 bool is_ascii_avx(const char *src, uint64_t src_len)
 {
   uint64_t i = 0;
