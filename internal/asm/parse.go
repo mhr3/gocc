@@ -154,6 +154,10 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 				assembly = parts[1]
 			)
 
+			if assembly == "" {
+				return fmt.Errorf("objdump line %d: missing instruction, try to increase --insn-width of objdump", i)
+			}
+
 			for _, s := range splits {
 				// If the binary representation is not separated with spaces, split it
 				switch {
@@ -170,17 +174,30 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 				}
 			}
 
-			switch {
-			case assembly == "":
-				return fmt.Errorf("try to increase --insn-width of objdump")
-			case strings.HasPrefix(assembly, "nop"):
-				continue
-			case assembly == "xchg   %ax,%ax":
-				continue
-			case strings.HasPrefix(assembly, "cs nopw"):
-				continue
-			case lineNumber >= len(current.Lines):
-				return fmt.Errorf("%d: unexpected objectdump line: %s, please compare assembly with objdump output", i, line)
+			switch arch.Name {
+			case "arm64":
+				switch {
+				case strings.HasPrefix(assembly, "bl") && strings.TrimSpace(assembly[2:3]) == "":
+					return fmt.Errorf("unsupported CALL instruction: \"%s\"", assembly)
+				case strings.HasPrefix(assembly, "nop"):
+					continue
+				}
+			case "amd64":
+				// alignment instructions, skip
+				switch {
+				case strings.HasPrefix(assembly, "call"):
+					return fmt.Errorf("unsupported CALL instruction: \"%s\"", assembly)
+				case strings.HasPrefix(assembly, "nop"):
+					continue
+				case assembly == "xchg   %ax,%ax":
+					continue
+				case strings.HasPrefix(assembly, "cs nopw"):
+					continue
+				}
+			}
+
+			if lineNumber >= len(current.Lines) {
+				return fmt.Errorf("objdump line %d: unexpected objectdump line: %s, please compare assembly with objdump output", i, line)
 			}
 
 			if dec != nil {
