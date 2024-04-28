@@ -31,6 +31,8 @@ import (
 	"modernc.org/cc/v4"
 )
 
+const goccComment = "gocc:"
+
 var supportedTypes = mapset.NewSet(
 	"int64_t", "uint64_t",
 	"int32_t", "uint32_t",
@@ -66,9 +68,9 @@ var errNoSignature = errors.New("no gocc signature found")
 
 // Parse parse C source file and extracts functions declarations.
 func Parse(path string) ([]asm.Function, error) {
-	source, err := redactSource(path)
+	source, err := extractAnnotatedSignatures(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gocc: unable to process file: %w", err)
 	}
 
 	ccCfg, err := cc.NewConfig("", "")
@@ -81,7 +83,7 @@ func Parse(path string) ([]asm.Function, error) {
 		{Name: path, Value: source},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gocc: %w", err)
+		return nil, fmt.Errorf("gocc: cannot parse function signatures: %w", err)
 	}
 
 	var functions []asm.Function
@@ -99,9 +101,10 @@ func Parse(path string) ([]asm.Function, error) {
 			continue
 		}
 		var (
-			allTypeSpecs []cc.TypeSpecifierCase
-			funcComment  string
-			funcTypeSpec *cc.TypeSpecifier
+			allTypeSpecs     []cc.TypeSpecifierCase
+			funcComment      string
+			funcTypeSpec     *cc.TypeSpecifier
+			funcStorageClass *cc.StorageClassSpecifier
 		)
 		declSpec := funcDef.DeclarationSpecifiers
 		for declSpec != nil {
@@ -117,6 +120,7 @@ func Parse(path string) ([]asm.Function, error) {
 					funcComment = strings.TrimSpace(string(declSpec.TypeQualifier.Token.Sep()))
 				}
 			case cc.DeclarationSpecifiersStorage:
+				funcStorageClass = declSpec.StorageClassSpecifier
 				if funcComment == "" {
 					funcComment = strings.TrimSpace(string(declSpec.StorageClassSpecifier.Token.Sep()))
 				}
@@ -152,6 +156,8 @@ func Parse(path string) ([]asm.Function, error) {
 			} else if funcTypeSpec.Case != cc.TypeSpecifierVoid {
 				// the C function is returning a value, but the Go function is not
 				return nil, fmt.Errorf("%s: go function is missing a return type", goFunc.Name)
+			} else if funcStorageClass != nil && funcStorageClass.Case == cc.StorageClassSpecifierStatic {
+				return nil, fmt.Errorf("%s: function cannot be static", funcIdent.DirectDeclarator.Token.SrcStr())
 			}
 
 			function, err := convertFunction(funcIdent, extractCReturnType(allTypeSpecs), goFunc)
@@ -186,9 +192,9 @@ func extractCReturnType(specs []cc.TypeSpecifierCase) string {
 	return ret
 }
 
-// redactSource removes code from the source and only leaves function declarations.
+// extractAnnotatedSignatures removes code from the source and only leaves function declarations.
 // This is done to avoid parsing errors when the source is not compatible with the compiler.
-func redactSource(path string) (string, error) {
+func extractAnnotatedSignatures(path string) (string, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
@@ -207,6 +213,7 @@ func redactSource(path string) (string, error) {
 	redacted.WriteString("#define bool _Bool\n")
 
 	var clauseCount int
+	var isAnnotated bool
 
 	lines := strings.Split(string(src), "\n")
 	for i, l := range lines {
@@ -216,24 +223,43 @@ func redactSource(path string) (string, error) {
 			continue
 		case strings.HasPrefix(line, "//") && clauseCount == 0:
 			// keep comments
+			if clauseCount == 0 && strings.Contains(line, goccComment) {
+				isAnnotated = true
+			} else if clauseCount == 0 && isAnnotated {
+				isAnnotated = false
+			}
+
 			redacted.WriteString(line)
 			redacted.WriteRune('\n')
 		case strings.Contains(line, "{"):
-			if clauseCount == 0 {
-				bracketIdx := strings.Index(line, "{")
-				if bracketIdx == 0 {
-					// just try including the previous line
-					redacted.WriteString(lines[i-1])
+			if clauseCount == 0 && isAnnotated {
+				startLine := i
+				bracketIdx := strings.Index(line, "(")
+				for bracketIdx == -1 && startLine > 0 {
+					startLine--
+					bracketIdx = strings.Index(lines[startLine], "(")
 				}
-				redacted.WriteString(line[:bracketIdx+1])
+				// possibly include the previous lines
+				for j := startLine; j < i; j++ {
+					redacted.WriteString(strings.TrimSpace(lines[j]))
+					redacted.WriteRune(' ')
+				}
+				braceIdx := strings.Index(line, "{")
+				redacted.WriteString(line[:braceIdx+1])
 				redacted.WriteString("\n // removed for compatibility\n")
 			}
-			clauseCount++
+			braceIdx := strings.Index(line, "{")
+			closeBraceIdx := strings.Index(line, "}")
+			if closeBraceIdx == -1 || closeBraceIdx < braceIdx {
+				clauseCount++
+			}
 		case strings.Contains(line, "}"):
 			clauseCount--
-			if clauseCount == 0 {
+			if clauseCount == 0 && isAnnotated {
 				redacted.WriteString(line[strings.Index(line, "}"):])
 				redacted.WriteRune('\n')
+
+				isAnnotated = false
 			}
 		default:
 			continue
@@ -293,10 +319,10 @@ func convertFunction(declarator *cc.DirectDeclarator, returnType string, goFunc 
 func extractGoSignature(comment string) (asm.GoFunction, error) {
 	lines := strings.Split(comment, "\n")
 	for _, line := range lines {
-		if !strings.Contains(line, "gocc:") {
+		if !strings.Contains(line, goccComment) {
 			continue
 		}
-		parts := strings.SplitN(line, "gocc:", 2)
+		parts := strings.SplitN(line, goccComment, 2)
 
 		goExpr, err := parser.ParseExpr("interface {" + parts[1] + "}")
 		if err != nil {

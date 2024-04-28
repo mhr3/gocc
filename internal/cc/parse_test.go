@@ -25,3 +25,21 @@ func TestParse(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(fn))
 }
+
+func TestParseSplit(t *testing.T) {
+	fn, err := Parse("testdata/split_fn.c")
+	assert.NoError(t, err)
+	assert.Len(t, fn, 1)
+}
+
+func TestParseWithStatic(t *testing.T) {
+	fn, err := Parse("testdata/static_fn.c")
+	assert.Error(t, err)
+	assert.Nil(t, fn)
+}
+
+func TestParseStreamVByte(t *testing.T) {
+	fn, err := Parse("testdata/streamvbyte.c")
+	assert.Error(t, err)
+	assert.Nil(t, fn)
+}
