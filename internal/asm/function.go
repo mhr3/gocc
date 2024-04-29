@@ -16,6 +16,7 @@
 package asm
 
 import (
+	"encoding/binary"
 	"fmt"
 	"go/ast"
 	"go/types"
@@ -361,8 +362,8 @@ type Const struct {
 }
 
 type ConstLine struct {
-	Size  int   `json:"size"`  // Size of the constant
-	Value int64 `json:"value"` // Value of the constant
+	Size  int    `json:"size"`  // Size of the constant
+	Value uint64 `json:"value"` // Value of the constant
 }
 
 // Compile returns the string representation of a line in PLAN9 assembly
@@ -378,6 +379,8 @@ func (c *Const) Compile(arch *config.Arch) string {
 		switch d.Size {
 		case 1:
 			fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/%d, $%#02x\n", c.Label, totalSize, d.Size, d.Value)
+		case 8:
+			fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/%d, $%#016x\n", c.Label, totalSize, d.Size, d.Value)
 		default:
 			fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/%d, $%#04x\n", c.Label, totalSize, d.Size, d.Value)
 		}
@@ -391,20 +394,46 @@ func (c *Const) Compile(arch *config.Arch) string {
 }
 
 // parseConst parses a line in the constant section
-func parseConst(arch *config.Arch, line string) ConstLine {
+func parseConst(arch *config.Arch, line string) []ConstLine {
 	if arch.Name != "amd64" && arch.Name != "arm64" {
 		panic("gocc: only amd64 is supported for constants")
 	}
 
 	match := arch.Const.FindStringSubmatch(line)
-	typeName := match[1]
-	value, err := strconv.ParseInt(match[2], 10, 64)
+	if len(match) != 6 {
+		panic("gocc: invalid constant line")
+	}
+
+	isAscii := strings.HasPrefix(match[1], "ascii")
+	if !isAscii {
+		typeName := match[2]
+		value, err := strconv.ParseUint(match[3], 10, 64)
+		if err != nil {
+			panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
+		}
+
+		return []ConstLine{{
+			Size:  constSizes[typeName],
+			Value: value,
+		}}
+	}
+
+	s, err := strconv.Unquote(match[5])
 	if err != nil {
 		panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
 	}
-
-	return ConstLine{
-		Size:  constSizes[typeName],
-		Value: value,
+	data := []byte(s)
+	ret := []ConstLine{}
+	for i := 0; i+8 <= len(data); i += 8 {
+		ret = append(ret, ConstLine{
+			Size:  8,
+			Value: binary.LittleEndian.Uint64(data[i : i+8]),
+		})
 	}
+
+	if len(data)%8 != 0 {
+		panic("gocc: unaligned ascii constant parsing is not implemented")
+	}
+
+	return ret
 }

@@ -55,11 +55,17 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		switch {
 
+		switch {
 		// Handle constant lines and attach them to the current label
 		case arch.Const.MatchString(line):
-			constant.Lines = append(constant.Lines, parseConst(arch, line))
+			if constant == nil {
+				constant = &Const{Label: labelName}
+				if labelName == "" {
+					constant.Label = functionName
+				}
+			}
+			constant.Lines = append(constant.Lines, parseConst(arch, line)...)
 
 		// Skip attributes and comment lines
 		case arch.Attribute.MatchString(line):
@@ -94,6 +100,13 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 				Name:  functionName,
 				Lines: make([]Line, 0),
 			})
+
+			// do we have an empty function?
+			if current != nil && len(current.Lines) == 0 {
+				// drop the empty function
+				functions = functions[:len(functions)-1]
+			}
+
 			current = &functions[len(functions)-1]
 			labelName = "" // Reset current label
 
@@ -102,6 +115,10 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 				consts = append(consts, *constant)
 				constant = nil
 				current.Consts = append(current.Consts, consts...)
+				consts = nil
+			} else if constant != nil {
+				// reset if we have an empty constant
+				constant = nil
 			}
 
 		// Handle assembly instructions
@@ -114,6 +131,24 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 				current.Lines[len(current.Lines)-1].Assembly = code
 				labelName = ""
 			}
+		}
+	}
+
+	if current != nil {
+		// add the last constant
+		if constant != nil && len(constant.Lines) > 0 {
+			consts = append(consts, *constant)
+			constant = nil
+			current.Consts = append(current.Consts, consts...)
+			consts = nil
+		}
+
+		// drop empty functions
+		if len(current.Lines) == 0 && len(functions) > 1 {
+			consts = current.Consts
+			functions = functions[:len(functions)-1]
+			current = &functions[len(functions)-1]
+			current.Consts = append(current.Consts, consts...)
 		}
 	}
 

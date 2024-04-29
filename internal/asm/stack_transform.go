@@ -207,18 +207,29 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 			inst := decodeArm64Line(line)
 			parts := strings.Fields(line.Assembly)
 
-			if inst.Op == arm64asm.STP && len(inst.Args) > 2 && inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30 {
-				// storing the frame pointer
-				imm, ok := inst.Args[2].(arm64asm.MemImmediate)
-				// this tells us how much stack space we're using
-				if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
-					n := immFromMemImmediate(imm)
-					baseStack = -n
-					extraStack = baseStack
+			switch inst.Op {
+			case arm64asm.STP:
+				if len(inst.Args) > 2 && inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30 {
+					// storing the frame pointer
+					imm, ok := inst.Args[2].(arm64asm.MemImmediate)
+					// this tells us how much stack space we're using
+					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
+						n := immFromMemImmediate(imm)
+						baseStack = -n
+						extraStack = baseStack
+					}
+				} else if len(inst.Args) > 2 {
+					imm, ok := inst.Args[2].(arm64asm.MemImmediate)
+					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
+						n := immFromMemImmediate(imm)
+						baseStack = -n
+						extraStack = baseStack
+					}
+					// this could still be fine, as long as it's doing just callee-saved registers
+					rewriteRequired = true
 				}
-			} else if inst.Op == arm64asm.STP && len(inst.Args) > 2 {
-				// storing registers other than frame pointer
-				imm, ok := inst.Args[2].(arm64asm.MemImmediate)
+			case arm64asm.STR:
+				imm, ok := inst.Args[1].(arm64asm.MemImmediate)
 				if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
 					n := immFromMemImmediate(imm)
 					baseStack = -n
@@ -226,8 +237,7 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				}
 				// this could still be fine, as long as it's doing just callee-saved registers
 				rewriteRequired = true
-			}
-			if inst.Op == arm64asm.AND {
+			case arm64asm.AND:
 				// stack alignment
 				// this basically grows the stack, need to adjust for it
 				targetReg := inst.Args[0]
@@ -236,8 +246,7 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 					rewriteRequired = true
 					// TODO: definitely clear sign that we're doing something with the stack
 				}
-			}
-			if inst.Op == arm64asm.SUB {
+			case arm64asm.SUB:
 				// allocating stack space
 				targetReg := inst.Args[0]
 				srcReg := inst.Args[1]
@@ -304,19 +313,37 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 					continue
 				}
 
-				if inst.Op == arm64asm.STP {
+				switch inst.Op {
+				case arm64asm.STP, arm64asm.STR:
 					lineCpy := line
 					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
 					lineCpy.Binary = nil
 					newLines = append(newLines, lineCpy)
 					continue
-				}
-				if inst.Op == arm64asm.LDP {
+				case arm64asm.LDP, arm64asm.LDR:
 					lineCpy := line
 					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
 					lineCpy.Binary = nil
 					newLines = append(newLines, lineCpy)
 					continue
+				case arm64asm.AND, arm64asm.SUB:
+					if len(inst.Args) > 2 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
+						// stack alloc/alignment writing back into RSP
+						lineCpy := line
+						lineCpy.Disassembled = "NOP"
+						lineCpy.Binary = nil
+						newLines = append(newLines, lineCpy)
+						continue
+					}
+					if inst.Op == arm64asm.SUB && inst.Args[1] == arm64asm.RegSP(arm64asm.SP) {
+						// we're allocating stack space, but we already did that, just do a MOVD
+						replInst := arm64asm.Inst{Op: arm64asm.MOV, Args: arm64asm.Args{inst.Args[0], inst.Args[1]}}
+						lineCpy := line
+						lineCpy.Disassembled = arm64asm.GoSyntax(replInst, 0, nil, nil)
+						lineCpy.Binary = nil
+						newLines = append(newLines, lineCpy)
+						continue
+					}
 				}
 			}
 
@@ -335,13 +362,14 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 }
 
 func decodeArm64Line(line Line) arm64asm.Inst {
-	code, err := hex.DecodeString(strings.Join(line.Binary, ""))
+	binary := strings.Join(line.Binary, "")
+	code, err := hex.DecodeString(binary)
 	if err != nil {
 		panic(err)
 	}
 	inst, err := arm64asm.Decode(code)
 	if err != nil {
-		panic(err)
+		panic(fmt.Errorf("failed to decode instruction: %v (%q)", err, binary))
 	}
 	return inst
 }
