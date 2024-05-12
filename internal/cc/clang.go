@@ -27,30 +27,56 @@ import (
 
 // Compiler represents a C/C++ compiler.
 type Compiler struct {
-	arch  *config.Arch
-	clang string
+	arch    *config.Arch
+	clang   string
+	version string
 }
 
 // NewCompiler creates a new compiler.
 func NewCompiler(arch *config.Arch) (*Compiler, error) {
+	var version string
+
 	clang, err := config.FindClang()
 	if err != nil {
 		return nil, err
 	}
 
+	versionOutput, err := runCommand(clang, "--version")
+	if err != nil {
+		return nil, err
+	}
+
+	if parts := strings.SplitN(versionOutput, "\n", 2); len(parts) > 0 {
+		version = strings.TrimSpace(parts[0])
+	}
+
 	return &Compiler{
-		arch:  arch,
-		clang: clang,
+		arch:    arch,
+		clang:   clang,
+		version: version,
 	}, nil
+}
+
+func (c *Compiler) Version() string {
+	return c.version
 }
 
 // compile compiles the C source file to assembly and then to object.
 func (c *Compiler) Compile(source, assembly, object string, args ...string) error {
-	args = append(args, "-mno-red-zone", "-mstackrealign", "-mllvm", "-inline-threshold=1000",
-		"-fno-asynchronous-unwind-tables", "-fno-exceptions", "-fno-rtti", "-ffast-math", "-Wno-unused-command-line-argument")
+	args = append(args,
+		"-mno-red-zone",
+		"-mstackrealign",
+		"-mllvm",
+		"-inline-threshold=1000",
+		"-fno-asynchronous-unwind-tables",
+		"-fno-exceptions",
+		"-fno-rtti",
+		"-ffast-math",
+		"-Wno-unused-command-line-argument",
+	)
 	args = append(args, c.arch.ClangFlags...)
 
-	compileOutput, err := runCommand(c.clang, append([]string{"-S", "-c", source, "-o", assembly}, args...)...)
+	compileOutput, err := runCommandAndLog(c.clang, append([]string{"-S", "-c", source, "-o", assembly}, args...)...)
 	// Compile to assembly first
 	if err != nil {
 		return err
@@ -60,7 +86,7 @@ func (c *Compiler) Compile(source, assembly, object string, args ...string) erro
 	}
 
 	// Use clang to compile to object
-	objOutput, err := runCommand(c.clang, append([]string{"-c", assembly, "-o", object}, args...)...)
+	objOutput, err := runCommandAndLog(c.clang, append([]string{"-c", assembly, "-o", object}, args...)...)
 	if err != nil {
 		return err
 	}
@@ -71,11 +97,15 @@ func (c *Compiler) Compile(source, assembly, object string, args ...string) erro
 	return nil
 }
 
-// runCommand runs a command and extract its output.
-func runCommand(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
+// runCommandAndLog runs a command and extract its output.
+func runCommandAndLog(name string, args ...string) (string, error) {
 	fmt.Printf("Running %s %s\n", name, strings.Join(args, " "))
 
+	return runCommand(name, args...)
+}
+
+func runCommand(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		return string(output), nil

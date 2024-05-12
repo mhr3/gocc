@@ -307,12 +307,15 @@ func convertFunction(declarator *cc.DirectDeclarator, returnType string, goFunc 
 		}
 	}
 
+	declPos := declarator.Position()
+
 	return asm.Function{
-		Name:     declarator.DirectDeclarator.Token.SrcStr(),
-		Position: declarator.Position().Line,
-		Params:   params,
-		Ret:      retParam,
-		GoFunc:   goFunc,
+		Name:       declarator.DirectDeclarator.Token.SrcStr(),
+		SourcePath: declPos.Filename,
+		Position:   declPos.Line,
+		Params:     params,
+		Ret:        retParam,
+		GoFunc:     goFunc,
 	}, nil
 }
 

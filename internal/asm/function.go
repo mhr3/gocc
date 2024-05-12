@@ -43,6 +43,7 @@ type GoFunction struct {
 
 type Function struct {
 	Name       string  `json:"name"`
+	SourcePath string  `json:"sourcePath"`
 	Position   int     `json:"position"`
 	Params     []Param `json:"params"`
 	Consts     []Const `json:"consts,omitempty"`
