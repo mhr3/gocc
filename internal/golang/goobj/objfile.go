@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"github.com/kelindar/gocc/internal/golang/bio"
+	"github.com/mhr3/gocc/internal/golang/bio"
 )
 
 // New object file format.

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kelindar/gocc/internal/config"
+	"github.com/mhr3/gocc/internal/config"
 	"golang.org/x/arch/arm64/arm64asm"
 )
 

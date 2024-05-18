@@ -23,7 +23,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kelindar/gocc/internal/config"
+	"github.com/mhr3/gocc/internal/config"
 )
 
 type Plan9Decoder interface {

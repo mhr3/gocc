@@ -1,7 +1,7 @@
 <p align="center">
-<img width="250" height="110" src=".github/logo.png" border="0" alt="kelindar/gocc">
+<img width="250" height="110" src=".github/logo.png" border="0" alt="mhr3/gocc">
 <br>
-<img src="https://img.shields.io/github/go-mod/go-version/kelindar/gocc" alt="Go Version">
+<img src="https://img.shields.io/github/go-mod/go-version/mhr3/gocc" alt="Go Version">
 <a href="https://opensource.org/license/apache-2-0/"><img src="https://img.shields.io/badge/License-Apache-blue.svg" alt="License"></a>
 </p>
 
@@ -18,8 +18,23 @@ still use binary).
 - Only requires `clang` and `objdump` to be installed in order to compile.
 - Auto-detects the appropriate version of `clang` and `objdump` to use.
 - Supports cross-compilation.
-- Auto-generates Go stubs for the C functions by parsing C code.
+- Annotated C functions will have their Go stubs auto-generated.
 - Automatically formats go assembly using `asmfmt`.
+
+## Annotating C functions
+
+Only functions with gocc annotation will be compiled into Go functions, note that there's some limitations
+for parameters - for example when using Go slices, 3 parameters in C have to be used (base pointer, length
+and capacity). The tool will check whether the C signature is compatible with the go signature.
+
+An example annotation:
+
+```c
+// gocc: simd_fn(input string) int64
+int64_t simd_fn(char *input1, uint64_t input1_len) {
+  ...
+}
+```
 
 ## Setting up locally
 
@@ -52,7 +67,8 @@ This tool does not support most of the C features, it's not a replacement for C/
 
 - Only supports C code that can be compiled by `clang`.
 - Does not support C++ code or templates for now.
-- Does not support call statements, thus requires you to inline your C functions
+- Does not support call statements, thus requires you to inline your C functions.
+- No dynamic memory allocation.
 - Currently limited to 6 arguments per function.
 
 ## Resources

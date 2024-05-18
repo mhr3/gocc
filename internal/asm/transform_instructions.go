@@ -3,7 +3,7 @@ package asm
 import (
 	"strings"
 
-	"github.com/kelindar/gocc/internal/config"
+	"github.com/mhr3/gocc/internal/config"
 )
 
 func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {

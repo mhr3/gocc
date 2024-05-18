@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kelindar/gocc/internal/config"
+	"github.com/mhr3/gocc/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

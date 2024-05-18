@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/kelindar/gocc/internal/golang/abi"
+	"github.com/mhr3/gocc/internal/golang/abi"
 )
 
 // CUFileIndex is used to index the filenames that are stored in the

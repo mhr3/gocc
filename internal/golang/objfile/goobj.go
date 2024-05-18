@@ -14,10 +14,10 @@ import (
 	"io"
 	"os"
 
-	"github.com/kelindar/gocc/internal/golang/archive"
-	"github.com/kelindar/gocc/internal/golang/goobj"
-	"github.com/kelindar/gocc/internal/golang/objabi"
-	"github.com/kelindar/gocc/internal/golang/sys"
+	"github.com/mhr3/gocc/internal/golang/archive"
+	"github.com/mhr3/gocc/internal/golang/goobj"
+	"github.com/mhr3/gocc/internal/golang/objabi"
+	"github.com/mhr3/gocc/internal/golang/sys"
 )
 
 type goobjFile struct {

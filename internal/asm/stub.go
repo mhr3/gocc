@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kelindar/gocc/internal/config"
+	"github.com/mhr3/gocc/internal/config"
 )
 
 // GenerateGoStubs generates Go stubs for the functions.

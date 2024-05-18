@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/imroc/req/v3"
-	"github.com/kelindar/gocc/internal/cc"
+	"github.com/mhr3/gocc/internal/cc"
 )
 
 // WebRequest represents a request to the remote server

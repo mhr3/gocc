@@ -27,7 +27,7 @@ import (
 	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/kelindar/gocc/internal/asm"
+	"github.com/mhr3/gocc/internal/asm"
 	"modernc.org/cc/v4"
 )
 

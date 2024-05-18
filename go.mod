@@ -1,4 +1,4 @@
-module github.com/kelindar/gocc
+module github.com/mhr3/gocc
 
 go 1.21
 

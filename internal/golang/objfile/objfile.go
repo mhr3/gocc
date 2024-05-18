@@ -13,7 +13,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/kelindar/gocc/internal/golang/archive"
+	"github.com/mhr3/gocc/internal/golang/archive"
 )
 
 type rawFile interface {

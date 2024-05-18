@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kelindar/gocc/internal/golang/bisect"
+	"github.com/mhr3/gocc/internal/golang/bisect"
 )
 
 func Flagcount(name, usage string, val *int) {

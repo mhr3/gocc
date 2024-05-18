@@ -3,7 +3,7 @@ package asm
 import (
 	"testing"
 
-	"github.com/kelindar/gocc/internal/config"
+	"github.com/mhr3/gocc/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 

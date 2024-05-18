@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kelindar/gocc"
-	"github.com/kelindar/gocc/internal/config"
+	"github.com/mhr3/gocc"
+	"github.com/mhr3/gocc/internal/config"
 )
 
 func main() {

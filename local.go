@@ -22,9 +22,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kelindar/gocc/internal/asm"
-	"github.com/kelindar/gocc/internal/cc"
-	"github.com/kelindar/gocc/internal/config"
+	"github.com/mhr3/gocc/internal/asm"
+	"github.com/mhr3/gocc/internal/cc"
+	"github.com/mhr3/gocc/internal/config"
 )
 
 // Local translates a C file to Go assembly

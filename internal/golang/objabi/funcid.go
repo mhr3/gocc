@@ -7,7 +7,7 @@ package objabi
 import (
 	"strings"
 
-	"github.com/kelindar/gocc/internal/golang/abi"
+	"github.com/mhr3/gocc/internal/golang/abi"
 )
 
 var funcIDs = map[string]abi.FuncID{

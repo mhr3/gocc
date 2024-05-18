@@ -7,7 +7,7 @@ package objabi
 import (
 	"runtime"
 
-	"github.com/kelindar/gocc/internal/golang/abi"
+	"github.com/mhr3/gocc/internal/golang/abi"
 )
 
 func StackNosplit(race bool) int {

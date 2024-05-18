@@ -3,7 +3,7 @@ package generated_test
 import (
 	"testing"
 
-	"github.com/kelindar/gocc/internal/asm/generated"
+	"github.com/mhr3/gocc/internal/asm/generated"
 	"github.com/stretchr/testify/assert"
 )
 

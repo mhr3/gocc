@@ -21,8 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kelindar/gocc/internal/config"
 	"github.com/klauspost/asmfmt"
+	"github.com/mhr3/gocc/internal/config"
 )
 
 // Generate generates the Go PLAN9 assembly

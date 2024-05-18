@@ -1,9 +1,9 @@
 package cc
 
 import (
-	"github.com/kelindar/gocc/internal/asm"
-	"github.com/kelindar/gocc/internal/config"
-	"github.com/kelindar/gocc/internal/golang/objfile"
+	"github.com/mhr3/gocc/internal/asm"
+	"github.com/mhr3/gocc/internal/config"
+	"github.com/mhr3/gocc/internal/golang/objfile"
 )
 
 type Disassembler struct {
