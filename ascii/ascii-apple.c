@@ -77,12 +77,31 @@ int64_t index_nonascii(const unsigned char *data, const uint64_t length){
 // gocc: IsASCII(data string) bool
 bool is_ascii(unsigned char *data, uint64_t length){
     const uint64_t blockSize = 16; // NEON can process 128 bits (16 bytes) at a time
+    const uint64_t ld4BlockSize = blockSize * 4;
 
     if (length >= 8)
     {
         uint8x16_t msb_mask = vdupq_n_u8(0x80); // Create a mask for the MSB
 
-        for (const unsigned char *neon_end = (data + length) - (length % blockSize); data < neon_end; data += blockSize)
+#ifndef SKIP_LD4
+        for (const unsigned char *data_bound = (data + length) - (length % ld4BlockSize); data < data_bound; data += ld4BlockSize)
+        {
+            uint8x16x4_t blocks = vld4q_u8(data);         // Load 64 bytes of data
+            blocks.val[0] = vandq_u8(blocks.val[0], msb_mask); // AND with the mask to isolate MSB
+            blocks.val[1] = vandq_u8(blocks.val[1], msb_mask); // AND with the mask to isolate MSB
+            blocks.val[2] = vandq_u8(blocks.val[2], msb_mask); // AND with the mask to isolate MSB
+            blocks.val[3] = vandq_u8(blocks.val[3], msb_mask); // AND with the mask to isolate MSB
+
+            uint8x16_t result = vorrq_u8(vorrq_u8(blocks.val[0], blocks.val[1]), vorrq_u8(blocks.val[2], blocks.val[3])); // OR the results
+            // Check if there's any set bit (u32 is faster than u8)
+            if (vmaxvq_u32(result) > 0)
+            {
+                return false;
+            }
+        }
+        length %= ld4BlockSize;
+#endif
+        for (const unsigned char *data_bound = (data + length) - (length % blockSize); data < data_bound; data += blockSize)
         {
             uint8x16_t block = vld1q_u8(data);         // Load 16 bytes of data
             uint8x16_t result = vandq_u8(block, msb_mask); // AND with the mask to isolate MSB
