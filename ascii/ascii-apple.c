@@ -19,8 +19,8 @@ int64_t index_nonascii(const unsigned char *data, const uint64_t length){
         {
             uint8x16_t block = vld1q_u8(data + i);         // Load 16 bytes of data
             uint8x16_t result = vandq_u8(block, msb_mask); // AND with the mask to isolate MSB
-            // Check if there's any set bit
-            if (vmaxvq_u8(result) > 0)
+            // Check if there's any set bit (u32 is faster than u8)
+            if (vmaxvq_u32(result) > 0)
             {
                 // now a few operations to find the index of the first set bit
                 result = vshrq_n_u8(result, 7); // Shift the MSB to the LSB
@@ -39,7 +39,7 @@ int64_t index_nonascii(const unsigned char *data, const uint64_t length){
             // same as above, but for 8 bytes
             uint8x8_t block = vld1_u8(data + i);
             uint8x8_t result = vand_u8(block, vget_low_u8(msb_mask));
-            if (vmaxv_u8(result) > 0)
+            if (vmaxv_u16(result) > 0) // faster than u8
             {
                 result = vshr_n_u8(result, 7);
                 result = vmul_u8(result, vget_low_u8(indexes));
@@ -86,8 +86,8 @@ bool is_ascii(unsigned char *data, uint64_t length){
         {
             uint8x16_t block = vld1q_u8(data);         // Load 16 bytes of data
             uint8x16_t result = vandq_u8(block, msb_mask); // AND with the mask to isolate MSB
-            // Check if there's any set bit
-            if (vmaxvq_u8(result) > 0)
+            // Check if there's any set bit (u32 is faster than u8)
+            if (vmaxvq_u32(result) > 0)
             {
                 return false;
             }
