@@ -405,7 +405,7 @@ func parseConst(arch *config.Arch, line string) []ConstLine {
 		panic("gocc: invalid constant line")
 	}
 
-	isAscii := strings.HasPrefix(match[1], "ascii")
+	isAscii := strings.HasPrefix(match[1], "asci") // ascii or asciz
 	if !isAscii {
 		typeName := match[2]
 		value, err := strconv.ParseUint(match[3], 10, 64)
@@ -423,6 +423,10 @@ func parseConst(arch *config.Arch, line string) []ConstLine {
 	if err != nil {
 		panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
 	}
+	if match[4] == "asciz" {
+		s += "\x00"
+	}
+
 	data := []byte(s)
 	ret := []ConstLine{}
 	for i := 0; i+8 <= len(data); i += 8 {

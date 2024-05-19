@@ -17,8 +17,10 @@ package asm
 import (
 	"testing"
 
-	"github.com/mhr3/gocc/internal/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/mhr3/gocc/internal/config"
 )
 
 func TestParamSizes(t *testing.T) {
@@ -112,4 +114,50 @@ func TestLineARM(t *testing.T) {
 	}
 	assert.Equal(t, "\tWORD $0x910003fd\t// mov x29, sp\n",
 		line.Compile(config.ARM64()))
+}
+
+func TestParseConst(t *testing.T) {
+	testCases := []struct {
+		Name        string
+		Const       string
+		ExpectedLen int
+	}{
+		{
+			Name:        "byte",
+			Const:       `	.byte	255`,
+			ExpectedLen: 1,
+		},
+		{
+			Name:        "int",
+			Const:       `	.int	42`,
+			ExpectedLen: 4,
+		},
+		{
+			Name:        "ascii",
+			Const:       `	.ascii	"\000\377\377\377\001\377\377\377\002\377\377\377\003\377\377\377"`,
+			ExpectedLen: 16,
+		},
+		{
+			Name:        "asciz",
+			Const:       `	.asciz	"\002\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\003\000\000\000\000"`,
+			ExpectedLen: 32,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			for _, arch := range []*config.Arch{config.AMD64(), config.ARM64()} {
+				require.True(t, arch.Const.MatchString(tc.Const))
+
+				lines := parseConst(arch, tc.Const)
+				assert.NotEmpty(t, lines)
+
+				l := 0
+				for _, line := range lines {
+					l += line.Size
+				}
+				assert.Equal(t, tc.ExpectedLen, l)
+			}
+		})
+	}
 }
