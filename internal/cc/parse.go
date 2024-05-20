@@ -231,6 +231,8 @@ func extractAnnotatedSignatures(path string) (string, error) {
 
 			redacted.WriteString(line)
 			redacted.WriteRune('\n')
+		case strings.Contains(line, "{") && strings.Contains(line, "}"):
+			clauseCount += strings.Count(line, "{") - strings.Count(line, "}")
 		case strings.Contains(line, "{"):
 			if clauseCount == 0 && isAnnotated {
 				startLine := i
