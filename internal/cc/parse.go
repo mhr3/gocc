@@ -202,6 +202,7 @@ func extractAnnotatedSignatures(path string) (string, error) {
 
 	var redacted strings.Builder
 	redacted.WriteString("#define __STDC_HOSTED__ 1\n")
+	redacted.WriteString("#define size_t unsigned long long\n")
 	redacted.WriteString("#define uint64_t unsigned long long\n")
 	redacted.WriteString("#define uint32_t unsigned int\n")
 	redacted.WriteString("#define uint16_t unsigned short\n")
