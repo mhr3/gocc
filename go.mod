@@ -3,6 +3,7 @@ module github.com/mhr3/gocc
 go 1.21
 
 require (
+	github.com/carlmjohnson/versioninfo v0.22.5
 	github.com/deckarep/golang-set/v2 v2.3.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/imroc/req/v3 v3.42.3
