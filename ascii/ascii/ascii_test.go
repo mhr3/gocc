@@ -186,3 +186,20 @@ func BenchmarkAsciiEqualFold(b *testing.B) {
 		})
 	}
 }
+
+func FuzzEqualFold(f *testing.F) {
+	f.Add("01234567", "01234567")
+	f.Add("abcd", "ABCD")
+	f.Add("EqualFold", "equalFold")
+
+	f.Fuzz(func(t *testing.T, in1, in2 string) {
+		if !IsASCII(in1) || !IsASCII(in2) {
+			t.Skip()
+		}
+
+		res := EqualFold(in1, in2)
+		if res != strings.EqualFold(in1, in2) {
+			t.Fatalf("EqualFold(%q, %q) = %v; want %v", in1, in2, res, strings.EqualFold(in1, in2))
+		}
+	})
+}
