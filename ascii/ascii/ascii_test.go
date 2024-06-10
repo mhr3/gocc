@@ -3,6 +3,7 @@ package ascii
 import (
 	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 
 	segAscii "github.com/segmentio/asm/ascii"
@@ -80,6 +81,38 @@ func TestFfs(t *testing.T) {
 	}
 }
 
+func TestEqualFold(t *testing.T) {
+	equalFoldTests := []struct {
+		s, t string
+		out  bool
+	}{
+		{"", "", true},
+		{"abc", "abc", true},
+		{"ABcd", "ABcd", true},
+		{"123abc", "123ABC", true},
+		{"abc", "xyz", false},
+		{"abc", "XYZ", false},
+		{"abcdefghijk", "abcdefghijX", false},
+		{"1", "2", false},
+		{"utf-8", "US-ASCII", false},
+		{"hello", "Hello", true},
+		{"oh hello there!!", "oh hello there!!", true},
+		{"oh hello there!!", "oh HELLO there!!", true},
+		{"oh hello there!!", "oh HELLO there !", false},
+		{"oh hello there!! friend!", "oh HELLO there!! FRIEND!", true},
+	}
+
+	for _, tt := range equalFoldTests {
+		if out := EqualFold(tt.s, tt.t); out != tt.out {
+			t.Errorf("EqualFold(%#q, %#q) = %v, want %v", tt.s, tt.t, out, tt.out)
+		}
+		if out := EqualFold(tt.t, tt.s); out != tt.out {
+			t.Errorf("EqualFold(%#q, %#q) = %v, want %v", tt.t, tt.s, out, tt.out)
+		}
+	}
+
+}
+
 func indexNonAsciiGo(s []byte) int {
 	for i, r := range s {
 		if r >= 0x80 {
@@ -121,6 +154,34 @@ func BenchmarkAscii(b *testing.B) {
 			b.SetBytes(int64(len(asciiStr)))
 			for i := 0; i < b.N; i++ {
 				IsASCII(asciiStr)
+			}
+		})
+	}
+}
+
+func BenchmarkAsciiEqualFold(b *testing.B) {
+	for _, n := range []int{1, 7, 15, 44, 100, 1000} {
+		asciiBuf := makeASCII(n)
+		asciiStr := string(asciiBuf)
+
+		b.Run(fmt.Sprintf("go-%d", n), func(b *testing.B) {
+			b.SetBytes(int64(len(asciiStr)))
+			for i := 0; i < b.N; i++ {
+				strings.EqualFold(asciiStr, asciiStr)
+			}
+		})
+
+		b.Run(fmt.Sprintf("segment-%d", n), func(b *testing.B) {
+			b.SetBytes(int64(len(asciiStr)))
+			for i := 0; i < b.N; i++ {
+				segAscii.EqualFoldString(asciiStr, asciiStr)
+			}
+		})
+
+		b.Run(fmt.Sprintf("simd-%d", n), func(b *testing.B) {
+			b.SetBytes(int64(len(asciiStr)))
+			for i := 0; i < b.N; i++ {
+				EqualFold(asciiStr, asciiStr)
 			}
 		})
 	}
