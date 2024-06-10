@@ -282,8 +282,8 @@ LBB2_4:
 	VADD  V2.B16, V4.B16, V4.B16           // <--                                  // add	v4.16b, v4.16b, v2.16b
 	VTBL  V3.B16, [V0.B16, V1.B16], V5.B16 // <--                                  // tbl	v5.16b, { v0.16b, v1.16b }, v3.16b
 	VTBL  V4.B16, [V0.B16, V1.B16], V6.B16 // <--                                  // tbl	v6.16b, { v0.16b, v1.16b }, v4.16b
-	WORD  $0x6e258463                      // VSUB V5.B16, V3.B16, V3.B16          // sub	v3.16b, v3.16b, v5.16b
-	WORD  $0x6e268484                      // VSUB V6.B16, V4.B16, V4.B16          // sub	v4.16b, v4.16b, v6.16b
+	VSUB  V5.B16, V3.B16, V3.B16           // <--                                  // sub	v3.16b, v3.16b, v5.16b
+	VSUB  V6.B16, V4.B16, V4.B16           // <--                                  // sub	v4.16b, v4.16b, v6.16b
 	WORD  $0x6e248c63                      // VCMEQ V4.B16, V3.B16, V3.B16         // cmeq	v3.16b, v3.16b, v4.16b
 	WORD  $0x6eb1a863                      // VUMINV V3.S4, V3                     // uminv	s3, v3.4s
 	FMOVS F3, R9                           // <--                                  // fmov	w9, s3
@@ -305,8 +305,8 @@ LBB2_6:
 	VADD  V3.B8, V4.B8, V3.B8            // <--                                  // add	v3.8b, v4.8b, v3.8b
 	VTBL  V2.B8, [V0.B16, V1.B16], V4.B8 // <--                                  // tbl	v4.8b, { v0.16b, v1.16b }, v2.8b
 	VTBL  V3.B8, [V0.B16, V1.B16], V5.B8 // <--                                  // tbl	v5.8b, { v0.16b, v1.16b }, v3.8b
-	WORD  $0x2e248442                    // VSUB V4.B8, V2.B8, V2.B8             // sub	v2.8b, v2.8b, v4.8b
-	WORD  $0x2e258463                    // VSUB V5.B8, V3.B8, V3.B8             // sub	v3.8b, v3.8b, v5.8b
+	VSUB  V4.B8, V2.B8, V2.B8            // <--                                  // sub	v2.8b, v2.8b, v4.8b
+	VSUB  V5.B8, V3.B8, V3.B8            // <--                                  // sub	v3.8b, v3.8b, v5.8b
 	WORD  $0x2e238c42                    // VCMEQ V3.B8, V2.B8, V2.B8            // cmeq	v2.8b, v2.8b, v3.8b
 	WORD  $0x2e71a842                    // VUMINV V2.H4, V2                     // uminv	h2, v2.4h
 	FMOVS F2, R9                         // <--                                  // fmov	w9, s2
@@ -385,8 +385,8 @@ LBB2_21:
 	VADD  V2.B8, V4.B8, V2.B8            // <--                                  // add	v2.8b, v4.8b, v2.8b
 	VTBL  V3.B8, [V0.B16, V1.B16], V4.B8 // <--                                  // tbl	v4.8b, { v0.16b, v1.16b }, v3.8b
 	VTBL  V2.B8, [V0.B16, V1.B16], V0.B8 // <--                                  // tbl	v0.8b, { v0.16b, v1.16b }, v2.8b
-	WORD  $0x2e248461                    // VSUB V4.B8, V3.B8, V1.B8             // sub	v1.8b, v3.8b, v4.8b
-	WORD  $0x2e208440                    // VSUB V0.B8, V2.B8, V0.B8             // sub	v0.8b, v2.8b, v0.8b
+	VSUB  V4.B8, V3.B8, V1.B8            // <--                                  // sub	v1.8b, v3.8b, v4.8b
+	VSUB  V0.B8, V2.B8, V0.B8            // <--                                  // sub	v0.8b, v2.8b, v0.8b
 	WORD  $0x2e208c20                    // VCMEQ V0.B8, V1.B8, V0.B8            // cmeq	v0.8b, v1.8b, v0.8b
 	WORD  $0x2e71a800                    // VUMINV V0.H4, V0                     // uminv	h0, v0.4h
 	FMOVS F0, R8                         // <--                                  // fmov	w8, s0
