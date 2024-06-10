@@ -9,3 +9,6 @@ func IndexNonASCII(data string) int
 
 //go:noescape
 func IsASCII(data string) bool
+
+//go:noescape
+func EqualFold(a string, b string) bool
