@@ -30,11 +30,10 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 					// nope
 				case strings.HasPrefix(inst, "PSR"):
 					// nope
+				case strings.HasSuffix(dInst, "L"):
+					// the toolchain is so bad with these, skip
 				case inst == "ADD" || inst == "SUB" || inst == "AND" || inst == "OR":
-					// only some variants are ok
-					if len(dInst) == len(inst)+1 && strings.HasPrefix(dInst, inst) && strings.HasSuffix(dInst, "Q") {
-						line.Binary = nil
-					}
+					line.Binary = nil
 				case inst == "TEST":
 					// operands can be reversed, skip
 				case inst == dInst:
@@ -108,7 +107,7 @@ func removeBinaryInstructionsArm64(_ *config.Arch, function Function) Function {
 					line.Binary = nil
 				case strings.HasPrefix(dInst, "V") && dInst[1:] == inst:
 					switch dInst {
-					case "VDUP", "VTBL", "VADD", "VAND", "VORR", "VEOR", "VEXT", "VCNT":
+					case "VDUP", "VTBL", "VADD", "VAND", "VSUB", "VORR", "VEOR", "VEXT", "VCNT":
 						line.Binary = nil
 					}
 				}
