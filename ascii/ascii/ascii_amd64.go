@@ -2,7 +2,11 @@
 
 package ascii
 
-import "golang.org/x/sys/cpu"
+import (
+	"strings"
+
+	"golang.org/x/sys/cpu"
+)
 
 var useAVX2 = cpu.X86.HasAVX2
 
@@ -20,4 +24,8 @@ func IndexNonASCII(s string) int {
 		}
 	}
 	return -1
+}
+
+func EqualFold(a, b string) bool {
+	return strings.EqualFold(a, b)
 }
