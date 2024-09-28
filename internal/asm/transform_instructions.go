@@ -32,12 +32,16 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 					// nope
 				case strings.HasSuffix(dInst, "L"):
 					// the toolchain is so bad with these, skip
+					// unless it's CMPL or XORL
+					if dInst == "CMPL" || dInst == "XORL" {
+						line.Binary = nil
+					}
 				case inst == "ADD" || inst == "SUB" || inst == "AND" || inst == "OR":
 					line.Binary = nil
 				case inst == "TEST":
 					// operands can be reversed, skip
 				case inst == dInst:
-					if strings.Contains(line.Assembly, "ymm") || strings.Contains(line.Assembly, "zmm") {
+					if strings.Contains(line.Assembly, "xmm") || strings.Contains(line.Assembly, "ymm") || strings.Contains(line.Assembly, "zmm") {
 						// disassembler gets this wrong
 						break
 					} else if inst == "FMUL" {
