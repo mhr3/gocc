@@ -161,13 +161,13 @@ func Neon() *Arch {
 
 func SVE() *Arch {
 	arch := ARM64()
-	arch.ClangFlags = append(arch.ClangFlags, "-march=armv8.2-a+sve", "-mfpu=sve")
+	arch.ClangFlags = append(arch.ClangFlags, "-march=armv8.2-a+sve")
 	return arch
 }
 
 func SVE2() *Arch {
 	arch := ARM64()
-	arch.ClangFlags = append(arch.ClangFlags, "-march=armv8.5-a+sve2", "-mfpu=sve2")
+	arch.ClangFlags = append(arch.ClangFlags, "-march=armv8.5-a+sve2")
 	return arch
 }
 
