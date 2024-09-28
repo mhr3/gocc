@@ -29,6 +29,8 @@ import (
 var constSizes = map[string]int{
 	"byte":  1,
 	"short": 2,
+	"hword": 2,
+	"word":  4,
 	"long":  4,
 	"int":   4,
 	"quad":  8,

@@ -128,6 +128,11 @@ func TestParseConst(t *testing.T) {
 			ExpectedLen: 1,
 		},
 		{
+			Name:        "hword",
+			Const:       `	.hword  30`,
+			ExpectedLen: 2,
+		},
+		{
 			Name:        "int",
 			Const:       `	.int	42`,
 			ExpectedLen: 4,
