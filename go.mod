@@ -66,3 +66,5 @@ require (
 	modernc.org/strutil v1.2.0 // indirect
 	modernc.org/token v1.1.0 // indirect
 )
+
+replace golang.org/x/arch => github.com/mhr3/arch v0.0.0-20241019131242-b17390372d21
