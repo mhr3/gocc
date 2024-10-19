@@ -30,7 +30,7 @@ func TestGenerate(t *testing.T) {
 	var fn []Function
 	assert.NoError(t, json.Unmarshal(b, &fn))
 
-	asm, err := Generate(config.AMD64(), "", "", fn)
+	asm, err := Generate(config.AMD64(), "", fn, GeneratorMeta{})
 	assert.NoError(t, err)
 
 	assert.Contains(t, string(asm), "GLOBL LCPI0_0<>(SB), (RODATA|NOPTR), $32")

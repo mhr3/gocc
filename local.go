@@ -134,7 +134,12 @@ func (t *Local) Translate() error {
 		return err
 	}
 
-	return asm.GenerateFile(t.Arch, t.GoAssembly, t.Source, t.Clang.Version(), functions)
+	meta := asm.GeneratorMeta{
+		ClangVersion: t.Clang.Version(),
+		Options:      t.Options,
+	}
+
+	return asm.GenerateFile(t.Arch, t.GoAssembly, t.Source, functions, meta)
 }
 
 // Output returns the output files as a web result
