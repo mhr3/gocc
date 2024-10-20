@@ -10,7 +10,7 @@ require (
 	github.com/klauspost/asmfmt v1.3.2
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.3
-	golang.org/x/arch v0.7.0
+	golang.org/x/arch v0.10.0
 	golang.org/x/sys v0.19.1-0.20240503164519-77580903240c
 	modernc.org/cc/v4 v4.19.3
 )
