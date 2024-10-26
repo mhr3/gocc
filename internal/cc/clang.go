@@ -71,6 +71,7 @@ func (c *Compiler) Compile(source, assembly, object string, args ...string) erro
 		"-fno-asynchronous-unwind-tables",
 		"-fno-exceptions",
 		"-fno-rtti",
+		"-fno-jump-tables",
 		"-ffast-math",
 		"-Wno-unused-command-line-argument",
 	)
