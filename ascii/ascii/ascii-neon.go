@@ -8,7 +8,7 @@ package ascii
 func IsASCII(data string) bool
 
 //go:noescape
-func IndexNonASCII(data string) int
+func IndexBit(data string, mask byte) int
 
 //go:noescape
 func EqualFold(a string, b string) bool

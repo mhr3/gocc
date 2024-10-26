@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+	"unicode"
 
 	segAscii "github.com/segmentio/asm/ascii"
 )
@@ -66,8 +67,8 @@ func TestFfs(t *testing.T) {
 		if IsASCII(string(data)) != true {
 			t.Errorf("IsASCII(%q) = false; want true", data)
 		}
-		if res := IndexNonASCII(string(data)); res != -1 {
-			t.Errorf("IndexNonASCII(string%q[%d]) = %d; want %d", data, len(data), res, -1)
+		if res := IndexBit(string(data), 0x80); res != -1 {
+			t.Errorf("IndexBit(string%q[%d]) = %d; want %d", data, len(data), res, -1)
 		}
 
 		idx := rand.Intn(i)
@@ -75,8 +76,8 @@ func TestFfs(t *testing.T) {
 		if IsASCII(string(data)) != false {
 			t.Errorf("IsASCII(%q) = true; want false", data)
 		}
-		if res := IndexNonASCII(string(data)); res != idx {
-			t.Errorf("IndexNonASCII(string%q[%d]) = %d; want %d", data, len(data), res, idx)
+		if res := IndexBit(string(data), 0x80); res != idx {
+			t.Errorf("IndexBit(string%q[%d]) = %d; want %d", data, len(data), res, idx)
 		}
 	}
 }
@@ -113,9 +114,9 @@ func TestEqualFold(t *testing.T) {
 
 }
 
-func indexNonAsciiGo(s []byte) int {
+func indexBitGo(s []byte, mask byte) int {
 	for i, r := range s {
-		if r >= 0x80 {
+		if r&mask != 0 {
 			return i
 		}
 	}
@@ -159,29 +160,64 @@ func BenchmarkAscii(b *testing.B) {
 	}
 }
 
-func BenchmarkAsciiEqualFold(b *testing.B) {
+func BenchmarkIndex(b *testing.B) {
 	for _, n := range []int{1, 7, 15, 44, 100, 1000} {
 		asciiBuf := makeASCII(n)
+		idx := rand.Intn(n)
+		asciiBuf[idx] |= 0x80
+
 		asciiStr := string(asciiBuf)
 
 		b.Run(fmt.Sprintf("go-%d", n), func(b *testing.B) {
 			b.SetBytes(int64(len(asciiStr)))
 			for i := 0; i < b.N; i++ {
-				strings.EqualFold(asciiStr, asciiStr)
-			}
-		})
-
-		b.Run(fmt.Sprintf("segment-%d", n), func(b *testing.B) {
-			b.SetBytes(int64(len(asciiStr)))
-			for i := 0; i < b.N; i++ {
-				segAscii.EqualFoldString(asciiStr, asciiStr)
+				indexBitGo(asciiBuf, 0x80)
 			}
 		})
 
 		b.Run(fmt.Sprintf("simd-%d", n), func(b *testing.B) {
 			b.SetBytes(int64(len(asciiStr)))
 			for i := 0; i < b.N; i++ {
-				EqualFold(asciiStr, asciiStr)
+				IndexBit(asciiStr, 0x80)
+			}
+		})
+	}
+}
+
+func BenchmarkAsciiEqualFold(b *testing.B) {
+	for _, n := range []int{1, 7, 15, 44, 100, 1000} {
+		asciiBuf := makeASCII(n)
+		s1 := string(asciiBuf)
+
+		// try to flip as least one byte
+		for k := 0; k < 3; k++ {
+			idx := rand.Intn(n)
+			if unicode.IsUpper(rune(asciiBuf[idx])) {
+				asciiBuf[idx] = byte(unicode.ToLower(rune(asciiBuf[idx])))
+			} else if unicode.IsLower(rune(asciiBuf[idx])) {
+				asciiBuf[idx] = byte(unicode.ToUpper(rune(asciiBuf[idx])))
+			}
+		}
+		s2 := string(asciiBuf)
+
+		b.Run(fmt.Sprintf("go-%d", n), func(b *testing.B) {
+			b.SetBytes(int64(len(s1)))
+			for i := 0; i < b.N; i++ {
+				strings.EqualFold(s1, s2)
+			}
+		})
+
+		b.Run(fmt.Sprintf("segment-%d", n), func(b *testing.B) {
+			b.SetBytes(int64(len(s1)))
+			for i := 0; i < b.N; i++ {
+				segAscii.EqualFoldString(s1, s2)
+			}
+		})
+
+		b.Run(fmt.Sprintf("simd-%d", n), func(b *testing.B) {
+			b.SetBytes(int64(len(s1)))
+			for i := 0; i < b.N; i++ {
+				EqualFold(s1, s2)
 			}
 		})
 	}
