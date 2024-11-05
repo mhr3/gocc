@@ -86,6 +86,7 @@ func TestValid(t *testing.T) {
 		strings.Repeat("a", 32+31) + "☺☻☹",
 		// invalid at boundary
 		strings.Repeat("a", 32+31) + "\xE2a",
+		strings.Repeat("a", 14) + "☺" + strings.Repeat("a", 13) + "\xE2",
 
 		// same inputs as benchmarks
 		"0123456789",
@@ -239,6 +240,22 @@ func BenchmarkValidStringLongJapanese(b *testing.B) {
 	b.Run("simd", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			Valid(longStringJapanese)
+		}
+	})
+}
+
+func BenchmarkInvalidStringLong(b *testing.B) {
+	invalidLongString := "\xe2" + longStringMostlyASCII
+
+	b.Run("std", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			utf8.ValidString(invalidLongString)
+		}
+	})
+
+	b.Run("simd", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			Valid(invalidLongString)
 		}
 	})
 }
