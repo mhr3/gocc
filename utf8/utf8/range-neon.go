@@ -5,4 +5,4 @@ package utf8
 
 
 //go:noescape
-func utf8_range(src string) int
+func utf8_valid_range(src string) bool
