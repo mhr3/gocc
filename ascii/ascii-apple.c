@@ -280,8 +280,8 @@ bool equal_fold(unsigned char *a, uint64_t a_len, unsigned char *b, uint64_t b_l
             // we should shift the data back, but we just need to compare, so we can skip that
             uint8x8_t result = vceq_u8(a_data, b_data);
 
-            // Check if there's any 0 bytes (u16 is faster than u8)
-            if (vminv_u16(result) != 0xFFFF)
+            // Check if there's any 0 bytes
+            if (vget_lane_u64(result, 0) != 0xFFFFFFFFFFFFFFFF)
             {
                 return false;
             }
@@ -352,7 +352,7 @@ bool equal_fold(unsigned char *a, uint64_t a_len, unsigned char *b, uint64_t b_l
     uint8x8_t result = vceq_u8(a_data, b_data);
 
     // Check if there's any 0 bytes (u16 is faster than u8)
-    if (vminv_u16(result) != 0xFFFF)
+    if (vget_lane_u64(result, 0) != 0xFFFFFFFFFFFFFFFF)
     {
         return false;
     }
