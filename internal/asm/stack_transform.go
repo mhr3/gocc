@@ -174,9 +174,21 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 	return function
 }
 
+type virtualSP struct {
+	arm64asm.RegSP
+	name   string
+	offset int
+}
+
+func (v *virtualSP) String() string {
+	// ret-8(SP)
+	return fmt.Sprintf("%s%d(SP)", v.name, v.offset)
+}
+
 func checkStackArm64(arch *config.Arch, function Function) Function {
 	var (
 		rewriteRequired bool
+		complexManip    bool
 		baseStack       int
 		extraStack      int
 	)
@@ -245,12 +257,14 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 					// allocating more stack space
 					rewriteRequired = true
 					// TODO: definitely clear sign that we're doing something with the stack
+					complexManip = true
 				}
 			case arm64asm.SUB:
 				// allocating stack space
 				targetReg := inst.Args[0]
 				srcReg := inst.Args[1]
 				if targetReg == arm64asm.RegSP(arm64asm.SP) || srcReg == arm64asm.RegSP(arm64asm.SP) {
+					complexManip = true
 					// probably allocating more stack space, either directly or through an extra register
 					imm := parts[3]
 					imm = strings.TrimPrefix(imm, "#")
@@ -286,8 +300,124 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 		}
 
 		function.Lines = newLines
+	} else if !complexManip {
+		fnName := function.Name
+		if fnName == "" {
+			fnName = "[unknown]"
+		}
+		fmt.Fprintf(os.Stderr, "WARN: %s: contains stack manipulation, running experimental transform\n", fnName)
+
+		newLines := make([]Line, 0, len(function.Lines))
+		stackAllocator := map[string]int{}
+		stackSpace := -extraStack
+
+		for _, line := range function.Lines {
+			asm := line.Assembly
+			// detect everything that touches SP
+			if spInstruction.MatchString(asm) {
+				inst := decodeArm64Line(line)
+
+				// drop the frame pointer instructions
+				if ((inst.Op == arm64asm.STP || inst.Op == arm64asm.LDP) &&
+					inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30) ||
+					inst.Op == arm64asm.MOV && inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
+					lineCpy := line
+					lineCpy.Disassembled = "NOP"
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				}
+
+				switch inst.Op {
+				case arm64asm.STP, arm64asm.STR:
+					numRegs, registers := collectSpillRegisters(inst.Args)
+					stackAllocator[registers] = stackSpace
+					if stackSpace >= 0 {
+						panic("stack space allocation failed")
+					}
+					stackSpace += 8 * numRegs
+
+					if inst.Op == arm64asm.STP || inst.Op == arm64asm.STR {
+						argIndex := 2
+						if inst.Op == arm64asm.STR {
+							argIndex = 1
+						}
+						imm, ok := inst.Args[argIndex].(arm64asm.MemImmediate)
+						// this tells us how much stack space we're using
+						if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) {
+							replacement := &virtualSP{RegSP: arm64asm.RegSP(arm64asm.SP), name: registers, offset: stackAllocator[registers]}
+							inst.Args[argIndex] = replacement
+						}
+					}
+
+					lineCpy := line
+					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
+					if idx := strings.Index(lineCpy.Disassembled, registers); idx > 0 {
+						lineCpy.Disassembled = lineCpy.Disassembled[:idx] + strings.ToLower(registers) + lineCpy.Disassembled[idx+len(registers):]
+					}
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				case arm64asm.LDP, arm64asm.LDR:
+					_, registers := collectSpillRegisters(inst.Args)
+
+					stackOffset, ok := stackAllocator[registers]
+					if ok && inst.Op == arm64asm.LDP || inst.Op == arm64asm.LDR {
+						argIndex := 2
+						if inst.Op == arm64asm.LDR {
+							argIndex = 1
+						}
+						imm, ok := inst.Args[argIndex].(arm64asm.MemImmediate)
+						if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) {
+							replacement := &virtualSP{RegSP: arm64asm.RegSP(arm64asm.SP), name: registers, offset: stackOffset}
+							inst.Args[argIndex] = replacement
+						}
+					}
+
+					lineCpy := line
+					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
+					if idx := strings.Index(lineCpy.Disassembled, registers); idx > 0 {
+						lineCpy.Disassembled = lineCpy.Disassembled[:idx] + strings.ToLower(registers) + lineCpy.Disassembled[idx+len(registers):]
+					}
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				case arm64asm.AND, arm64asm.SUB:
+					if len(inst.Args) > 2 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
+						// stack alloc/alignment writing back into RSP
+						lineCpy := line
+						lineCpy.Disassembled = "NOP"
+						lineCpy.Binary = nil
+						newLines = append(newLines, lineCpy)
+						continue
+					}
+					if inst.Op == arm64asm.SUB && inst.Args[1] == arm64asm.RegSP(arm64asm.SP) {
+						// we're allocating stack space, but we already did that, just do a MOVD
+						replInst := arm64asm.Inst{Op: arm64asm.MOV, Args: arm64asm.Args{inst.Args[0], inst.Args[1]}}
+						lineCpy := line
+						lineCpy.Disassembled = arm64asm.GoSyntax(replInst, 0, nil, nil)
+						lineCpy.Binary = nil
+						newLines = append(newLines, lineCpy)
+						continue
+					}
+				}
+			}
+
+			// FIXME: we're keeping the SP alignment instruction, won't work if the stack isn't aligned
+			// although should be ok if we fit into the red zone
+
+			newLines = append(newLines, line)
+		}
+
+		function.Lines = newLines
+		// FIXME: we're doing extra 16bytes (which C uses for x29/x30)
+		function.LocalsSize = extraStack
 	} else {
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", function.Name)
+		fnName := function.Name
+		if fnName == "" {
+			fnName = "[unknown]"
+		}
+		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", fnName)
 		// go really doesn't like messing with SP, so we have two options:
 		// 1) skip instructions that change it
 		// 2) copy SP to BP and rewrite any instructions working with SP
@@ -372,6 +502,19 @@ func decodeArm64Line(line Line) arm64asm.Inst {
 		panic(fmt.Errorf("failed to decode instruction: %v (%q)", err, binary))
 	}
 	return inst
+}
+
+func collectSpillRegisters(args arm64asm.Args) (numRegs int, registers string) {
+	for _, arg := range args {
+		if _, isReg := arg.(arm64asm.Reg); isReg {
+			numRegs++
+			registers += arg.String()
+		}
+	}
+	if len(registers) > 0 {
+		registers += "SPILL"
+	}
+	return
 }
 
 func immFromMemImmediate(imm arm64asm.MemImmediate) int {

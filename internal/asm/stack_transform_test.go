@@ -78,6 +78,33 @@ func TestStackManipulationArm64(t *testing.T) {
 	assert.Equal(t, "RET", modified.Lines[14].Disassembled)
 }
 
+func TestStackRegisterSavingArm64(t *testing.T) {
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "stp	x29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
+			{Assembly: "stp	x20, x19, [sp, #16]", Binary: wordToLineBinary(0xa9014ff4)},
+			{Assembly: "mov	x29, sp", Binary: wordToLineBinary(0x910003fd)},
+
+			{Assembly: "ldp	x20, x19, [sp, #16]", Binary: wordToLineBinary(0xa9414ff4)},
+			{Assembly: "ldp	x29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Equal(t, 32, modified.LocalsSize)
+
+	require.Len(t, modified.Lines, 6)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled)
+	assert.True(t, strings.HasPrefix(modified.Lines[1].Disassembled, "STP"))
+	assert.Contains(t, modified.Lines[1].Disassembled, "x20x19spill-32(SP)")
+	assert.True(t, strings.HasPrefix(modified.Lines[3].Disassembled, "LDP"))
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled)
+	assert.Equal(t, "RET", modified.Lines[5].Disassembled)
+}
+
 func wordToLineBinary(word uint32) []string {
 	buf := [4]byte{}
 	binary.LittleEndian.PutUint32(buf[:], word)
