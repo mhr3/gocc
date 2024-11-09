@@ -14,12 +14,14 @@ func IndexFold(str, substr string) int {
 		return 0
 	case 1:
 		b := substr[0]
-		if idx := strings.IndexByte(str, b); idx >= 0 {
-			return idx
-		} else if isUpper(b) || isLower(b) {
-			return strings.IndexByte(str, b^0x20)
+		idx := strings.IndexByte(str, b)
+		if isUpper(b) || isLower(b) {
+			idx2 := strings.IndexByte(str, b^0x20)
+			if uint(idx2) < uint(idx) {
+				idx = idx2
+			}
 		}
-		return -1
+		return idx
 	case len(str):
 		if EqualFold(str, substr) {
 			return 0

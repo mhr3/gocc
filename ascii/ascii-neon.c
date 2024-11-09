@@ -43,25 +43,29 @@ bool is_ascii(unsigned char *data, uint64_t length)
         length %= blockSize;
     }
 
-    if (length >= 8)
+    if (length & 8)
     {
-        uint64_t data64 = *(uint64_t *)(data);
-        if (data64 & 0x8080808080808080ull)
-        {
-            return false;
-        }
-        data += 8;
-        length -= 8;
-    }
+        uint64_t lo64, hi64;
+        uint8_t *data_end = data + length;
+        __builtin_memcpy(&lo64, data, sizeof(lo64));
+        __builtin_memcpy(&hi64, data_end - 8, sizeof(hi64));
 
-    uint32_t data32 = 0;
+        uint64_t data64 = lo64 | hi64;
+        return (data64 & 0x8080808080808080ull) ? false : true;
+    }
 
     if (length & 4)
     {
-        data32 |= *(uint32_t *)(data);
-        data += 4;
-        length -= 4;
+        uint32_t lo32, hi32;
+        uint8_t *data_end = data + length;
+        __builtin_memcpy(&lo32, data, sizeof(lo32));
+        __builtin_memcpy(&hi32, data_end - 4, sizeof(hi32));
+
+        uint32_t data32 = lo32 | hi32;
+        return (data32 & 0x80808080) ? false : true;
     }
+
+    uint32_t data32 = 0;
 
     if (length != 0)
     {
@@ -393,6 +397,7 @@ static inline uint8x16_t load_data16(const unsigned char *src, int64_t len) {
 }
 
 // loads up to 16 bytes of data into a 128-bit register
+// requires stack space for 2 64-bit integers, gocc has trouble with that
 static inline uint8x16_t load_data16_v2(const unsigned char *src, int64_t len) {
     if (len >= 16) {
         return vld1q_u8(src);
@@ -407,7 +412,7 @@ static inline uint8x16_t load_data16_v2(const unsigned char *src, int64_t len) {
     uint8_t *dst = (uint8_t *)&buf[0];
     uint8_t *dst_end = dst + len;
 
-    if ((len & 8) != 0) {
+    if (len & 8) {
         // Copy 8-15 bytes when the 4th bit of count is set (count >= 8)
         uint64_t lo64, hi64;
         __builtin_memcpy(&lo64, src, sizeof(lo64));
@@ -418,7 +423,7 @@ static inline uint8x16_t load_data16_v2(const unsigned char *src, int64_t len) {
         return vld1q_u8(dst);
     }
 
-    if ((len & 4) != 0) {
+    if (len & 4) {
         // Copy 4-7 bytes when the 3rd bit of count is set (count >= 4)
         uint32_t lo32, hi32;
         __builtin_memcpy(&lo32, src, sizeof(lo32));
@@ -431,19 +436,55 @@ static inline uint8x16_t load_data16_v2(const unsigned char *src, int64_t len) {
 
     // Copy 1-3 bytes
     int idx = len >> 1;
-    uint8_t A_lw = src[0];
-    uint8_t B_lw = src[idx];
-    uint8_t C_lw = src_end[-1];
-
-    dst[0] = A_lw;
-    dst[idx] = B_lw;
-    dst_end[-1] = C_lw;
+    dst[0] = src[0];
+    dst[idx] = src[idx];
+    dst_end[-1] = src_end[-1];
 
     return vld1q_u8(dst);
 }
 
+static inline int64_t index_fold_2_byte_needle(unsigned char *haystack, uint64_t haystack_len,
+    const uint16x8_t first16, const uint8x16x2_t table)
+{
+    const uint64_t blockSize = 16; // NEON can process 128 bits (16 bytes) at a time
+    const uint64_t checked_len = haystack_len - 2;
+    const uint8x16_t shift = vdupq_n_u8(0x60);
+    uint8x16_t prev_data = vdupq_n_u8(0);
+    uint64_t curr_pos = 0;
+
+    for (const unsigned char *data_bound = haystack + checked_len + 1; haystack <= data_bound; haystack += blockSize, curr_pos += blockSize)
+    {
+        uint8x16_t data = load_data16(haystack, haystack_len - curr_pos);
+
+        data = vsubq_u8(data, shift);
+        data = vsubq_u8(data, vqtbl2q_u8(table, data));
+
+        // operating on shifted data
+        const uint16x8_t res1 = vceqq_u16(data, first16);
+        const uint16x8_t prev = vextq_u8(prev_data, data, 15);
+        const uint16x8_t res2 = vceqq_u16(prev, first16);
+        prev_data = data;
+
+        const uint16x8_t combined = vorrq_u16(vshlq_n_u16(res1, 8), vshrq_n_u16(res2, 8));
+        const uint8x8_t narrowed = vshrn_n_u16(combined, 4);
+
+        // these represent positions: [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        uint64_t data64 = vget_lane_u64(narrowed, 0);
+        // clear the 0th byte on the first iteration, we made up a 0 on that position
+        if (data64 && curr_pos == 0) data64 &= ~(0xF);
+        if (data64)
+        {
+            const int pos = (__builtin_ctzll(data64) / 4) - 1;
+
+            if (haystack+pos < data_bound) return curr_pos + pos;
+        }
+    }
+
+    return -1;
+}
+
 // gocc: index_fold_simd(a, b string) int
-int64_t index_fold(unsigned char *haystack, uint64_t haystack_len, unsigned char *needle, uint64_t needle_len)
+int64_t index_fold(unsigned char *haystack, const uint64_t haystack_len, unsigned char *needle, const uint64_t needle_len)
 {
     const uint64_t blockSize = 16; // NEON can process 128 bits (16 bytes) at a time
 
@@ -466,35 +507,8 @@ int64_t index_fold(unsigned char *haystack, uint64_t haystack_len, unsigned char
 
     if (needle_len == 2)
     {
-        // we're checking two bytes at a time, so we can't advance by full 16 bytes
-        const uint64_t advance = blockSize-1;
-        uint64_t curr_pos = 0;
-
-        for (const unsigned char *data_bound = haystack + checked_len; haystack <= data_bound; haystack += advance, curr_pos += advance)
-        {
-            uint8x16_t data = load_data16(haystack, haystack_len - curr_pos);
-
-            data = vsubq_u8(data, shift);
-            data = vsubq_u8(data, vqtbl2q_u8(table, data));
-
-            // operating on shifted data
-            const uint16x8_t res1 = vceqq_u16(data, first16);
-            data = vextq_u8(data, vdupq_n_u8(0), 1);
-            const uint16x8_t res2 = vceqq_u16(data, first16);
-
-            const uint16x8_t combined = vorrq_u16(vshrq_n_u16(res1, 8), vshlq_n_u16(res2, 8));
-            const uint8x8_t narrowed = vshrn_n_u16(combined, 4);
-
-            uint64_t data64 = vget_lane_u64(narrowed, 0);
-            if (data64)
-            {
-                const int pos = __builtin_ctzll(data64) / 4;
-                // 15th byte is never valid, we made up a 0 on that position
-                if (pos < 15 && haystack+pos <= data_bound) return curr_pos + pos;
-            }
-        }
-
-        return -1;
+        // special case for 2-byte needles, no need to run EqualFold
+        return index_fold_2_byte_needle(haystack, haystack_len, first16, table);
     }
 
     // load the last 2 bytes of the needle
@@ -503,10 +517,11 @@ int64_t index_fold(unsigned char *haystack, uint64_t haystack_len, unsigned char
     needle8 = vsubq_u8(needle8, vqtbl2q_u8(table, needle8));
     const uint16x8_t last16 = vreinterpretq_u16_u8(needle8);
 
-    const uint64_t advance = blockSize-1;
+    uint8x16_t prev_data = vdupq_n_u8(0);
+    uint8x16_t prev_data_end = vdupq_n_u8(0);
     uint64_t curr_pos = 0;
 
-    for (const unsigned char *data_bound = haystack + checked_len; haystack <= data_bound; haystack += advance, curr_pos += advance)
+    for (const unsigned char *data_bound = haystack + checked_len + 1; haystack <= data_bound; haystack += blockSize, curr_pos += blockSize)
     {
         const int64_t data_len = haystack_len - curr_pos;
         uint8x16_t data = load_data16(haystack, data_len);
@@ -520,26 +535,31 @@ int64_t index_fold(unsigned char *haystack, uint64_t haystack_len, unsigned char
 
         // operating on shifted data
         const uint16x8_t res1 = vandq_u16(vceqq_u16(data, first16), vceqq_u16(data_end, last16));
+        const uint16x8_t prev = vextq_u8(prev_data, data, 15);
+        const uint16x8_t prev_end = vextq_u8(prev_data_end, data_end, 15);
+        const uint16x8_t res2 = vandq_u16(vceqq_u16(prev, first16), vceqq_u16(prev_end, last16));
+        prev_data = data;
+        prev_data_end = data_end;
 
-        data = vextq_u8(data, vdupq_n_u8(0), 1);
-        data_end = vextq_u8(data_end, vdupq_n_u8(0), 1);
-
-        const uint16x8_t res2 = vandq_u16(vceqq_u16(data, first16), vceqq_u16(data_end, last16));
-
-        const uint16x8_t combined = vorrq_u16(vshrq_n_u16(res1, 8), vshlq_n_u16(res2, 8));
+        const uint16x8_t combined = vorrq_u16(vshlq_n_u16(res1, 8), vshrq_n_u16(res2, 8));
         const uint8x8_t narrowed = vshrn_n_u16(combined, 4);
 
+        // these represent positions: [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         uint64_t data64 = vget_lane_u64(narrowed, 0);
+        // clear the 0th byte on the first iteration, we made up a 0 on that position
+        if (data64 && curr_pos == 0) data64 &= ~(0xF);
+
         while (data64)
         {
-            const int pos = __builtin_ctzll(data64) / 4;
-            // 15th byte is never valid, we made up a 0 on that position
-            if (pos < 15 && haystack+pos <= data_bound && equal_fold_core(haystack + pos, needle, needle_len, table, shift))
+            int pos = __builtin_ctzll(data64) / 4;
+            // clear the byte we just checked
+            data64 &= ~(0xFull << (pos * 4));
+            pos--;
+
+            if (haystack+pos < data_bound && equal_fold_core(haystack+pos, needle, needle_len, table, shift))
             {
                 return curr_pos + pos;
             }
-            // clear the byte we just checked
-            data64 &= ~(0xFull << (pos * 4));
         }
     }
 
