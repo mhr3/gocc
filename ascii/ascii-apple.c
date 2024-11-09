@@ -10,7 +10,7 @@ bool is_ascii(unsigned char *data, uint64_t length)
 
     if (length >= blockSize)
     {
-        uint8x16_t msb_mask = vdupq_n_u8(0x80); // Create a mask for the MSB
+        const uint8x16_t msb_mask = vdupq_n_u8(0x80); // Create a mask for the MSB
 
 #ifndef SKIP_LD1x4
         for (const unsigned char *data64_end = (data + length) - (length % ld4BlockSize); data < data64_end; data += ld4BlockSize)
@@ -54,34 +54,23 @@ bool is_ascii(unsigned char *data, uint64_t length)
         length -= 8;
     }
 
-    uint32_t data32;
+    uint32_t data32 = 0;
 
-    if (length >= 4)
+    if (length & 4)
     {
-        data32 = *(uint32_t *)(data);
-        if ((data32 & 0x80808080) != 0)
-        {
-            return false;
-        }
+        data32 |= *(uint32_t *)(data);
         data += 4;
         length -= 4;
     }
 
-    switch (length)
+    if (length != 0)
     {
-    case 3:
-        data32 = *(uint16_t *)(data);
-        data32 |= data[2] << 16;
-        break;
-    case 2:
-        data32 = *(uint16_t *)(data);
-        break;
-    case 1:
-        data32 = (uint32_t)*data;
-        break;
-    default:
-        data32 = 0;
-        break;
+        // branchless check for 1-3 bytes
+        uint8_t *data_end = data + length;
+        int idx = length >> 1;
+        data32 |= data[0];
+        data32 |= data[idx];
+        data32 |= data_end[-1];
     }
 
     return (data32 & 0x80808080) ? false : true;
@@ -226,54 +215,51 @@ static inline bool equal_fold_core(unsigned char *a, unsigned char *b, uint64_t 
 {
     const uint64_t blockSize = 16; // NEON can process 128 bits (16 bytes) at a time
 
+    for (const unsigned char *data_bound = (a + length) - (length % blockSize); a < data_bound; a += blockSize, b += blockSize)
+    {
+        uint8x16_t a_data = vld1q_u8(a); // Load 16 bytes of data
+        uint8x16_t b_data = vld1q_u8(b); // Load 16 bytes of data
+
+        a_data = vsubq_u8(a_data, shift);
+        a_data = vsubq_u8(a_data, vqtbl2q_u8(table, a_data));
+
+        b_data = vsubq_u8(b_data, shift);
+        b_data = vsubq_u8(b_data, vqtbl2q_u8(table, b_data));
+
+        // we should shift the data back, but we just need to compare, so we can skip that
+        const uint8x16_t result = vceqq_u8(a_data, b_data);
+
+        // Check if there's any 0 bytes (u32 is faster than u8)
+        if (vminvq_u32(result) != 0xFFFFFFFF)
+        {
+            return false;
+        }
+    }
+    length %= blockSize;
+
+    // same as above, but with just half the vector register
     if (length >= 8)
     {
-        for (const unsigned char *data_bound = (a + length) - (length % blockSize); a < data_bound; a += blockSize, b += blockSize)
+        uint8x8_t a_data = vld1_u8(a);
+        uint8x8_t b_data = vld1_u8(b);
+
+        a_data = vsub_u8(a_data, vget_low_u8(shift));
+        a_data = vsub_u8(a_data, vqtbl2_u8(table, a_data));
+
+        b_data = vsub_u8(b_data, vget_low_u8(shift));
+        b_data = vsub_u8(b_data, vqtbl2_u8(table, b_data));
+
+        // we should shift the data back, but we just need to compare, so we can skip that
+        const uint8x8_t result = vceq_u8(a_data, b_data);
+
+        // Check if there's any 0 bytes
+        if (vget_lane_u64(result, 0) != 0xFFFFFFFFFFFFFFFFull)
         {
-            uint8x16_t a_data = vld1q_u8(a); // Load 16 bytes of data
-            uint8x16_t b_data = vld1q_u8(b); // Load 16 bytes of data
-
-            a_data = vsubq_u8(a_data, shift);
-            a_data = vsubq_u8(a_data, vqtbl2q_u8(table, a_data));
-
-            b_data = vsubq_u8(b_data, shift);
-            b_data = vsubq_u8(b_data, vqtbl2q_u8(table, b_data));
-
-            // we should shift the data back, but we just need to compare, so we can skip that
-            const uint8x16_t result = vceqq_u8(a_data, b_data);
-
-            // Check if there's any 0 bytes (u32 is faster than u8)
-            if (vminvq_u32(result) != 0xFFFFFFFF)
-            {
-                return false;
-            }
+            return false;
         }
-        length %= blockSize;
-
-        // same as above, but with just half the vector register
-        if (length >= 8)
-        {
-            uint8x8_t a_data = vld1_u8(a);
-            uint8x8_t b_data = vld1_u8(b);
-
-            a_data = vsub_u8(a_data, vget_low_u8(shift));
-            a_data = vsub_u8(a_data, vqtbl2_u8(table, a_data));
-
-            b_data = vsub_u8(b_data, vget_low_u8(shift));
-            b_data = vsub_u8(b_data, vqtbl2_u8(table, b_data));
-
-            // we should shift the data back, but we just need to compare, so we can skip that
-            const uint8x8_t result = vceq_u8(a_data, b_data);
-
-            // Check if there's any 0 bytes
-            if (vget_lane_u64(result, 0) != 0xFFFFFFFFFFFFFFFFull)
-            {
-                return false;
-            }
-            a += 8;
-            b += 8;
-            length -= 8;
-        }
+        a += 8;
+        b += 8;
+        length %= 8;
     }
 
     if (length == 0) {
@@ -296,14 +282,12 @@ static inline bool equal_fold_core(unsigned char *a, unsigned char *b, uint64_t 
     switch (length)
     {
     case 3:
-        a_data64 <<= 16;
-        a_data64 |= *(uint16_t *)(a);
-        a_data64 <<= 8;
+        a_data64 <<= 24;
+        a_data64 |= *(uint16_t *)(a) << 8;
         a_data64 |= a[2];
         // same for b
-        b_data64 <<= 16;
-        b_data64 |= *(uint16_t *)(b);
-        b_data64 <<= 8;
+        b_data64 <<= 24;
+        b_data64 |= *(uint16_t *)(b) << 8;
         b_data64 |= b[2];
         break;
     case 2:
@@ -361,25 +345,20 @@ bool equal_fold(unsigned char *a, uint64_t a_len, unsigned char *b, uint64_t b_l
 static inline uint8x16_t load_data16(const unsigned char *src, int64_t len) {
     if (len >= 16) {
         return vld1q_u8(src);
+    } else if (len == 8) {
+        return vcombine_u64(vld1_u64((uint64_t *)src), vcreate_u64(0));
     } else if (len <= 0) {
         return vdupq_n_u8(0);
     }
 
-    const int64_t orig_len = len;
+    const uint64_t orig_len = len;
     uint64_t data64 = 0;
     uint64_t data64lo;
 
     if (len & 8) {
-        data64 = *(uint64_t *)(src);
+        data64lo = *(uint64_t *)(src);
         src += 8;
         len -= 8;
-    }
-
-    if (len == 0) {
-        return vcombine_u64(vcreate_u64(data64), vcreate_u64(0));
-    } else {
-        data64lo = data64;
-        data64 = 0;
     }
 
     if (len & 4) {
@@ -387,15 +366,24 @@ static inline uint8x16_t load_data16(const unsigned char *src, int64_t len) {
         src += 4;
         len -= 4;
     }
-    if (len & 2) {
-        uint64_t tmp = *(uint16_t *)(src);
+
+    uint64_t tmp;
+    switch (len) {
+    case 3:
+        tmp = *(uint16_t *)(src);
+        int shift = 8 * (orig_len & 4);
+        data64 |= tmp << shift;
+        tmp = src[2];
+        data64 |= tmp << (16 + shift);
+        break;
+    case 2:
+        tmp = *(uint16_t *)(src);
         data64 |= tmp << (8 * (orig_len & 4));
-        src += 2;
-        len -= 2;
-    }
-    if (len & 1) {
-        uint64_t tmp = *src;
-        data64 |= tmp << (8 * (orig_len & 6));
+        break;
+    case 1:
+        tmp = *src;
+        data64 |= tmp << (8 * (orig_len & 4));
+        break;
     }
 
     if (orig_len < 8) {
@@ -404,15 +392,66 @@ static inline uint8x16_t load_data16(const unsigned char *src, int64_t len) {
     return vcombine_u64(vcreate_u64(data64lo), vcreate_u64(data64));
 }
 
-// gocc: contains_fold(a, b string) bool
-bool contains_fold(unsigned char *haystack, uint64_t haystack_len, unsigned char *needle, uint64_t needle_len)
+// loads up to 16 bytes of data into a 128-bit register
+static inline uint8x16_t load_data16_v2(const unsigned char *src, int64_t len) {
+    if (len >= 16) {
+        return vld1q_u8(src);
+    } else if (len <= 0) {
+        return vdupq_n_u8(0);
+    }
+
+    const uint64_t orig_len = len;
+    const uint8_t *src_end = src + len;
+    uint64_t buf[2] = {0};
+
+    uint8_t *dst = (uint8_t *)&buf[0];
+    uint8_t *dst_end = dst + len;
+
+    if ((len & 8) != 0) {
+        // Copy 8-15 bytes when the 4th bit of count is set (count >= 8)
+        uint64_t lo64, hi64;
+        __builtin_memcpy(&lo64, src, sizeof(lo64));
+        __builtin_memcpy(&hi64, src_end - 8, sizeof(hi64));
+        __builtin_memcpy(dst, &lo64, sizeof(lo64));
+        __builtin_memcpy(dst_end - 8, &hi64, sizeof(hi64));
+
+        return vld1q_u8(dst);
+    }
+
+    if ((len & 4) != 0) {
+        // Copy 4-7 bytes when the 3rd bit of count is set (count >= 4)
+        uint32_t lo32, hi32;
+        __builtin_memcpy(&lo32, src, sizeof(lo32));
+        __builtin_memcpy(&hi32, src_end - 4, sizeof(hi32));
+        __builtin_memcpy(dst, &lo32, sizeof(lo32));
+        __builtin_memcpy(dst_end - 4, &hi32, sizeof(hi32));
+
+        return vld1q_u8(dst);
+    }
+
+    // Copy 1-3 bytes
+    int idx = len >> 1;
+    uint8_t A_lw = src[0];
+    uint8_t B_lw = src[idx];
+    uint8_t C_lw = src_end[-1];
+
+    dst[0] = A_lw;
+    dst[idx] = B_lw;
+    dst_end[-1] = C_lw;
+
+    return vld1q_u8(dst);
+}
+
+// gocc: index_fold_simd(a, b string) int
+int64_t index_fold(unsigned char *haystack, uint64_t haystack_len, unsigned char *needle, uint64_t needle_len)
 {
     const uint64_t blockSize = 16; // NEON can process 128 bits (16 bytes) at a time
 
     if (haystack_len < needle_len)
     {
-        return false;
+        return -1;
     }
+    // NOTE: this algorithm only works with needles of length >= 2
 
     const uint64_t checked_len = haystack_len - needle_len;
     const uint8x16x2_t table = vld1q_u8_x2(uppercasingTable);
@@ -451,11 +490,11 @@ bool contains_fold(unsigned char *haystack, uint64_t haystack_len, unsigned char
             {
                 const int pos = __builtin_ctzll(data64) / 4;
                 // 15th byte is never valid, we made up a 0 on that position
-                if (pos < 15 && haystack+pos <= data_bound) return true;
+                if (pos < 15 && haystack+pos <= data_bound) return curr_pos + pos;
             }
         }
 
-        return false;
+        return -1;
     }
 
     // load the last 2 bytes of the needle
@@ -495,11 +534,14 @@ bool contains_fold(unsigned char *haystack, uint64_t haystack_len, unsigned char
         {
             const int pos = __builtin_ctzll(data64) / 4;
             // 15th byte is never valid, we made up a 0 on that position
-            if (pos < 15 && haystack+pos <= data_bound && equal_fold_core(haystack + pos, needle, needle_len, table, shift)) return true;
+            if (pos < 15 && haystack+pos <= data_bound && equal_fold_core(haystack + pos, needle, needle_len, table, shift))
+            {
+                return curr_pos + pos;
+            }
             // clear the byte we just checked
             data64 &= ~(0xFull << (pos * 4));
         }
     }
 
-    return false;
+    return -1;
 }
