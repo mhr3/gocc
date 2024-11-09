@@ -1,6 +1,7 @@
 package ascii
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -82,6 +83,105 @@ func TestFfs(t *testing.T) {
 	}
 }
 
+func TestContainsFold(t *testing.T) {
+	containsTests := []struct {
+		str, substr string
+		expected    bool
+	}{
+		{"abc", "bc", true},
+		{"abc", "bcd", false},
+		{"abc", "", true},
+		{"", "a", false},
+		// 2-byte needle
+		{"xxxxxx", "01", false},
+		{"01xxxx", "01", true},
+		{"xx01xx", "01", true},
+		{"xxxx01", "01", true},
+		{"01xxxxx"[1:], "01", false},
+		{"xxxxx01"[:6], "01", false},
+		// 3-byte needle
+		{"xxxxxxx", "012", false},
+		{"012xxxx", "012", true},
+		{"xx012xx", "012", true},
+		{"xxxx012", "012", true},
+		{"012xxxxx"[1:], "012", false},
+		{"xxxxx012"[:7], "012", false},
+		// 4-byte needle
+		{"xxxxxxxx", "0123", false},
+		{"0123xxxx", "0123", true},
+		{"xx0123xx", "0123", true},
+		{"xxxx0123", "0123", true},
+		{"0123xxxxx"[1:], "0123", false},
+		{"xxxxx0123"[:8], "0123", false},
+		// 5-7-byte needle
+		{"xxxxxxxxx", "01234", false},
+		{"01234xxxx", "01234", true},
+		{"xx01234xx", "01234", true},
+		{"xxxx01234", "01234", true},
+		{"01234xxxxx"[1:], "01234", false},
+		{"xxxxx01234"[:9], "01234", false},
+		// 8-byte needle
+		{"xxxxxxxxxxxx", "01234567", false},
+		{"01234567xxxx", "01234567", true},
+		{"xx01234567xx", "01234567", true},
+		{"xxxx01234567", "01234567", true},
+		{"01234567xxxxx"[1:], "01234567", false},
+		{"xxxxx01234567"[:12], "01234567", false},
+		// 9-15-byte needle
+		{"xxxxxxxxxxxxx", "012345678", false},
+		{"012345678xxxx", "012345678", true},
+		{"xx012345678xx", "012345678", true},
+		{"xxxx012345678", "012345678", true},
+		{"012345678xxxxx"[1:], "012345678", false},
+		{"xxxxx012345678"[:13], "012345678", false},
+		// 16-byte needle
+		{"xxxxxxxxxxxxxxxxxxxx", "0123456789ABCDEF", false},
+		{"0123456789ABCDEFxxxx", "0123456789ABCDEF", true},
+		{"xx0123456789ABCDEFxx", "0123456789ABCDEF", true},
+		{"xxxx0123456789ABCDEF", "0123456789ABCDEF", true},
+		{"0123456789ABCDEFxxxxx"[1:], "0123456789ABCDEF", false},
+		{"xxxxx0123456789ABCDEF"[:20], "0123456789ABCDEF", false},
+		// 17-31-byte needle
+		{"xxxxxxxxxxxxxxxxxxxxx", "0123456789ABCDEFG", false},
+		{"0123456789ABCDEFGxxxx", "0123456789ABCDEFG", true},
+		{"xx0123456789ABCDEFGxx", "0123456789ABCDEFG", true},
+		{"xxxx0123456789ABCDEFG", "0123456789ABCDEFG", true},
+		{"0123456789ABCDEFGxxxxx"[1:], "0123456789ABCDEFG", false},
+		{"xxxxx0123456789ABCDEFG"[:21], "0123456789ABCDEFG", false},
+
+		// partial match cases
+		{"xx01x", "012", false},                             // 3
+		{"xx0123x", "01234", false},                         // 5-7
+		{"xx01234567x", "012345678", false},                 // 9-15
+		{"xx0123456789ABCDEFx", "0123456789ABCDEFG", false}, // 17-31, issue 15679
+		// 2 byte needle, 16byte haystack
+		{"xxxxxxxxxxxxxxxx", "01", false},
+		{"01xxxxxxxxxxxxxx", "01", true},
+		{"xx01xxxxxxxxxxxx", "01", true},
+		{"xxxxxxxxxxxxx01x", "01", true},
+		{"xxxxxxxxxxxxxxx01xxxxxxx", "01", true},
+		{"01xxxxxxxxxxxxxxx"[1:], "01", false},
+		// 5 bytes needle, 21byte haystack
+		{"xxxxxxxxxxxxxxxxxxxxx", "01234", false},
+		{"01234xxxxxxxxxxxxxxxx", "01234", true},
+		{"xx01234xxxxxxxxxxxxxx", "01234", true},
+		{"xxxxxxxxxxx01234xxxxx", "01234", true},
+		{"xxxxxxxxxxx01x34xxxxx", "01234", false},
+		{"0101x340123401234xxxx", "01234", true},
+		// fuzzed cases
+		{"000", "0\x00", false},
+		{"00000000000000000", "0`", false},
+		{"0000", "\x00\x00\x00", false},
+	}
+
+	for _, ct := range containsTests {
+		if ContainsFold(ct.str, ct.substr) != ct.expected {
+			t.Errorf("Contains(%s, %s) = %v, want %v",
+				ct.str, ct.substr, !ct.expected, ct.expected)
+		}
+	}
+}
+
 func TestEqualFold(t *testing.T) {
 	equalFoldTests := []struct {
 		s, t string
@@ -132,6 +232,33 @@ func isAsciiGo(s []byte) bool {
 	return true
 }
 
+func containsFoldGo(s []byte, substr []byte) bool {
+	if len(substr) == 0 {
+		return true
+	}
+
+	first := substr[0]
+	complement := first
+	if first >= 'A' && first <= 'Z' {
+		complement += 0x20
+	} else if first >= 'a' && first <= 'z' {
+		complement -= 0x20
+	}
+
+	for i, b := range s {
+		if b == first || b == complement {
+			prefix := s[i:]
+			if len(prefix) < len(substr) {
+				return false
+			}
+			if bytes.EqualFold(prefix[:len(substr)], substr) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func BenchmarkAscii(b *testing.B) {
 	for _, n := range []int{1, 7, 15, 44, 100, 1000} {
 		asciiBuf := makeASCII(n)
@@ -160,7 +287,7 @@ func BenchmarkAscii(b *testing.B) {
 	}
 }
 
-func BenchmarkIndex(b *testing.B) {
+func BenchmarkIndexBit(b *testing.B) {
 	for _, n := range []int{1, 7, 15, 44, 100, 1000} {
 		asciiBuf := makeASCII(n)
 		idx := rand.Intn(n)
@@ -223,6 +350,42 @@ func BenchmarkAsciiEqualFold(b *testing.B) {
 	}
 }
 
+func BenchmarkAsciiContainsFold(b *testing.B) {
+	for _, n := range []int{1, 7, 15, 44, 100, 1000} {
+		asciiBuf := makeASCII(n)
+		s1 := string(asciiBuf)
+
+		// try to flip as least one byte
+		for k := 0; k < 3; k++ {
+			idx := rand.Intn(n)
+			if unicode.IsUpper(rune(asciiBuf[idx])) {
+				asciiBuf[idx] = byte(unicode.ToLower(rune(asciiBuf[idx])))
+			} else if unicode.IsLower(rune(asciiBuf[idx])) {
+				asciiBuf[idx] = byte(unicode.ToUpper(rune(asciiBuf[idx])))
+			}
+		}
+
+		s2 := string(asciiBuf[rand.Intn(n):])
+
+		b1 := []byte(s1)
+		b2 := []byte(s2)
+
+		b.Run(fmt.Sprintf("go-%d", n), func(b *testing.B) {
+			b.SetBytes(int64(len(s1)))
+			for i := 0; i < b.N; i++ {
+				containsFoldGo(b1, b2)
+			}
+		})
+
+		b.Run(fmt.Sprintf("simd-%d", n), func(b *testing.B) {
+			b.SetBytes(int64(len(s1)))
+			for i := 0; i < b.N; i++ {
+				ContainsFold(s1, s2)
+			}
+		})
+	}
+}
+
 func FuzzEqualFold(f *testing.F) {
 	f.Add("01234567", "01234567")
 	f.Add("abcd", "ABCD")
@@ -236,6 +399,25 @@ func FuzzEqualFold(f *testing.F) {
 		res := EqualFold(in1, in2)
 		if res != strings.EqualFold(in1, in2) {
 			t.Fatalf("EqualFold(%q, %q) = %v; want %v", in1, in2, res, strings.EqualFold(in1, in2))
+		}
+	})
+}
+
+func FuzzContainsFold(f *testing.F) {
+	f.Add("01234567", "01234567")
+	f.Add("abcdefghijklmnopqrstuvwxyz01234567890", "klmno")
+	f.Add("abcdefghijklmnopqrstuvwxyz01234567890", "12")
+	f.Add("EqualFold", "fold")
+
+	f.Fuzz(func(t *testing.T, istr, isubstr string) {
+		if !IsASCII(isubstr) {
+			t.Skip()
+		}
+
+		res := ContainsFold(istr, isubstr)
+
+		if goRes := containsFoldGo([]byte(istr), []byte(isubstr)); res != goRes {
+			t.Fatalf("ContainsFold(%q, %q) = %v; want %v", istr, isubstr, res, goRes)
 		}
 	})
 }
