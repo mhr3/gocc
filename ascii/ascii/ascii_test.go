@@ -161,6 +161,8 @@ func TestContainsFold(t *testing.T) {
 		{"xxxxxxxxxxxxx01x", "01", true},
 		{"xxxxxxxxxxxxxxx01xxxxxxx", "01", true},
 		{"01xxxxxxxxxxxxxxx"[1:], "01", false},
+		// 3 byte needle, 32byte haystack
+		{"xyyyyyyyyyyyyyyyyxxxxxxxxxxxxxxx", "yyy", true},
 		// 5 bytes needle, 21byte haystack
 		{"xxxxxxxxxxxxxxxxxxxxx", "01234", false},
 		{"01234xxxxxxxxxxxxxxxx", "01234", true},
@@ -178,6 +180,10 @@ func TestContainsFold(t *testing.T) {
 		if ContainsFold(ct.str, ct.substr) != ct.expected {
 			t.Errorf("Contains(%s, %s) = %v, want %v",
 				ct.str, ct.substr, !ct.expected, ct.expected)
+		}
+		if idx, goIdx := IndexFold(ct.str, ct.substr), indexFoldGo([]byte(ct.str), []byte(ct.substr)); idx != goIdx {
+			t.Errorf("IndexFold(%s, %s) = %v, want %v",
+				ct.str, ct.substr, idx, goIdx)
 		}
 	}
 }
@@ -211,12 +217,27 @@ func TestEqualFold(t *testing.T) {
 			t.Errorf("EqualFold(%#q, %#q) = %v, want %v", tt.t, tt.s, out, tt.out)
 		}
 	}
-
 }
 
 func indexBitGo(s []byte, mask byte) int {
-	for i, r := range s {
-		if r&mask != 0 {
+	s = s[:len(s):len(s)]
+
+	mask32 := uint32(mask)
+	mask32 |= mask32 << 8
+	mask32 |= mask32 << 16
+
+	// use all go tricks to make this fast
+	for len(s) >= 8 {
+		first32 := uint32(s[0]) | uint32(s[1])<<8 | uint32(s[2])<<16 | uint32(s[3])<<24
+		second32 := uint32(s[4]) | uint32(s[5])<<8 | uint32(s[6])<<16 | uint32(s[7])<<24
+		if (first32|second32)&mask32 != 0 {
+			break
+		}
+		s = s[8:]
+	}
+
+	for i, b := range s {
+		if b&mask != 0 {
 			return i
 		}
 	}
@@ -224,17 +245,14 @@ func indexBitGo(s []byte, mask byte) int {
 }
 
 func isAsciiGo(s []byte) bool {
-	for _, r := range s {
-		if r >= 0x80 {
-			return false
-		}
-	}
-	return true
+	return indexBitGo(s, 0x80) == -1
 }
 
-func containsFoldGo(s []byte, substr []byte) bool {
+func indexFoldGo(s []byte, substr []byte) int {
 	if len(substr) == 0 {
-		return true
+		return 0
+	} else if len(substr) > len(s) {
+		return -1
 	}
 
 	first := substr[0]
@@ -245,18 +263,18 @@ func containsFoldGo(s []byte, substr []byte) bool {
 		complement -= 0x20
 	}
 
-	for i, b := range s {
+	for i, b := range s[:len(s)-len(substr)+1] {
 		if b == first || b == complement {
 			prefix := s[i:]
 			if len(prefix) < len(substr) {
-				return false
+				continue
 			}
 			if bytes.EqualFold(prefix[:len(substr)], substr) {
-				return true
+				return i
 			}
 		}
 	}
-	return false
+	return -1
 }
 
 func BenchmarkAscii(b *testing.B) {
@@ -350,7 +368,7 @@ func BenchmarkAsciiEqualFold(b *testing.B) {
 	}
 }
 
-func BenchmarkAsciiContainsFold(b *testing.B) {
+func BenchmarkAsciiIndexFold(b *testing.B) {
 	for _, n := range []int{1, 7, 15, 44, 100, 1000} {
 		asciiBuf := makeASCII(n)
 		s1 := string(asciiBuf)
@@ -373,14 +391,14 @@ func BenchmarkAsciiContainsFold(b *testing.B) {
 		b.Run(fmt.Sprintf("go-%d", n), func(b *testing.B) {
 			b.SetBytes(int64(len(s1)))
 			for i := 0; i < b.N; i++ {
-				containsFoldGo(b1, b2)
+				indexFoldGo(b1, b2)
 			}
 		})
 
 		b.Run(fmt.Sprintf("simd-%d", n), func(b *testing.B) {
 			b.SetBytes(int64(len(s1)))
 			for i := 0; i < b.N; i++ {
-				ContainsFold(s1, s2)
+				IndexFold(s1, s2)
 			}
 		})
 	}
@@ -403,21 +421,24 @@ func FuzzEqualFold(f *testing.F) {
 	})
 }
 
-func FuzzContainsFold(f *testing.F) {
+func FuzzIndexFold(f *testing.F) {
 	f.Add("01234567", "01234567")
 	f.Add("abcdefghijklmnopqrstuvwxyz01234567890", "klmno")
 	f.Add("abcdefghijklmnopqrstuvwxyz01234567890", "12")
+	f.Add("abcdefghABCDEFGH01234567890", "H")
+	f.Add("000000000000000B0", "B0")
 	f.Add("EqualFold", "fold")
+	f.Add("Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor...", " ELIT")
 
 	f.Fuzz(func(t *testing.T, istr, isubstr string) {
 		if !IsASCII(isubstr) {
 			t.Skip()
 		}
 
-		res := ContainsFold(istr, isubstr)
+		res := IndexFold(istr, isubstr)
 
-		if goRes := containsFoldGo([]byte(istr), []byte(isubstr)); res != goRes {
-			t.Fatalf("ContainsFold(%q, %q) = %v; want %v", istr, isubstr, res, goRes)
+		if goRes := indexFoldGo([]byte(istr), []byte(isubstr)); res != goRes {
+			t.Fatalf("IndexFold(%q, %q) = %v; want %v", istr, isubstr, res, goRes)
 		}
 	})
 }
