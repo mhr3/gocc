@@ -115,9 +115,10 @@ func removeBinaryInstructionsArm64(_ *config.Arch, function Function) Function {
 						line.Binary = nil
 					}
 				case strings.HasPrefix(dInst, "V") && dInst[1:] == inst:
+					// some variants of VLD1R don't work, do not add below
 					switch dInst {
 					// allowlist
-					case "VLD1", "VLD1R", "VDUP", "VMOV", "VTBL", "VADD", "VSUB", "VAND", "VORR", "VEOR", "VEXT", "VCNT", "VSHL", "VSHR", "VCMTST", "VCMEQ":
+					case "VLD1", "VDUP", "VMOV", "VTBL", "VADD", "VSUB", "VAND", "VORR", "VEOR", "VEXT", "VCNT", "VSHL", "VSHR", "VCMTST", "VCMEQ":
 						line.Binary = nil
 					}
 				}
