@@ -92,6 +92,7 @@ func TestContainsFold(t *testing.T) {
 		{"abc", "bcd", false},
 		{"abc", "", true},
 		{"", "a", false},
+		{"0123abcd", "B", true},
 		// 2-byte needle
 		{"xxxxxx", "01", false},
 		{"01xxxx", "01", true},
