@@ -443,12 +443,54 @@ static inline uint8x16_t load_data16_v2(const unsigned char *src, int64_t len) {
     return vld1q_u8(dst);
 }
 
+static inline int64_t index_fold_1_byte_needle(unsigned char *haystack, uint64_t haystack_len,
+    uint8_t needle, const uint8x16x2_t table)
+{
+    const uint64_t blockSize = 16; // NEON can process 128 bits (16 bytes) at a time
+    const uint8x16_t shift = vdupq_n_u8(0x60);
+
+    if (needle >= 'a' && needle <= 'z') needle -= 32;
+    // the needle is uppercased and shifted
+    const uint8x16_t searched = vdupq_n_u8(needle-0x60);
+
+    uint64_t curr_pos = 0;
+
+    for (const unsigned char *data_bound = haystack + haystack_len; haystack < data_bound; haystack += blockSize, curr_pos += blockSize)
+    {
+        uint8x16_t data = load_data16(haystack, haystack_len - curr_pos);
+
+        data = vsubq_u8(data, shift);
+        data = vsubq_u8(data, vqtbl2q_u8(table, data));
+
+        // operating on shifted data
+        const uint8x16_t res = vceqq_u8(data, searched);
+        const uint8x8_t narrowed = vshrn_n_u16(res, 4);
+
+        uint64_t data64 = vget_lane_u64(narrowed, 0);
+        if (data64)
+        {
+            const int pos = (__builtin_ctzll(data64) / 4);
+
+            if (haystack+pos < data_bound) return curr_pos + pos;
+        }
+    }
+
+    return -1;
+}
+
 static inline int64_t index_fold_2_byte_needle(unsigned char *haystack, uint64_t haystack_len,
-    const uint16x8_t first16, const uint8x16x2_t table)
+    const uint16_t needle, const uint8x16x2_t table)
 {
     const uint64_t blockSize = 16; // NEON can process 128 bits (16 bytes) at a time
     const uint64_t checked_len = haystack_len - 2;
     const uint8x16_t shift = vdupq_n_u8(0x60);
+
+    uint8x16_t needle8 = vreinterpretq_u8_u16(vdupq_n_u16(needle));
+    needle8 = vsubq_u8(needle8, shift);
+    needle8 = vsubq_u8(needle8, vqtbl2q_u8(table, needle8));
+    // the needle is uppercased and shifted
+    const uint16x8_t searched = vreinterpretq_u16_u8(needle8);
+
     uint8x16_t prev_data = vdupq_n_u8(0);
     uint64_t curr_pos = 0;
 
@@ -460,9 +502,9 @@ static inline int64_t index_fold_2_byte_needle(unsigned char *haystack, uint64_t
         data = vsubq_u8(data, vqtbl2q_u8(table, data));
 
         // operating on shifted data
-        const uint16x8_t res1 = vceqq_u16(data, first16);
+        const uint16x8_t res1 = vceqq_u16(data, searched);
         const uint16x8_t prev = vextq_u8(prev_data, data, 15);
-        const uint16x8_t res2 = vceqq_u16(prev, first16);
+        const uint16x8_t res2 = vceqq_u16(prev, searched);
         prev_data = data;
 
         const uint16x8_t combined = vorrq_u16(vshlq_n_u16(res1, 8), vshrq_n_u16(res2, 8));
@@ -492,24 +534,29 @@ int64_t index_fold(unsigned char *haystack, const uint64_t haystack_len, unsigne
     {
         return -1;
     }
-    // NOTE: this algorithm only works with needles of length >= 2
 
     const uint64_t checked_len = haystack_len - needle_len;
     const uint8x16x2_t table = vld1q_u8_x2(uppercasingTable);
     const uint8x16_t shift = vdupq_n_u8(0x60);
 
+    switch (needle_len)
+    {
+    case 0:
+        return 0;
+    case 1:
+        // special case for 1-byte needles
+        return index_fold_1_byte_needle(haystack, haystack_len, *(uint8_t *)needle, table);
+    case 2:
+        // special case for 2-byte needles, no need to run EqualFold
+        return index_fold_2_byte_needle(haystack, haystack_len, *(uint16_t *)needle, table);
+    }
+
     // load the first 2 bytes of the needle
     uint8x16_t needle8 = vreinterpretq_u8_u16(vld1q_dup_u16((uint16_t *)needle));
     needle8 = vsubq_u8(needle8, shift);
     needle8 = vsubq_u8(needle8, vqtbl2q_u8(table, needle8));
-    // the needle is lowercased and shifted
+    // the needle is uppercased and shifted
     const uint16x8_t first16 = vreinterpretq_u16_u8(needle8);
-
-    if (needle_len == 2)
-    {
-        // special case for 2-byte needles, no need to run EqualFold
-        return index_fold_2_byte_needle(haystack, haystack_len, first16, table);
-    }
 
     // load the last 2 bytes of the needle
     needle8 = vreinterpretq_u8_u16(vld1q_dup_u16((uint16_t *)(needle + needle_len - 2)));
