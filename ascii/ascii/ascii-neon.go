@@ -14,4 +14,4 @@ func IndexBit(data string, mask byte) int
 func EqualFold(a string, b string) bool
 
 //go:noescape
-func contains_fold(a string, b string) bool
+func index_fold_simd(a string, b string) int

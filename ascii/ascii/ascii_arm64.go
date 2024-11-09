@@ -5,23 +5,35 @@ import (
 )
 
 func ContainsFold(str, substr string) bool {
-	n := len(substr)
-	switch n {
+	return IndexFold(str, substr) >= 0
+}
+
+func IndexFold(str, substr string) int {
+	switch l := len(substr); l {
 	case 0:
-		return true
+		return 0
 	case 1:
 		b := substr[0]
-		if strings.IndexByte(str, b) >= 0 {
-			return true
-		} else if b >= 'A' && b <= 'Z' {
-			return strings.IndexByte(str, b+0x20) >= 0
-		} else if b >= 'a' && b <= 'z' {
-			return strings.IndexByte(str, b-0x20) >= 0
+		if idx := strings.IndexByte(str, b); idx >= 0 {
+			return idx
+		} else if isUpper(b) || isLower(b) {
+			return strings.IndexByte(str, b^0x20)
 		}
-		return false
+		return -1
 	case len(str):
-		return EqualFold(str, substr)
+		if EqualFold(str, substr) {
+			return 0
+		}
+		return -1
 	}
 
-	return contains_fold(str, substr)
+	return index_fold_simd(str, substr)
+}
+
+func isUpper(b byte) bool {
+	return b >= 'A' && b <= 'Z'
+}
+
+func isLower(b byte) bool {
+	return b >= 'a' && b <= 'z'
 }

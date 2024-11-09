@@ -159,42 +159,55 @@ static inline void utf8_range_process_block(const uint8x16_t input,
     *prev_input = input;
 }
 
-// loads up to 15 bytes of data into a 128-bit register
-static inline uint8x16_t load_remaining_data(const unsigned char *src, int64_t len) {
-    const int64_t orig_len = len;
-    unsigned long long buf[2] = {0};
+// loads up to 16 bytes of data into a 128-bit register
+static inline uint8x16_t load_data16(const unsigned char *src, int64_t len) {
+    if (len >= 16) {
+        return vld1q_u8(src);
+    } else if (len == 8) {
+        return vcombine_u64(vld1_u64((uint64_t *)src), vcreate_u64(0));
+    } else if (len <= 0) {
+        return vdupq_n_u8(0);
+    }
+
+    const uint64_t orig_len = len;
+    uint64_t data64 = 0;
+    uint64_t data64lo;
 
     if (len & 8) {
-        buf[0] = *(uint64_t *)(src);
+        data64lo = *(uint64_t *)(src);
         src += 8;
         len -= 8;
     }
-
-    uint64_t data64 = 0;
 
     if (len & 4) {
         data64 = *(uint32_t *)(src);
         src += 4;
         len -= 4;
     }
-    if (len & 2) {
-        uint64_t tmp = *(uint16_t *)(src);
+
+    uint64_t tmp;
+    switch (len) {
+    case 3:
+        tmp = *(uint16_t *)(src);
+        int shift = 8 * (orig_len & 4);
+        data64 |= tmp << shift;
+        tmp = src[2];
+        data64 |= tmp << (16 + shift);
+        break;
+    case 2:
+        tmp = *(uint16_t *)(src);
         data64 |= tmp << (8 * (orig_len & 4));
-        src += 2;
-        len -= 2;
-    }
-    if (len & 1) {
-        uint64_t tmp = *src;
-        data64 |= tmp << (8 * (orig_len & 6));
-    }
-
-    if (orig_len >= 8) {
-        buf[1] = data64;
-    } else {
-        buf[0] = data64;
+        break;
+    case 1:
+        tmp = *src;
+        data64 |= tmp << (8 * (orig_len & 4));
+        break;
     }
 
-    return vcombine_u64(vcreate_u64(buf[0]), vcreate_u64(buf[1]));
+    if (orig_len < 8) {
+        return vcombine_u64(vcreate_u64(data64), vcreate_u64(0));
+    }
+    return vcombine_u64(vcreate_u64(data64lo), vcreate_u64(data64));
 }
 
 // gocc: utf8_valid_range(src string) bool
@@ -269,8 +282,8 @@ main_loop:
         goto main_loop;
     }
 
-    // Handle the remaining bytes (must be < 16)
-    const uint8x16_t input = load_remaining_data(data, len);
+    // Handle the remaining bytes (must be <= 16)
+    const uint8x16_t input = load_data16(data, len);
 
     utf8_range_process_block(input,
         &prev_input, &prev_first_len, &error1, &error2,
