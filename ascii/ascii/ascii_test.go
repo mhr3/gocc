@@ -62,14 +62,14 @@ func TestAscii(t *testing.T) {
 	}
 }
 
-func TestFfs(t *testing.T) {
+func TestIndexBit(t *testing.T) {
 	for i := 4; i < 6400; i++ {
 		data := makeASCII(i)
 		if IsASCII(string(data)) != true {
 			t.Errorf("IsASCII(%q) = false; want true", data)
 		}
 		if res := IndexBit(string(data), 0x80); res != -1 {
-			t.Errorf("IndexBit(string%q[%d]) = %d; want %d", data, len(data), res, -1)
+			t.Errorf("IndexBit([%d]) = %d; want %d", len(data), res, -1)
 		}
 
 		idx := rand.Intn(i)
@@ -78,7 +78,7 @@ func TestFfs(t *testing.T) {
 			t.Errorf("IsASCII(%q) = true; want false", data)
 		}
 		if res := IndexBit(string(data), 0x80); res != idx {
-			t.Errorf("IndexBit(string%q[%d]) = %d; want %d", data, len(data), res, idx)
+			t.Errorf("IndexBit([%d]) = %d; want %d", len(data), res, idx)
 		}
 	}
 }
@@ -370,13 +370,15 @@ func BenchmarkAsciiEqualFold(b *testing.B) {
 }
 
 func BenchmarkAsciiIndexFold(b *testing.B) {
+	rnd := rand.New(rand.NewSource(0))
+
 	for _, n := range []int{1, 7, 15, 44, 100, 1000} {
 		asciiBuf := makeASCII(n)
 		s1 := string(asciiBuf)
 
 		// try to flip as least one byte
 		for k := 0; k < 3; k++ {
-			idx := rand.Intn(n)
+			idx := rnd.Intn(n)
 			if unicode.IsUpper(rune(asciiBuf[idx])) {
 				asciiBuf[idx] = byte(unicode.ToLower(rune(asciiBuf[idx])))
 			} else if unicode.IsLower(rune(asciiBuf[idx])) {
@@ -384,7 +386,11 @@ func BenchmarkAsciiIndexFold(b *testing.B) {
 			}
 		}
 
-		s2 := string(asciiBuf[rand.Intn(n):])
+		s2 := string(asciiBuf[rnd.Intn(n):])
+		if len(s2) > 3 {
+			s2 = s2[:rnd.Intn(len(s2))]
+		}
+		b.Logf("haystack len: %d, needle len: %d", len(s1), len(s2))
 
 		b1 := []byte(s1)
 		b2 := []byte(s2)
@@ -400,6 +406,43 @@ func BenchmarkAsciiIndexFold(b *testing.B) {
 			b.SetBytes(int64(len(s1)))
 			for i := 0; i < b.N; i++ {
 				IndexFold(s1, s2)
+			}
+		})
+	}
+}
+
+var benchInputTorture = strings.Repeat("ABC", 1<<10) + "123" + strings.Repeat("ABC", 1<<10)
+var benchNeedleTorture = strings.Repeat("ABC", 1<<10+1)
+
+func BenchmarkIndexTorture(b *testing.B) {
+	b.Run("go", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			strings.Index(benchInputTorture, benchNeedleTorture)
+		}
+	})
+
+	b.Run("simd", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			IndexFold(benchInputTorture, benchNeedleTorture)
+		}
+	})
+}
+
+func BenchmarkIndexPeriodic(b *testing.B) {
+	key := "aa"
+
+	for _, skip := range [...]int{2, 4, 8, 16, 32, 64} {
+		b.Run(fmt.Sprintf("go-%d", skip), func(b *testing.B) {
+			s := strings.Repeat("a"+strings.Repeat(" ", skip-1), 1<<16/skip)
+			for i := 0; i < b.N; i++ {
+				strings.Index(s, key)
+			}
+		})
+
+		b.Run(fmt.Sprintf("simd-%d", skip), func(b *testing.B) {
+			s := strings.Repeat("a"+strings.Repeat(" ", skip-1), 1<<16/skip)
+			for i := 0; i < b.N; i++ {
+				IndexFold(s, key)
 			}
 		})
 	}
