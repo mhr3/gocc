@@ -186,6 +186,10 @@ func TestContainsFold(t *testing.T) {
 			t.Errorf("IndexFold(%s, %s) = %v, want %v",
 				ct.str, ct.substr, idx, goIdx)
 		}
+		if idx, goIdx := IndexFoldRabinKarp(ct.str, ct.substr), indexFoldGo([]byte(ct.str), []byte(ct.substr)); idx != goIdx {
+			t.Errorf("IndexFold(%s, %s) = %v, want %v",
+				ct.str, ct.substr, idx, goIdx)
+		}
 	}
 }
 
@@ -480,9 +484,14 @@ func FuzzIndexFold(f *testing.F) {
 		}
 
 		res := IndexFold(istr, isubstr)
-
-		if goRes := indexFoldGo([]byte(istr), []byte(isubstr)); res != goRes {
+		goRes := indexFoldGo([]byte(istr), []byte(isubstr))
+		if res != goRes {
 			t.Fatalf("IndexFold(%q, %q) = %v; want %v", istr, isubstr, res, goRes)
+		}
+
+		res = IndexFoldRabinKarp(istr, isubstr)
+		if res != goRes {
+			t.Fatalf("IndexFoldRabinKarp(%q, %q) = %v; want %v", istr, isubstr, res, goRes)
 		}
 	})
 }

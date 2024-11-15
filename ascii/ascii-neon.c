@@ -199,10 +199,12 @@ static uint8_t uppercasingTable[32] = {
     32,32,32,32,32,32,32,32,32,32,32,0, 0, 0, 0, 0,
 };
 
-static inline bool equal_fold_core(unsigned char *a, unsigned char *b, uint64_t length,
+static inline bool equal_fold_core(unsigned char *a, unsigned char *b, int64_t length,
     const uint8x16x2_t table, const uint8x16_t shift)
 {
     const uint64_t blockSize = 16; // NEON can process 128 bits (16 bytes) at a time
+
+    if (length < 0) return false;
 
     for (const unsigned char *data_bound = (a + length) - (length % blockSize); a < data_bound; a += blockSize, b += blockSize)
     {
@@ -428,6 +430,72 @@ static inline uint8x16_t load_data16_v2(const unsigned char *src, int64_t len) {
     return vld1q_u8(dst);
 }
 
+static inline uint32_t rabin_karp_hash_string_fold(unsigned char *data, uint64_t data_len, uint32_t *pow_ret)
+{
+    const uint32_t PrimeRK = 16777619;
+
+    uint32_t hash = 0;
+    for (uint64_t i = 0; i < data_len; i++)
+    {
+        uint8_t c = data[i];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        hash = hash * PrimeRK + c;
+    }
+
+    uint32_t sq = PrimeRK;
+    uint32_t pow = 1;
+
+    for (uint64_t i = data_len; i > 0; i >>= 1)
+    {
+        if (i & 1) pow *= sq;
+        sq *= sq;
+    }
+
+    *pow_ret = pow;
+    return hash;
+}
+
+static inline int64_t index_fold_rabin_karp_core(unsigned char *haystack, const int64_t haystack_len, unsigned char *needle, const int64_t needle_len,
+    const uint8x16x2_t table, const uint8x16_t shift)
+{
+    const uint32_t PrimeRK = 16777619;
+
+    uint32_t hash_needle, pow;
+    hash_needle = rabin_karp_hash_string_fold(needle, needle_len, &pow);
+
+    uint32_t hash = 0;
+    // calculate the hash for the first needle_len bytes
+    for (uint64_t i = 0; i < needle_len; i++)
+    {
+        uint8_t c = haystack[i];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        hash = hash * PrimeRK + c;
+    }
+
+    if (hash == hash_needle && equal_fold_core(haystack, needle, needle_len, table, shift))
+    {
+        return 0;
+    }
+
+    // TODO: use actual simd here
+    for (uint64_t i = needle_len; i < haystack_len; i++)
+    {
+        uint8_t c = haystack[i];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        hash = hash * PrimeRK + c;
+        c = haystack[i - needle_len];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        hash -= pow * c;
+
+        if (hash == hash_needle && equal_fold_core(haystack + i - needle_len + 1, needle, needle_len, table, shift))
+        {
+            return i - needle_len + 1;
+        }
+    }
+
+    return -1;
+}
+
 static inline int64_t index_fold_1_byte_needle(unsigned char *haystack, uint64_t haystack_len,
     uint8_t needle, const uint8x16x2_t table)
 {
@@ -438,11 +506,11 @@ static inline int64_t index_fold_1_byte_needle(unsigned char *haystack, uint64_t
     // the needle is uppercased and shifted
     const uint8x16_t searched = vdupq_n_u8(needle-0x60);
 
-    uint64_t curr_pos = 0;
+    const unsigned char *data_start = haystack;
 
-    for (const unsigned char *data_bound = haystack + haystack_len; haystack < data_bound; haystack += blockSize, curr_pos += blockSize)
+    for (const unsigned char *data_bound = haystack + haystack_len - (haystack_len%blockSize); haystack < data_bound; haystack += blockSize)
     {
-        uint8x16_t data = load_data16(haystack, haystack_len - curr_pos);
+        uint8x16_t data = vld1q_u8(haystack);
 
         data = vsubq_u8(data, shift);
         data = vsubq_u8(data, vqtbl2q_u8(table, data));
@@ -456,8 +524,30 @@ static inline int64_t index_fold_1_byte_needle(unsigned char *haystack, uint64_t
         {
             const int pos = (__builtin_ctzll(data64) / 4);
             if (haystack+pos >= data_bound) return -1;
-            return curr_pos + pos;
+            return (haystack-data_start) + pos;
         }
+    }
+    haystack_len %= blockSize;
+
+    if (haystack_len == 0) {
+        return -1;
+    }
+
+    uint8x16_t data = load_data16(haystack, haystack_len);
+
+    data = vsubq_u8(data, shift);
+    data = vsubq_u8(data, vqtbl2q_u8(table, data));
+
+    // operating on shifted data
+    const uint8x16_t res = vceqq_u8(data, searched);
+    const uint8x8_t narrowed = vshrn_n_u16(res, 4);
+
+    uint64_t data64 = vget_lane_u64(narrowed, 0);
+    if (data64)
+    {
+        const int pos = (__builtin_ctzll(data64) / 4);
+        if (pos >= haystack_len) return -1;
+        return (haystack-data_start) + pos;
     }
 
     return -1;
@@ -534,16 +624,15 @@ static inline uint64_t index_fold_process_block(uint8x16_t data, uint8x16_t data
     const uint16x8_t combined = vorrq_u16(vshlq_n_u16(res1, 8), vshrq_n_u16(res2, 8));
     const uint8x8_t narrowed = vshrn_n_u16(combined, 4);
 
-    // these represent positions: [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    // the return contains 16 nibbles (0x0 or 0xF), each representing position of a match
+    // [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
     return vget_lane_u64(narrowed, 0);
 }
 
-// gocc: IndexFold(a, b string) int
-int64_t index_fold(unsigned char *haystack, const uint64_t haystack_len, unsigned char *needle, const uint64_t needle_len)
+// gocc: IndexFoldRabinKarp(a, b string) int
+int64_t index_fold_rabin_karp(unsigned char *haystack, const int64_t haystack_len, unsigned char *needle, const int64_t needle_len)
 {
     const uint64_t blockSize = 16; // NEON can process 128 bits (16 bytes) at a time
-
-    const uint64_t checked_len = haystack_len - needle_len;
     const uint8x16x2_t table = vld1q_u8_x2(uppercasingTable);
     const uint8x16_t shift = vdupq_n_u8(0x60);
 
@@ -563,18 +652,90 @@ int64_t index_fold(unsigned char *haystack, const uint64_t haystack_len, unsigne
         return index_fold_2_byte_needle(haystack, haystack_len, (uint16_t *)needle, table);
     }
 
+    return index_fold_rabin_karp_core(haystack, haystack_len, needle, needle_len, table, shift);
+}
+
+#define MIN(a, b) ((a) > (b) ? (b) : (a))
+#define MAX(a, b) ((a) < (b) ? (b) : (a))
+
+// gocc: IndexFold(a, b string) int
+int64_t index_fold(unsigned char *haystack, int64_t haystack_len, unsigned char *needle, const int64_t needle_len)
+{
+    const uint64_t blockSize = 16; // NEON can process 128 bits (16 bytes) at a time
+
+    const uint8x16x2_t table = vld1q_u8_x2(uppercasingTable);
+    const uint8x16_t shift = vdupq_n_u8(0x60);
+
+    if (haystack_len < needle_len) return -1;
+    if (needle_len <= 0) return 0;
+    if (haystack_len == needle_len) {
+        return equal_fold_core(haystack, needle, needle_len, table, shift) ? 0 : -1;
+    }
+
+    switch (needle_len)
+    {
+    case 1:
+        // special case for 1-byte needles
+        return index_fold_1_byte_needle(haystack, haystack_len, *(uint8_t *)needle, table);
+    case 2:
+        // special case for 2-byte needles, no need for two loads
+        return index_fold_2_byte_needle(haystack, haystack_len, (uint16_t *)needle, table);
+    }
+
     // load the first 2 bytes of the needle
     const uint16x8_t first2 = index_fold_prepare_comparer((uint16_t *)needle, shift, table);
     // load the last 2 bytes of the needle
     const uint16x8_t last2 = index_fold_prepare_comparer((uint16_t *)(needle + needle_len - 2), shift, table);
 
+    const unsigned char *data_start = haystack;
+
+    const int64_t checked_len = haystack_len - needle_len;
     uint8x16_t prev_data = vdupq_n_u8(0);
     uint8x16_t prev_data_end = vdupq_n_u8(0);
-    uint64_t curr_pos = 0;
+    uint64_t failures = 0;
 
-    for (const unsigned char *data_bound = haystack + checked_len + 1; haystack <= data_bound; haystack += blockSize, curr_pos += blockSize)
+    for (const unsigned char *data_bound = haystack + MIN(checked_len - (checked_len%blockSize), haystack_len-blockSize); haystack < data_bound; haystack += blockSize)
     {
-        const int64_t data_len = haystack_len - curr_pos;
+        uint8x16_t data = vld1q_u8(haystack);
+        uint8x16_t data_end = vld1q_u8(haystack + needle_len - 2);
+
+        uint64_t data64 = index_fold_process_block(data, data_end, first2, last2, table, shift, &prev_data, &prev_data_end);
+        if (data64) {
+            while (data64)
+            {
+                int pos = __builtin_ctzll(data64) / 4;
+                // clear this byte position
+                data64 &= ~(0xFull << (pos * 4));
+                // disregard 0th byte on the first iteration, we made up a 0 on that position
+                if (haystack == data_start && pos == 0) continue;
+                pos--;
+
+                if (equal_fold_core(haystack+pos+2, needle+2, MAX(needle_len-4, 0), table, shift))
+                {
+                    return haystack-data_start + pos;
+                }
+                failures++;
+            }
+            const uint64_t advance = blockSize-1;
+            if (failures > 4 + ((haystack-data_start+advance)>>4) && haystack+advance < data_bound) {
+                // advance the haystack to the unprocessed part of the data and use the rabin-karp implementation
+                haystack += advance;
+                int64_t curr_pos = haystack - data_start;
+                int64_t rem_len = haystack_len - curr_pos;
+                int64_t rk_pos = index_fold_rabin_karp_core(haystack, rem_len, needle, needle_len, table, shift);
+                if (rk_pos != -1) {
+                    return curr_pos + rk_pos;
+                }
+                return -1;
+            }
+        }
+    }
+
+    const unsigned char *data_bound = data_start + checked_len + 1;
+
+    for (; haystack <= data_bound; haystack += blockSize)
+    {
+        const int64_t data_len = haystack_len - (haystack - data_start);
         uint8x16_t data = load_data16(haystack, data_len);
         uint8x16_t data_end = load_data16(haystack + needle_len - 2, data_len - needle_len + 2);
 
@@ -585,12 +746,12 @@ int64_t index_fold(unsigned char *haystack, const uint64_t haystack_len, unsigne
             // clear this byte position
             data64 &= ~(0xFull << (pos * 4));
             // disregard 0th byte on the first iteration, we made up a 0 on that position
-            if (curr_pos == 0 && pos == 0) continue;
+            if (haystack == data_start && pos == 0) continue;
             pos--;
 
-            if (haystack+pos < data_bound && equal_fold_core(haystack+pos, needle, needle_len, table, shift))
+            if (haystack+pos < data_bound && equal_fold_core(haystack+pos+2, needle+2, MAX(needle_len-4, 0), table, shift))
             {
-                return curr_pos + pos;
+                return (haystack-data_start) + pos;
             }
         }
     }
