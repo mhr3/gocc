@@ -182,13 +182,14 @@ func TestContainsFold(t *testing.T) {
 			t.Errorf("Contains(%s, %s) = %v, want %v",
 				ct.str, ct.substr, !ct.expected, ct.expected)
 		}
-		if idx, goIdx := IndexFold(ct.str, ct.substr), indexFoldGo([]byte(ct.str), []byte(ct.substr)); idx != goIdx {
+		want := indexFoldGo([]byte(ct.str), []byte(ct.substr))
+		if idx := IndexFold(ct.str, ct.substr); idx != want {
 			t.Errorf("IndexFold(%s, %s) = %v, want %v",
-				ct.str, ct.substr, idx, goIdx)
+				ct.str, ct.substr, idx, want)
 		}
-		if idx, goIdx := IndexFoldRabinKarp(ct.str, ct.substr), indexFoldGo([]byte(ct.str), []byte(ct.substr)); idx != goIdx {
-			t.Errorf("IndexFold(%s, %s) = %v, want %v",
-				ct.str, ct.substr, idx, goIdx)
+		if idx := IndexFoldRabinKarp(ct.str, ct.substr); idx != want {
+			t.Errorf("IndexFoldRabinKarp(%s, %s) = %v, want %v",
+				ct.str, ct.substr, idx, want)
 		}
 	}
 }

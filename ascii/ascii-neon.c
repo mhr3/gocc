@@ -438,7 +438,11 @@ static inline uint32_t rabin_karp_hash_string_fold(unsigned char *data, uint64_t
     for (uint64_t i = 0; i < data_len; i++)
     {
         uint8_t c = data[i];
-        if (c >= 'a' && c <= 'z') c -= 32;
+        if (c >= 'a' && c <= 'z') {
+            c -= 0x80;
+        } else {
+            c -= 0x60;
+        }
         hash = hash * PrimeRK + c;
     }
 
@@ -468,7 +472,11 @@ static inline int64_t index_fold_rabin_karp_core(unsigned char *haystack, const 
     for (uint64_t i = 0; i < needle_len; i++)
     {
         uint8_t c = haystack[i];
-        if (c >= 'a' && c <= 'z') c -= 32;
+        if (c >= 'a' && c <= 'z') {
+            c -= 0x80;
+        } else {
+            c -= 0x60;
+        }
         hash = hash * PrimeRK + c;
     }
 
@@ -481,10 +489,18 @@ static inline int64_t index_fold_rabin_karp_core(unsigned char *haystack, const 
     for (uint64_t i = needle_len; i < haystack_len; i++)
     {
         uint8_t c = haystack[i];
-        if (c >= 'a' && c <= 'z') c -= 32;
+        if (c >= 'a' && c <= 'z') {
+            c -= 0x80;
+        } else {
+            c -= 0x60;
+        }
         hash = hash * PrimeRK + c;
         c = haystack[i - needle_len];
-        if (c >= 'a' && c <= 'z') c -= 32;
+        if (c >= 'a' && c <= 'z') {
+            c -= 0x80;
+        } else {
+            c -= 0x60;
+        }
         hash -= pow * c;
 
         if (hash == hash_needle && equal_fold_core(haystack + i - needle_len + 1, needle, needle_len, table, shift))
