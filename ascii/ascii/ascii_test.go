@@ -1,7 +1,6 @@
 package ascii
 
 import (
-	"bytes"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -9,6 +8,7 @@ import (
 	"unicode"
 
 	segAscii "github.com/segmentio/asm/ascii"
+	"github.com/stretchr/testify/require"
 )
 
 func makeASCII(n int) []byte {
@@ -182,7 +182,7 @@ func TestContainsFold(t *testing.T) {
 			t.Errorf("Contains(%s, %s) = %v, want %v",
 				ct.str, ct.substr, !ct.expected, ct.expected)
 		}
-		want := indexFoldGo([]byte(ct.str), []byte(ct.substr))
+		want := indexFoldGo(ct.str, ct.substr)
 		if idx := IndexFold(ct.str, ct.substr); idx != want {
 			t.Errorf("IndexFold(%s, %s) = %v, want %v",
 				ct.str, ct.substr, idx, want)
@@ -192,6 +192,65 @@ func TestContainsFold(t *testing.T) {
 				ct.str, ct.substr, idx, want)
 		}
 	}
+}
+
+/*
+	s1 = s2 = 0;
+
+	for (i = 0; i < (len-4); i+=4) {
+		s2 += 4*(s1 + buf[i]) + 3*buf[i+1] + 2*buf[i+2] + buf[i+3] + 10*CHAR_OFFSET;
+		s1 += (buf[i+0] + buf[i+1] + buf[i+2] + buf[i+3] + 4*CHAR_OFFSET);
+	}
+
+	for (; i < len; i++) {
+		s1 += (buf[i]+CHAR_OFFSET); s2 += s1;
+	}
+
+return (s1 & 0xffff) + (s2 << 16);
+*/
+
+func TestRollingAdler(t *testing.T) {
+	data := []byte("0123456789ABCDEFGxxxxx")
+	needle := []byte("9ABC")
+
+	const CHAR_OFFSET = 0
+
+	hashFn := func(data []byte, s1, s2 uint32) (uint32, uint32) {
+		s2 >>= 16
+
+		i := 0
+		for i = 0; i < len(data)-4; i += 4 {
+			s2 += 4*(s1+uint32(data[i])) + 3*uint32(data[i+1]) + 2*uint32(data[i+2]) + uint32(data[i+3]) + 10*CHAR_OFFSET
+			s1 += uint32(data[i+0]) + uint32(data[i+1]) + uint32(data[i+2]) + uint32(data[i+3]) + 4*CHAR_OFFSET
+		}
+
+		for ; i < len(data); i++ {
+			s1 += uint32(data[i]) + CHAR_OFFSET
+			s2 += s1
+		}
+
+		return s1 & 0xffff, s2 << 16
+	}
+
+	n1, n2 := hashFn(needle, 0, 0)
+	needle_hash := n1 | n2
+
+	s1, s2 := hashFn(data[:len(needle)], 0, 0)
+	require.NotZero(t, s1)
+	require.NotZero(t, s2)
+	initial_hash := s1 | s2
+	_ = initial_hash
+
+	for i := len(needle); i < len(data); i++ {
+		s1, s2 = hashFn(data[i:i+1], s1, s2)
+
+		startIdx := i - len(needle)
+		dec1, _ := hashFn(data[startIdx:startIdx+1], 0, 0)
+		s1 = (s1 - dec1) & 0xffff
+		s2 = (s2>>16 - dec1) << 16
+	}
+
+	_, _ = needle, needle_hash
 }
 
 func TestEqualFold(t *testing.T) {
@@ -223,64 +282,6 @@ func TestEqualFold(t *testing.T) {
 			t.Errorf("EqualFold(%#q, %#q) = %v, want %v", tt.t, tt.s, out, tt.out)
 		}
 	}
-}
-
-func indexBitGo(s []byte, mask byte) int {
-	s = s[:len(s):len(s)]
-
-	mask32 := uint32(mask)
-	mask32 |= mask32 << 8
-	mask32 |= mask32 << 16
-
-	// use all go tricks to make this fast
-	for len(s) >= 8 {
-		first32 := uint32(s[0]) | uint32(s[1])<<8 | uint32(s[2])<<16 | uint32(s[3])<<24
-		second32 := uint32(s[4]) | uint32(s[5])<<8 | uint32(s[6])<<16 | uint32(s[7])<<24
-		if (first32|second32)&mask32 != 0 {
-			break
-		}
-		s = s[8:]
-	}
-
-	for i, b := range s {
-		if b&mask != 0 {
-			return i
-		}
-	}
-	return -1
-}
-
-func isAsciiGo(s []byte) bool {
-	return indexBitGo(s, 0x80) == -1
-}
-
-func indexFoldGo(s []byte, substr []byte) int {
-	if len(substr) == 0 {
-		return 0
-	} else if len(substr) > len(s) {
-		return -1
-	}
-
-	first := substr[0]
-	complement := first
-	if first >= 'A' && first <= 'Z' {
-		complement += 0x20
-	} else if first >= 'a' && first <= 'z' {
-		complement -= 0x20
-	}
-
-	for i, b := range s[:len(s)-len(substr)+1] {
-		if b == first || b == complement {
-			prefix := s[i:]
-			if len(prefix) < len(substr) {
-				continue
-			}
-			if bytes.EqualFold(prefix[:len(substr)], substr) {
-				return i
-			}
-		}
-	}
-	return -1
 }
 
 func BenchmarkAscii(b *testing.B) {
@@ -354,7 +355,7 @@ func BenchmarkAsciiEqualFold(b *testing.B) {
 		b.Run(fmt.Sprintf("go-%d", n), func(b *testing.B) {
 			b.SetBytes(int64(len(s1)))
 			for i := 0; i < b.N; i++ {
-				strings.EqualFold(s1, s2)
+				equalFoldGo(s1, s2)
 			}
 		})
 
@@ -397,13 +398,10 @@ func BenchmarkAsciiIndexFold(b *testing.B) {
 		}
 		b.Logf("haystack len: %d, needle len: %d", len(s1), len(s2))
 
-		b1 := []byte(s1)
-		b2 := []byte(s2)
-
 		b.Run(fmt.Sprintf("go-%d", n), func(b *testing.B) {
 			b.SetBytes(int64(len(s1)))
 			for i := 0; i < b.N; i++ {
-				indexFoldGo(b1, b2)
+				indexFoldGo(s1, s2)
 			}
 		})
 
@@ -464,8 +462,13 @@ func FuzzEqualFold(f *testing.F) {
 		}
 
 		res := EqualFold(in1, in2)
-		if res != strings.EqualFold(in1, in2) {
-			t.Fatalf("EqualFold(%q, %q) = %v; want %v", in1, in2, res, strings.EqualFold(in1, in2))
+		stdRes := strings.EqualFold(in1, in2)
+		if res != stdRes {
+			t.Fatalf("EqualFold(%q, %q) = %v; want %v", in1, in2, res, stdRes)
+		}
+		goRes := equalFoldGo(in1, in2)
+		if goRes != stdRes {
+			t.Fatalf("equalFoldGo(%q, %q) = %v; want %v", in1, in2, goRes, stdRes)
 		}
 	})
 }
@@ -485,7 +488,7 @@ func FuzzIndexFold(f *testing.F) {
 		}
 
 		res := IndexFold(istr, isubstr)
-		goRes := indexFoldGo([]byte(istr), []byte(isubstr))
+		goRes := indexFoldGo(istr, isubstr)
 		if res != goRes {
 			t.Fatalf("IndexFold(%q, %q) = %v; want %v", istr, isubstr, res, goRes)
 		}
