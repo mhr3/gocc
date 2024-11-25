@@ -1,6 +1,7 @@
 [
 	{
 		"name": "uint8_mul",
+		"sourcePath": "",
 		"position": 10,
 		"params": [
 			{
@@ -29,67 +30,67 @@
 				"lines": [
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					},
 					{
 						"size": 2,
-						"value": 255
+						"data": "/wA="
 					}
 				]
 			}
@@ -1365,6 +1366,10 @@
 				],
 				"assembly": "jmp\t.LBB0_18"
 			}
-		]
+		],
+		"GoFunc": {
+			"Name": "",
+			"Expr": null
+		}
 	}
 ]

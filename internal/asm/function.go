@@ -16,10 +16,13 @@
 package asm
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"go/ast"
 	"go/types"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -361,12 +364,44 @@ func (p *Param) String() string {
 
 type Const struct {
 	Label string      `json:"label"` // Label of the constant
-	Lines []ConstLine `json:"lines"` // LInes of the constant
+	Lines []ConstLine `json:"lines"` // Lines of the constant
 }
 
 type ConstLine struct {
-	Size  int    `json:"size"`  // Size of the constant
-	Value uint64 `json:"value"` // Value of the constant
+	Size int    `json:"size"` // Size of the constant
+	Data []byte `json:"data"` // Data of the constant
+}
+
+func NewConstLine(data []byte) ConstLine {
+	return ConstLine{
+		Size: len(data),
+		Data: data,
+	}
+}
+
+func NewConstLineFromUint(size int, value uint64) ConstLine {
+	data := make([]byte, size)
+	switch size {
+	case 1:
+		data[0] = byte(value)
+	case 2:
+		binary.LittleEndian.PutUint16(data, uint16(value))
+	case 4:
+		binary.LittleEndian.PutUint32(data, uint32(value))
+	case 8:
+		binary.LittleEndian.PutUint64(data, value)
+	default:
+		panic("invalid const line size")
+	}
+
+	return ConstLine{
+		Size: size,
+		Data: data,
+	}
+}
+
+func (cl *ConstLine) ValueAsHex() string {
+	return hex.EncodeToString(cl.Data)
 }
 
 // Compile returns the string representation of a line in PLAN9 assembly
@@ -379,16 +414,27 @@ func (c *Const) Compile(arch *config.Arch) string {
 	var totalSize int
 	for _, d := range c.Lines {
 		// Write the DATA instruction.
-		switch d.Size {
-		case 1:
-			fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/%d, $%#02x\n", c.Label, totalSize, d.Size, d.Value)
-		case 8:
-			fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/%d, $%#016x\n", c.Label, totalSize, d.Size, d.Value)
-		default:
-			fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/%d, $%#04x\n", c.Label, totalSize, d.Size, d.Value)
+		data := d.Data
+		for len(data) > 0 {
+			switch {
+			case len(data) >= 8:
+				fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/8, $%#016x\n", c.Label, totalSize, binary.LittleEndian.Uint64(data))
+				data = data[8:]
+				totalSize += 8
+			case len(data) >= 4:
+				fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/4, $%#08x\n", c.Label, totalSize, binary.LittleEndian.Uint32(data))
+				data = data[4:]
+				totalSize += 4
+			case len(data) >= 2:
+				fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/2, $%#04x\n", c.Label, totalSize, binary.LittleEndian.Uint16(data))
+				data = data[2:]
+				totalSize += 2
+			default:
+				fmt.Fprintf(&output, "DATA %s<>+%#02x(SB)/1, $%#02x\n", c.Label, totalSize, data[0])
+				data = data[1:]
+				totalSize++
+			}
 		}
-
-		totalSize += d.Size
 	}
 
 	// Write the GLOBL instruction (8=RODATA, 16=NOPTR)
@@ -396,93 +442,63 @@ func (c *Const) Compile(arch *config.Arch) string {
 	return output.String()
 }
 
-// parseConst parses a line in the constant section
-func parseConst(arch *config.Arch, line string) []ConstLine {
+var directiveParseRegex = regexp.MustCompile(`\.((zero|byte|short|hword|word|long|int|quad)\s+(-?\d+)(.*)|(ascii|asciz)\s+("[^"]+"))$`)
+
+// parseConstLine parses a line in the constant section
+func parseConstLine(arch *config.Arch, line string) ConstLine {
 	if arch.Name != "amd64" && arch.Name != "arm64" {
 		panic("gocc: only amd64 is supported for constants")
 	}
 
 	match := arch.Const.FindStringSubmatch(line)
+	if len(match) < 2 {
+		panic("gocc: cannot determine constant directive")
+	}
+	typeName := match[1]
+
+	match = directiveParseRegex.FindStringSubmatch(line)
 	if len(match) != 7 {
-		panic("gocc: invalid constant line")
+		panic(fmt.Errorf("gocc: unimplemented constant directive: %q", typeName))
 	}
 
-	isAscii := strings.HasPrefix(match[1], "asci") // ascii or asciz
-	if !isAscii {
-		typeName := match[2]
+	switch typeName {
+	case "ascii", "asciz":
+		s, err := strconv.Unquote(match[6])
+		if err != nil {
+			panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
+		}
+		if match[5] == "asciz" {
+			s += "\x00"
+		}
+
+		return NewConstLine([]byte(s))
+	case "zero":
 		value, err := strconv.ParseUint(match[3], 10, 64)
 		if err != nil {
 			panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
 		}
-
-		switch typeName {
-		case "zero":
-			zeroSz := int(value)
-			fillVal := byte(0)
-			if strings.Contains(match[4], ",") {
-				parts := strings.SplitN(match[4], ",", 2)
-				val, err := strconv.Atoi(parts[1])
-				if err != nil {
-					panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
-				}
-				fillVal = byte(val)
+		zeroSz := int(value)
+		fillVal := byte(0)
+		if strings.Contains(match[4], ",") {
+			parts := strings.SplitN(match[4], ",", 2)
+			val, err := strconv.Atoi(parts[1])
+			if err != nil {
+				panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
 			}
-			ret := []ConstLine{}
-			if zeroSz >= 8 {
-				fillVal64 := uint64(fillVal)
-				fillVal64 |= fillVal64 << 8
-				fillVal64 |= fillVal64 << 16
-				fillVal64 |= fillVal64 << 32
-
-				for i := 0; i+8 <= zeroSz; i += 8 {
-					ret = append(ret, ConstLine{
-						Size:  8,
-						Value: fillVal64,
-					})
-				}
-			}
-			if zeroSz%8 != 0 {
-				for i := zeroSz - zeroSz%8; i < zeroSz; i++ {
-					ret = append(ret, ConstLine{
-						Size:  1,
-						Value: uint64(fillVal),
-					})
-				}
-			}
-
-			return ret
-		default:
-			typeSz, ok := constSizes[typeName]
-			if !ok {
-				panic(fmt.Sprintf("gocc: invalid constant type: %s", typeName))
-			}
-			return []ConstLine{{
-				Size:  typeSz,
-				Value: value,
-			}}
+			fillVal = byte(val)
 		}
+
+		return NewConstLine(bytes.Repeat([]byte{fillVal}, zeroSz))
 	}
 
-	s, err := strconv.Unquote(match[6])
+	value, err := strconv.ParseUint(match[3], 10, 64)
 	if err != nil {
 		panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
 	}
-	if match[5] == "asciz" {
-		s += "\x00"
-	}
 
-	data := []byte(s)
-	ret := []ConstLine{}
-	for i := 0; i+8 <= len(data); i += 8 {
-		ret = append(ret, ConstLine{
-			Size:  8,
-			Value: binary.LittleEndian.Uint64(data[i : i+8]),
-		})
+	typeSz, ok := constSizes[typeName]
+	if !ok {
+		panic(fmt.Sprintf("gocc: invalid constant type: %s", typeName))
 	}
-
-	if len(data)%8 != 0 {
-		panic("gocc: unaligned ascii constant parsing is not implemented")
-	}
-
-	return ret
+	return NewConstLineFromUint(typeSz, value)
 }

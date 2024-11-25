@@ -65,7 +65,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 					constant.Label = functionName
 				}
 			}
-			constant.Lines = append(constant.Lines, parseConst(arch, line)...)
+			constant.Lines = append(constant.Lines, parseConstLine(arch, line))
 
 		// Skip attributes and comment lines
 		case arch.Attribute.MatchString(line):
@@ -80,7 +80,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 			labelName = strings.TrimLeft(labelName, ".")
 			// If we have a constant, attach it to the current function
 			if constant != nil && len(constant.Lines) > 0 {
-				consts = append(consts, *constant)
+				consts = append(consts, finalizeConstant(constant))
 			}
 			constant = &Const{Label: labelName} // reset the current constant
 			switch {
@@ -112,7 +112,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 
 			// If we have a constant, attach it to the current function
 			if constant != nil && len(constant.Lines) > 0 {
-				consts = append(consts, *constant)
+				consts = append(consts, finalizeConstant(constant))
 				constant = nil
 				current.Consts = append(current.Consts, consts...)
 				consts = nil
@@ -137,7 +137,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 	if current != nil {
 		// add the last constant
 		if constant != nil && len(constant.Lines) > 0 {
-			consts = append(consts, *constant)
+			consts = append(consts, finalizeConstant(constant))
 			constant = nil
 			current.Consts = append(current.Consts, consts...)
 			consts = nil
@@ -156,6 +156,58 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 		return nil, err
 	}
 	return functions, nil
+}
+
+func finalizeConstant(constant *Const) Const {
+	lines := constant.Lines
+	condensed := []ConstLine{}
+
+	szSum := 0
+	if len(lines) >= 8 {
+		szSum = lines[0].Size + lines[1].Size + lines[2].Size + lines[3].Size +
+			lines[4].Size + lines[5].Size + lines[6].Size + lines[7].Size
+	}
+
+	switch szSum {
+	case 8:
+		for len(lines) >= 8 {
+			szSum = lines[0].Size + lines[1].Size + lines[2].Size + lines[3].Size +
+				lines[4].Size + lines[5].Size + lines[6].Size + lines[7].Size
+
+			if szSum == 8 {
+				data := []byte{}
+				for _, l := range lines[:8] {
+					data = append(data, l.Data...)
+				}
+				condensed = append(condensed, NewConstLine(data))
+			} else {
+				condensed = append(condensed, lines[:8]...)
+			}
+
+			lines = lines[8:]
+		}
+	case 16:
+		for len(lines) >= 4 {
+			szSum = lines[0].Size + lines[1].Size + lines[2].Size + lines[3].Size
+			if szSum == 8 {
+				data := []byte{}
+				for _, l := range lines[:4] {
+					data = append(data, l.Data...)
+				}
+				condensed = append(condensed, NewConstLine(data))
+			} else {
+				condensed = append(condensed, lines[:4]...)
+			}
+
+			lines = lines[4:]
+		}
+	}
+
+	if len(lines) == 0 {
+		return Const{Label: constant.Label, Lines: condensed}
+	}
+
+	return *constant
 }
 
 // ParseClangObjectDump parses the output of objdump file and returns a list of functions

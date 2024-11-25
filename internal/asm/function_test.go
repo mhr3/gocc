@@ -15,9 +15,6 @@
 package asm
 
 import (
-	"encoding/binary"
-	"encoding/hex"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -128,27 +125,27 @@ func TestParseConst(t *testing.T) {
 		{
 			Name:        "zero",
 			Const:       `	.zero	16,255`,
-			ExpectedVal: "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+			ExpectedVal: "ffffffffffffffffffffffffffffffff",
 		},
 		{
 			Name:        "byte",
 			Const:       `	.byte	255`,
-			ExpectedVal: "FF",
+			ExpectedVal: "ff",
 		},
 		{
 			Name:        "hword",
 			Const:       `	.hword  30`,
-			ExpectedVal: "1E00",
+			ExpectedVal: "1e00",
 		},
 		{
 			Name:        "int",
 			Const:       `	.int	42`,
-			ExpectedVal: "2A000000",
+			ExpectedVal: "2a000000",
 		},
 		{
 			Name:        "ascii",
 			Const:       `	.ascii	"\000\377\377\377\001\377\377\377\002\377\377\377\003\377\377\377"`,
-			ExpectedVal: "00FFFFFF01FFFFFF02FFFFFF03FFFFFF",
+			ExpectedVal: "00ffffff01ffffff02ffffff03ffffff",
 		},
 		{
 			Name:        "asciz",
@@ -162,42 +159,10 @@ func TestParseConst(t *testing.T) {
 			for _, arch := range []*config.Arch{config.AMD64(), config.ARM64()} {
 				require.True(t, arch.Const.MatchString(tc.Const))
 
-				lines := parseConst(arch, tc.Const)
-				assert.NotEmpty(t, lines)
-
-				l := 0
-				for _, line := range lines {
-					l += line.Size
-				}
-				assert.Len(t, tc.ExpectedVal, l*2)
-				actualVal := linesToHex(lines)
-				assert.Equal(t, tc.ExpectedVal, actualVal)
+				line := parseConstLine(arch, tc.Const)
+				assert.Len(t, tc.ExpectedVal, line.Size*2)
+				assert.Equal(t, tc.ExpectedVal, line.ValueAsHex())
 			}
 		})
 	}
-}
-func linesToHex(lines []ConstLine) string {
-	var val string
-	var slc [8]byte
-	buf := slc[:]
-	for _, line := range lines {
-		buf = buf[:8]
-		switch line.Size {
-		case 1:
-			buf[0] = byte(line.Value)
-			buf = buf[:1]
-		case 2:
-			binary.LittleEndian.PutUint16(buf, uint16(line.Value))
-			buf = buf[:2]
-		case 4:
-			binary.LittleEndian.PutUint32(buf, uint32(line.Value))
-			buf = buf[:4]
-		case 8:
-			binary.LittleEndian.PutUint64(buf, uint64(line.Value))
-			buf = buf[:8]
-		}
-
-		val += hex.EncodeToString(buf)
-	}
-	return strings.ToUpper(val)
 }

@@ -49,6 +49,12 @@ func TestParseClangObjectDumpAmd64(t *testing.T) {
 		assert.NotEmpty(t, line.Assembly)
 		assert.NotEmpty(t, line.Binary)
 	}
+
+	/*
+		m, _ := json.MarshalIndent(fn, "", "\t")
+		fmt.Println(string(m))
+		assert.False(t, true)
+	*/
 }
 
 func TestParseClangObjectDumpArm64(t *testing.T) {
