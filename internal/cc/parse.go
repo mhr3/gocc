@@ -297,9 +297,14 @@ func normalizeCType(t string) string {
 
 // convertFunction extracts the function definition from cc.DirectDeclarator.
 func convertFunction(declarator *cc.DirectDeclarator, returnType string, goFunc asm.GoFunction) (asm.Function, error) {
-	params, err := convertFunctionParameters(declarator.ParameterTypeList.ParameterList)
-	if err != nil {
-		return asm.Function{}, err
+	var params []asm.Param
+
+	if declarator.ParameterTypeList != nil {
+		var err error
+		params, err = convertFunctionParameters(declarator.ParameterTypeList.ParameterList)
+		if err != nil {
+			return asm.Function{}, err
+		}
 	}
 
 	var retParam *asm.Param
