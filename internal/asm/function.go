@@ -403,7 +403,7 @@ func parseConst(arch *config.Arch, line string) []ConstLine {
 	}
 
 	match := arch.Const.FindStringSubmatch(line)
-	if len(match) != 6 {
+	if len(match) != 7 {
 		panic("gocc: invalid constant line")
 	}
 
@@ -415,17 +415,59 @@ func parseConst(arch *config.Arch, line string) []ConstLine {
 			panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
 		}
 
-		return []ConstLine{{
-			Size:  constSizes[typeName],
-			Value: value,
-		}}
+		switch typeName {
+		case "zero":
+			zeroSz := int(value)
+			fillVal := byte(0)
+			if strings.Contains(match[4], ",") {
+				parts := strings.SplitN(match[4], ",", 2)
+				val, err := strconv.Atoi(parts[1])
+				if err != nil {
+					panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
+				}
+				fillVal = byte(val)
+			}
+			ret := []ConstLine{}
+			if zeroSz >= 8 {
+				fillVal64 := uint64(fillVal)
+				fillVal64 |= fillVal64 << 8
+				fillVal64 |= fillVal64 << 16
+				fillVal64 |= fillVal64 << 32
+
+				for i := 0; i+8 <= zeroSz; i += 8 {
+					ret = append(ret, ConstLine{
+						Size:  8,
+						Value: fillVal64,
+					})
+				}
+			}
+			if zeroSz%8 != 0 {
+				for i := zeroSz - zeroSz%8; i < zeroSz; i++ {
+					ret = append(ret, ConstLine{
+						Size:  1,
+						Value: uint64(fillVal),
+					})
+				}
+			}
+
+			return ret
+		default:
+			typeSz, ok := constSizes[typeName]
+			if !ok {
+				panic(fmt.Sprintf("gocc: invalid constant type: %s", typeName))
+			}
+			return []ConstLine{{
+				Size:  typeSz,
+				Value: value,
+			}}
+		}
 	}
 
-	s, err := strconv.Unquote(match[5])
+	s, err := strconv.Unquote(match[6])
 	if err != nil {
 		panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
 	}
-	if match[4] == "asciz" {
+	if match[5] == "asciz" {
 		s += "\x00"
 	}
 
