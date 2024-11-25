@@ -100,7 +100,8 @@ func (c *Compiler) Compile(source, assembly, object string, args ...string) erro
 
 // runCommandAndLog runs a command and extract its output.
 func runCommandAndLog(name string, args ...string) (string, error) {
-	fmt.Printf("Running %s %s\n", name, strings.Join(args, " "))
+	cmd := fmt.Sprintf("%s %s", name, strings.Join(args, " "))
+	fmt.Printf("Running %q\n", cmd)
 
 	return runCommand(name, args...)
 }
