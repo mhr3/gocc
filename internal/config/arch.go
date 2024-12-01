@@ -85,7 +85,7 @@ func AMD64() *Arch {
 		Comment:        regexp.MustCompile(`^\s*#.*$`),
 		Const:          regexp.MustCompile(`^\s+\.(ascii|asciz|byte|double|float|hword|int|long|octa|quad|short|single|skip|space|string|word|zero)\b`),
 		Label:          regexp.MustCompile(`[A-Z0-9]+_\d+`),
-		DataLoad:       regexp.MustCompile(`^(?P<instr>\w+)\s+[^;]+?(?P<register>\b[RXY]\d+);.*?\.(?P<var>\w+)\b`),
+		DataLoad:       regexp.MustCompile(`^(?P<instr>\w+)\s+[^;]+?(?P<register>\b(?:[RXY]\d+|[ABCD]X|[SD]I));.*?\b[re]ip\s*[+-]\s*[.]?(?P<var>\w+)\b`),
 		JumpInstr:      regexp.MustCompile(`^(?P<instr>J\w+)[^;]+;.*?[.](?P<label>\w+)$`),
 		Registers:      []string{"DI", "SI", "DX", "CX", "R8", "R9"},
 		FloatRegisters: []string{"X0", "X1", "X2", "X3", "X4", "X5", "X6", "X7"},

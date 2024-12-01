@@ -15,10 +15,11 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 			if len(asmParts) > 0 {
 				// do the instructions match?
 				inst := strings.ToUpper(asmParts[0])
-				dInst := line.Disassembled
+				dInst, dRest := line.Disassembled, ""
 				dIdx := strings.IndexByte(line.Disassembled, ' ')
 				if dIdx > 0 {
 					dInst = line.Disassembled[:dIdx]
+					dRest = line.Disassembled[dIdx+1:]
 				}
 
 				switch {
@@ -32,8 +33,8 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 					// nope
 				case strings.HasSuffix(dInst, "L"):
 					// the toolchain is so bad with these, skip
-					// unless it's CMPL or XORL
-					if dInst == "CMPL" || dInst == "XORL" {
+					// unless it's CMPL or XORL (but even then working with BL/CL doesn't compile)
+					if (dInst == "CMPL" || dInst == "XORL") && !strings.Contains(dRest, "L") {
 						line.Binary = nil
 					}
 				case inst == "ADD" || inst == "SUB" || inst == "AND" || inst == "OR":
