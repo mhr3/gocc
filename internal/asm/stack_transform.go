@@ -84,16 +84,11 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 			if inst.Op != x86asm.PUSH {
 				panic(fmt.Sprintf("unexpected instruction: %q", line.Assembly))
 			}
-			dstReg, ok := inst.Args[0].(x86asm.Reg)
-			if ok {
-				switch dstReg {
-				case x86asm.RBP, x86asm.RBX, x86asm.R12, x86asm.R13, x86asm.R14, x86asm.R15:
-					// go's ABI0 doesn't have callee-saved registers
-				default:
-					rewriteRequired = true
-					numPushes++
-				}
-			} else {
+			dstReg, _ := inst.Args[0].(x86asm.Reg)
+			switch dstReg {
+			case x86asm.RBP, x86asm.RBX, x86asm.R12, x86asm.R13, x86asm.R14, x86asm.R15:
+				// go's ABI0 doesn't have callee-saved registers
+			default:
 				rewriteRequired = true
 				numPushes++
 			}
@@ -105,6 +100,7 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 		newLines := make([]Line, 0, len(function.Lines))
 
 		for _, line := range function.Lines {
+			doSkip := false
 			asm := line.Assembly
 			asmFields := strings.Fields(asm)
 			if asmFields[0] == "push" || asmFields[0] == "pop" {
@@ -112,21 +108,25 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 				if inst.Op != x86asm.PUSH && inst.Op != x86asm.POP {
 					panic(fmt.Sprintf("unexpected instruction: %q", line.Assembly))
 				}
-				dstReg, ok := inst.Args[0].(x86asm.Reg)
-				if ok {
-					switch dstReg {
-					case x86asm.RBP, x86asm.RBX, x86asm.R12, x86asm.R13, x86asm.R14, x86asm.R15:
-						// can be dropped
-						lineCpy := line
-						lineCpy.Disassembled = "NOP"
-						lineCpy.Binary = nil
-						newLines = append(newLines, lineCpy)
-						continue
-					}
+				dstReg, _ := inst.Args[0].(x86asm.Reg)
+				switch dstReg {
+				case x86asm.RBP, x86asm.RBX, x86asm.R12, x86asm.R13, x86asm.R14, x86asm.R15:
+					// can be dropped
+					doSkip = true
+				}
+			} else if asmFields[0] == "lea" {
+				parts := asmFields
+				if len(parts) > 1 && strings.HasPrefix(parts[1], "rsp") {
+					// writing into rsp, drop
+					doSkip = true
 				}
 			} else if strings.HasPrefix(asm, "mov") && (strings.HasSuffix(asm, "rsp") || strings.HasSuffix(asm, "rbp")) ||
 				strings.HasPrefix(asm, "and") && strings.Contains(asm, "rsp") {
 				// we need to drop all of these
+				doSkip = true
+			}
+
+			if doSkip {
 				lineCpy := line
 				lineCpy.Disassembled = "NOP"
 				lineCpy.Binary = nil
@@ -164,17 +164,15 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 				if inst.Op != x86asm.PUSH && inst.Op != x86asm.POP {
 					panic(fmt.Sprintf("unexpected instruction: %q", line.Assembly))
 				}
-				dstReg, ok := inst.Args[0].(x86asm.Reg)
-				if ok {
-					switch dstReg {
-					case x86asm.RBP, x86asm.RBX, x86asm.R12, x86asm.R13, x86asm.R14, x86asm.R15:
-						// can be dropped
-						lineCpy := line
-						lineCpy.Disassembled = "NOP"
-						lineCpy.Binary = nil
-						newLines = append(newLines, lineCpy)
-						continue
-					}
+				dstReg, _ := inst.Args[0].(x86asm.Reg)
+				switch dstReg {
+				case x86asm.RBP, x86asm.RBX, x86asm.R12, x86asm.R13, x86asm.R14, x86asm.R15:
+					// can be dropped
+					lineCpy := line
+					lineCpy.Disassembled = "NOP"
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
 				}
 			}
 			if stackAllocIdx == i ||

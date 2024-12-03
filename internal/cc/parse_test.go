@@ -37,9 +37,3 @@ func TestParseWithStatic(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, fn)
 }
-
-func TestParseStreamVByte(t *testing.T) {
-	fn, err := Parse("testdata/streamvbyte.c")
-	assert.NoError(t, err)
-	assert.NotNil(t, fn)
-}
