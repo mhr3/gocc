@@ -23,17 +23,18 @@ import (
 // Arch represents a context for a specific architecture
 type Arch struct {
 	Name           string          // Architecture name
-	Attribute      *regexp.Regexp  // Parses assembly attributes
+	Attribute      *regexp.Regexp  // Parses assembly attributes (must capture the attribute name)
 	Function       *regexp.Regexp  // Parses assembly function names
+	FunctionEnd    *regexp.Regexp  // Matches assembly function end marker
 	SourceLabel    *regexp.Regexp  // Parses assembly labels
 	Code           *regexp.Regexp  // Parses assembly code
 	Symbol         *regexp.Regexp  // Parses assembly symbols
 	Data           *regexp.Regexp  // Parses assembly data
 	Comment        *regexp.Regexp  // Parses assembly comments
-	Const          *regexp.Regexp  // Parses assembly constants
 	Label          *regexp.Regexp  // Finds label inside an instruction
 	DataLoad       *regexp.Regexp  // Finds instructions with data loads
 	JumpInstr      *regexp.Regexp  // Parses assembly jump instructions
+	ConstAttrs     []string        // Data attributes
 	Registers      []string        // Registers to use
 	FloatRegisters []string        // Floating point registers
 	RetRegister    string          // Register for return values
@@ -76,17 +77,18 @@ func For(arch string) (*Arch, error) {
 func AMD64() *Arch {
 	arch := &Arch{
 		Name:           "amd64",
-		Attribute:      regexp.MustCompile(`^\s+\..+$`),
+		Attribute:      regexp.MustCompile(`^\s+\.(\w+).+$`),
 		Function:       regexp.MustCompile(`^\w+:.*$`),
+		FunctionEnd:    regexp.MustCompile(`^\.Lfunc_end\d+:$`),
 		SourceLabel:    regexp.MustCompile(`^\.[A-Z0-9]+_\d+:.*$`),
 		Code:           regexp.MustCompile(`^\s+\w+.+$`),
 		Symbol:         regexp.MustCompile(`^\w+\s+<\w+>:$`),
 		Data:           regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
 		Comment:        regexp.MustCompile(`^\s*#.*$`),
-		Const:          regexp.MustCompile(`^\s+\.(ascii|asciz|byte|double|float|hword|int|long|octa|quad|short|single|skip|space|string|word|zero)\b`),
 		Label:          regexp.MustCompile(`[A-Z0-9]+_\d+`),
 		DataLoad:       regexp.MustCompile(`^(?P<instr>\w+)\s+[^;]+?(?P<register>\b(?:[RXY]\d+|[ABCD]X|[SD]I));.*?\b[re]ip\s*[+-]\s*[.]?(?P<var>\w+)\b`),
 		JumpInstr:      regexp.MustCompile(`^(?P<instr>J\w+)[^;]+;.*?[.](?P<label>\w+)$`),
+		ConstAttrs:     []string{"ascii", "asciz", "byte", "double", "float", "hword", "int", "long", "octa", "quad", "short", "single", "skip", "space", "string", "word", "zero"},
 		Registers:      []string{"DI", "SI", "DX", "CX", "R8", "R9"},
 		FloatRegisters: []string{"X0", "X1", "X2", "X3", "X4", "X5", "X6", "X7"},
 		RetRegister:    "AX",
@@ -128,14 +130,15 @@ func Avx512() *Arch {
 func ARM64() *Arch {
 	arch := &Arch{
 		Name:           "arm64",
-		Attribute:      regexp.MustCompile(`^\s+\..+$`),
+		Attribute:      regexp.MustCompile(`^\s+\.(\w+).+$`),
 		Function:       regexp.MustCompile(`^\w+:.*$`),
+		FunctionEnd:    regexp.MustCompile(`^\.Lfunc_end\d+:$`),
 		SourceLabel:    regexp.MustCompile(`^\.[A-Z0-9]+_\d+:.*$`),
 		Code:           regexp.MustCompile(`^\s+\w+.+$`),
 		Symbol:         regexp.MustCompile(`^\w+\s+<\w+>:$`),
 		Data:           regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
 		Comment:        regexp.MustCompile(`^\s*//.*$`),
-		Const:          regexp.MustCompile(`^\s+\.(ascii|asciz|byte|double|float|hword|int|long|octa|quad|short|single|skip|space|string|word|zero)\b`),
+		ConstAttrs:     []string{"ascii", "asciz", "byte", "double", "float", "hword", "int", "long", "octa", "quad", "short", "single", "skip", "space", "string", "word", "zero"},
 		Label:          regexp.MustCompile(`[A-Z0-9]+_\d+`),
 		DataLoad:       regexp.MustCompile(`^ADRP\s+[^;]+?(?P<register>\bR\d+);.*?[.]?\b(?P<var>[A-Za-z_][A-Za-z0-9_]+)$`),
 		JumpInstr:      regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`),

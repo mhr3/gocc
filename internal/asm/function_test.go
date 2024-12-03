@@ -157,9 +157,10 @@ func TestParseConst(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			for _, arch := range []*config.Arch{config.AMD64(), config.ARM64()} {
-				require.True(t, arch.Const.MatchString(tc.Const))
+				require.True(t, arch.Attribute.MatchString(tc.Const))
+				attr := arch.Attribute.FindStringSubmatch(tc.Const)[1]
 
-				line := parseConstLine(arch, tc.Const)
+				line := parseConstLine(arch, attr, tc.Const)
 				assert.Len(t, tc.ExpectedVal, line.Size*2)
 				assert.Equal(t, tc.ExpectedVal, line.ValueAsHex())
 			}

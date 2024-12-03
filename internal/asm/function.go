@@ -445,23 +445,17 @@ func (c *Const) Compile(arch *config.Arch) string {
 var directiveParseRegex = regexp.MustCompile(`\.((zero|byte|short|hword|word|long|int|quad)\s+(-?\d+)(.*)|(ascii|asciz)\s+("[^"]+"))$`)
 
 // parseConstLine parses a line in the constant section
-func parseConstLine(arch *config.Arch, line string) ConstLine {
+func parseConstLine(arch *config.Arch, constType string, line string) ConstLine {
 	if arch.Name != "amd64" && arch.Name != "arm64" {
 		panic("gocc: only amd64 is supported for constants")
 	}
 
-	match := arch.Const.FindStringSubmatch(line)
-	if len(match) < 2 {
-		panic("gocc: cannot determine constant directive")
-	}
-	typeName := match[1]
-
-	match = directiveParseRegex.FindStringSubmatch(line)
+	match := directiveParseRegex.FindStringSubmatch(line)
 	if len(match) != 7 {
-		panic(fmt.Errorf("gocc: unimplemented constant directive: %q", typeName))
+		panic(fmt.Errorf("gocc: unimplemented constant directive: %q", constType))
 	}
 
-	switch typeName {
+	switch constType {
 	case "ascii", "asciz":
 		s, err := strconv.Unquote(match[6])
 		if err != nil {
@@ -496,9 +490,9 @@ func parseConstLine(arch *config.Arch, line string) ConstLine {
 		panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
 	}
 
-	typeSz, ok := constSizes[typeName]
+	typeSz, ok := constSizes[constType]
 	if !ok {
-		panic(fmt.Sprintf("gocc: invalid constant type: %s", typeName))
+		panic(fmt.Sprintf("gocc: invalid constant type: %s", constType))
 	}
 	return NewConstLineFromUint(typeSz, value)
 }

@@ -43,6 +43,11 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 		}
 	}(file)
 
+	constAttrsMap := map[string]struct{}{}
+	for _, attr := range arch.ConstAttrs {
+		constAttrsMap[attr] = struct{}{}
+	}
+
 	var (
 		functions    = make([]Function, 0, 8)
 		current      *Function
@@ -57,19 +62,21 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 		line := scanner.Text()
 
 		switch {
-		// Handle constant lines and attach them to the current label
-		case arch.Const.MatchString(line):
-			if constant == nil {
-				constant = &Const{Label: labelName}
-				if labelName == "" {
-					constant.Label = functionName
-				}
-			}
-			constant.Lines = append(constant.Lines, parseConstLine(arch, line))
-
-		// Skip attributes and comment lines
 		case arch.Attribute.MatchString(line):
-			continue
+			attr := arch.Attribute.FindStringSubmatch(line)[1]
+
+			if _, ok := constAttrsMap[attr]; ok {
+				// Handle constant lines and attach them to the current label
+				if constant == nil {
+					constant = &Const{Label: labelName}
+					if labelName == "" {
+						constant.Label = functionName
+					}
+				}
+				constant.Lines = append(constant.Lines, parseConstLine(arch, attr, line))
+			}
+
+		// Skip comment lines
 		case arch.Comment.MatchString(line):
 			continue
 
@@ -85,9 +92,7 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 			constant = &Const{Label: labelName} // reset the current constant
 			switch {
 			case current == nil: // No function yet
-			case len(current.Lines) == 0:
-				current.Lines = append(current.Lines, Line{Labels: []string{labelName}})
-			case current.Lines[len(current.Lines)-1].Assembly == "": // Previous line was a label
+			case len(current.Lines) > 0 && current.Lines[len(current.Lines)-1].Assembly == "": // Previous line was a label
 				current.Lines[len(current.Lines)-1].Labels = append(current.Lines[len(current.Lines)-1].Labels, labelName)
 			default:
 				current.Lines = append(current.Lines, Line{Labels: []string{labelName}})
@@ -119,6 +124,29 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 			} else if constant != nil {
 				// reset if we have an empty constant
 				constant = nil
+			}
+
+		case arch.FunctionEnd.MatchString(line):
+			if current != nil {
+				// add the last constant
+				if constant != nil && len(constant.Lines) > 0 {
+					consts = append(consts, finalizeConstant(constant))
+					constant = nil
+					current.Consts = append(current.Consts, consts...)
+					consts = nil
+				}
+
+				// drop empty functions
+				if len(current.Lines) == 0 && len(functions) > 1 {
+					consts = current.Consts
+					functions = functions[:len(functions)-1]
+					current = &functions[len(functions)-1]
+					current.Consts = append(current.Consts, consts...)
+				}
+
+				current = nil
+				functionName = ""
+				labelName = ""
 			}
 
 		// Handle assembly instructions

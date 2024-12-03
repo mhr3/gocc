@@ -1,6 +1,7 @@
 package asm
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mhr3/gocc/internal/config"
@@ -125,6 +126,7 @@ func TestTransformInstructions(t *testing.T) {
 }
 
 func binaryFromHex(bin string) []string {
+	bin = strings.ReplaceAll(bin, " ", "")
 	// split every two bytes
 	var res []string
 	for i := 0; i < len(bin); i += 2 {
