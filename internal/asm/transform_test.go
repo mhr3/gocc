@@ -33,6 +33,42 @@ func TestDataLoadRewrite(t *testing.T) {
 			},
 		},
 		{
+			Name: "arm64-jump-misdecoded",
+			Cfg:  config.ARM64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "b\t.LBB2_14", Disassembled: "JMP encodingShuffleTable_0124(SB)"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "JMP LBB2_14", Binary: nil},
+			},
+		},
+		{
+			Name: "arm64-jump-cbz",
+			Cfg:  config.ARM64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "cbz\tx8, .LBB2_23", Disassembled: "CBZ R8, 38(PC)"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "CBZ R8, LBB2_23", Binary: nil},
+			},
+		},
+		{
+			Name: "arm64-jump-tbz",
+			Cfg:  config.ARM64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "tbz\tw12, #0, .LBB1_19", Disassembled: "TBZ $0, R12, 67(PC)"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "TBZ $0, R12, LBB1_19", Binary: nil},
+			},
+		},
+		{
 			Name: "amd64-movo",
 			Cfg:  config.AMD64(),
 			Func: Function{

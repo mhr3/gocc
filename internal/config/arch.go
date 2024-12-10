@@ -141,7 +141,7 @@ func ARM64() *Arch {
 		ConstAttrs:     []string{"ascii", "asciz", "byte", "double", "float", "hword", "int", "long", "octa", "quad", "short", "single", "skip", "space", "string", "word", "zero"},
 		Label:          regexp.MustCompile(`[A-Z0-9]+_\d+`),
 		DataLoad:       regexp.MustCompile(`^ADRP\s+[^;]+?(?P<register>\bR\d+);.*?[.]?\b(?P<var>[A-Za-z_][A-Za-z0-9_]+)$`),
-		JumpInstr:      regexp.MustCompile(`^(?P<instr>.*?)([-]?\d*[(]PC[)]);.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`),
+		JumpInstr:      regexp.MustCompile(`^(?P<instr>(?:JMP|B[.]?(?:AL|NE|EQ|C[CS]|L[TESO]|G[TE]|PL|H[IS]|MI|V[CS])|CB[N]?Z[W]?\s+\S+|TB[N]?Z[W]?\s+\S+\s+\S+))\s+((?:[-]?\d*[(]PC[)])|(?:\w+[(]SB[)]));.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`),
 		Registers:      []string{"R0", "R1", "R2", "R3", "R4", "R5", "R6", "R7"},
 		FloatRegisters: []string{"F0", "F1", "F2", "F3", "F4", "F5", "F6", "F7"},
 		RetRegister:    "R0",
