@@ -88,19 +88,19 @@ LBB0_11:
 	VZEROUPPER // <--                                  // vzeroupper
 	RET        // <--                                  // ret
 
-TEXT ·f32_matmul(SB), 0, $464-32
+TEXT ·f32_matmul(SB), 0, $424-32
 	MOVQ  dst+0(FP), DI
 	MOVQ  m+8(FP), SI
 	MOVQ  n+16(FP), DX
 	MOVQ  dims+24(FP), CX
 	NOP                           // (skipped)                            // push	rbp
 	NOP                           // (skipped)                            // mov	rbp, rsp
-	MOVQ  R15, 424(SP)            // <--                                  // push	r15
-	MOVQ  R14, 432(SP)            // <--                                  // push	r14
-	MOVQ  R13, 440(SP)            // <--                                  // push	r13
-	MOVQ  R12, 448(SP)            // <--                                  // push	r12
-	MOVQ  BX, 456(SP)             // <--                                  // push	rbx
-	ANDQ  $-0x8, SP               // <--                                  // and	rsp, -8
+	NOP                           // (skipped)                            // push	r15
+	NOP                           // (skipped)                            // push	r14
+	NOP                           // (skipped)                            // push	r13
+	NOP                           // (skipped)                            // push	r12
+	NOP                           // (skipped)                            // push	rbx
+	NOP                           // (skipped)                            // and	rsp, -8
 	NOP                           // (skipped)                            // sub	rsp, 424
 	MOVQ  DX, 0x8(SP)             // <--                                  // mov	qword ptr [rsp + 8], rdx
 	MOVQ  CX, AX                  // <--                                  // mov	rax, rcx
@@ -172,15 +172,15 @@ LBB1_18:
 	JNE  LBB1_16                   // <--                                  // jne	.LBB1_16
 
 LBB1_27:
-	NOP               // (skipped)                            // lea	rsp, [rbp - 40]
-	MOVQ 456(SP), BX  // <--                                  // pop	rbx
-	MOVQ 448(SP), R12 // <--                                  // pop	r12
-	MOVQ 440(SP), R13 // <--                                  // pop	r13
-	MOVQ 432(SP), R14 // <--                                  // pop	r14
-	MOVQ 424(SP), R15 // <--                                  // pop	r15
-	NOP               // (skipped)                            // pop	rbp
-	VZEROUPPER        // <--                                  // vzeroupper
-	RET               // <--                                  // ret
+	NOP        // (skipped)                            // lea	rsp, [rbp - 40]
+	NOP        // (skipped)                            // pop	rbx
+	NOP        // (skipped)                            // pop	r12
+	NOP        // (skipped)                            // pop	r13
+	NOP        // (skipped)                            // pop	r14
+	NOP        // (skipped)                            // pop	r15
+	NOP        // (skipped)                            // pop	rbp
+	VZEROUPPER // <--                                  // vzeroupper
+	RET        // <--                                  // ret
 
 LBB1_3:
 	WORD $0xd089                   // MOVL DX, AX                          // mov	eax, edx
