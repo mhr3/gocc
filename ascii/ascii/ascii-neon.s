@@ -430,7 +430,7 @@ LBB2_21:
 	MOVB  R0, ret+32(FP)                 // <--
 	RET                                  // <--                                  // ret
 
-TEXT ·IndexFoldRabinKarp(SB), 0, $48-40
+TEXT ·IndexFoldRabinKarp(SB), NOSPLIT, $0-40
 	MOVD haystack+0(FP), R0
 	MOVD haystack_len+8(FP), R1
 	MOVD needle+16(FP), R2
@@ -442,23 +442,23 @@ TEXT ·IndexFoldRabinKarp(SB), 0, $48-40
 	RET                         // <--                                  // ret
 
 LBB3_2:
-	CBZ  R3, LBB3_12                    // <--                                  // cbz	x3, .LBB3_12
-	NOP                                 // (skipped)                            // stp	x29, x30, [sp, #-48]!
-	MOVD $uppercasingTable<>(SB), R8    // <--                                  // adrp	x8, uppercasingTable
-	ADD  $0, R8, R8                     // <--                                  // add	x8, x8, :lo12:uppercasingTable
-	CMP  R3, R1                         // <--                                  // cmp	x1, x3
-	MOVD R21, x21spill-48(SP)           // <--                                  // str	x21, [sp, #16]
-	STP  (R20, R19), x20x19spill-40(SP) // <--                                  // stp	x20, x19, [sp, #32]
-	NOP                                 // (skipped)                            // mov	x29, sp
-	VLD1 (R8), [V0.B16, V1.B16]         // <--                                  // ld1	{ v0.16b, v1.16b }, [x8]
-	BNE  LBB3_13                        // <--                                  // b.ne	.LBB3_13
-	TBNZ $63, R1, LBB3_104              // <--                                  // tbnz	x1, #63, .LBB3_104
-	ADD  R1, R0, R9                     // <--                                  // add	x9, x0, x1
-	AND  $15, R1, R8                    // <--                                  // and	x8, x1, #0xf
-	SUB  R8, R9, R9                     // <--                                  // sub	x9, x9, x8
-	CMP  R0, R9                         // <--                                  // cmp	x9, x0
-	BLS  LBB3_9                         // <--                                  // b.ls	.LBB3_9
-	WORD $0x4f05e402                    // VMOVI $160, V2.B16                   // movi	v2.16b, #160
+	CBZ  R3, LBB3_12                 // <--                                  // cbz	x3, .LBB3_12
+	NOP                              // (skipped)                            // stp	x29, x30, [sp, #-48]!
+	MOVD $uppercasingTable<>(SB), R8 // <--                                  // adrp	x8, uppercasingTable
+	ADD  $0, R8, R8                  // <--                                  // add	x8, x8, :lo12:uppercasingTable
+	CMP  R3, R1                      // <--                                  // cmp	x1, x3
+	NOP                              // (skipped)                            // str	x21, [sp, #16]
+	NOP                              // (skipped)                            // stp	x20, x19, [sp, #32]
+	NOP                              // (skipped)                            // mov	x29, sp
+	VLD1 (R8), [V0.B16, V1.B16]      // <--                                  // ld1	{ v0.16b, v1.16b }, [x8]
+	BNE  LBB3_13                     // <--                                  // b.ne	.LBB3_13
+	TBNZ $63, R1, LBB3_104           // <--                                  // tbnz	x1, #63, .LBB3_104
+	ADD  R1, R0, R9                  // <--                                  // add	x9, x0, x1
+	AND  $15, R1, R8                 // <--                                  // and	x8, x1, #0xf
+	SUB  R8, R9, R9                  // <--                                  // sub	x9, x9, x8
+	CMP  R0, R9                      // <--                                  // cmp	x9, x0
+	BLS  LBB3_9                      // <--                                  // b.ls	.LBB3_9
+	WORD $0x4f05e402                 // VMOVI $160, V2.B16                   // movi	v2.16b, #160
 
 LBB3_7:
 	WORD  $0x3dc00003                      // FMOVQ (R0), F3                       // ldr	q3, [x0]
@@ -811,38 +811,38 @@ LBB3_69:
 	JMP  LBB3_81          // <--                                  // b	.LBB3_81
 
 LBB3_73:
-	RBIT  R14, R11                       // <--                                  // rbit	x11, x14
-	CLZ   R11, R11                       // <--                                  // clz	x11, x11
-	UBFX  $2, R11, $30, R11              // <--                                  // ubfx	x11, x11, #2, #30
-	MOVW  R11, R12                       // <--                                  // mov	w12, w11
-	SUBW  $1, R11, R11                   // <--                                  // sub	w11, w11, #1
-	ADD   R12, R8, R8                    // <--                                  // add	x8, x8, x12
-	SUB   $1, R8, R8                     // <--                                  // sub	x8, x8, #1
-	ADD   R11.SXTW, R10, R10             // <--                                  // add	x10, x10, w11, sxtw
-	CMP   R9, R8                         // <--                                  // cmp	x8, x9
-	CSINV LO, R10, ZR, R8                // <--                                  // csinv	x8, x10, xzr, lo
-	LDP   x20x19spill-40(SP), (R20, R19) // <--                                  // ldp	x20, x19, [sp, #32]
-	MOVD  x21spill-48(SP), R21           // <--                                  // ldr	x21, [sp, #16]
-	NOP                                  // (skipped)                            // ldp	x29, x30, [sp], #48
-	MOVD  R8, R0                         // <--                                  // mov	x0, x8
-	MOVD  R0, ret+32(FP)                 // <--
-	RET                                  // <--                                  // ret
+	RBIT  R14, R11           // <--                                  // rbit	x11, x14
+	CLZ   R11, R11           // <--                                  // clz	x11, x11
+	UBFX  $2, R11, $30, R11  // <--                                  // ubfx	x11, x11, #2, #30
+	MOVW  R11, R12           // <--                                  // mov	w12, w11
+	SUBW  $1, R11, R11       // <--                                  // sub	w11, w11, #1
+	ADD   R12, R8, R8        // <--                                  // add	x8, x8, x12
+	SUB   $1, R8, R8         // <--                                  // sub	x8, x8, #1
+	ADD   R11.SXTW, R10, R10 // <--                                  // add	x10, x10, w11, sxtw
+	CMP   R9, R8             // <--                                  // cmp	x8, x9
+	CSINV LO, R10, ZR, R8    // <--                                  // csinv	x8, x10, xzr, lo
+	NOP                      // (skipped)                            // ldp	x20, x19, [sp, #32]
+	NOP                      // (skipped)                            // ldr	x21, [sp, #16]
+	NOP                      // (skipped)                            // ldp	x29, x30, [sp], #48
+	MOVD  R8, R0             // <--                                  // mov	x0, x8
+	MOVD  R0, ret+32(FP)     // <--
+	RET                      // <--                                  // ret
 
 LBB3_74:
-	RBIT  R11, R8                        // <--                                  // rbit	x8, x11
-	CLZ   R8, R8                         // <--                                  // clz	x8, x8
-	LSR   $2, R8, R8                     // <--                                  // lsr	x8, x8, #2
-	ADD   R8, R9, R11                    // <--                                  // add	x11, x9, x8
-	SUB   R0, R9, R9                     // <--                                  // sub	x9, x9, x0
-	ADD   R8, R9, R8                     // <--                                  // add	x8, x9, x8
-	CMP   R10, R11                       // <--                                  // cmp	x11, x10
-	CSINV LO, R8, ZR, R8                 // <--                                  // csinv	x8, x8, xzr, lo
-	LDP   x20x19spill-40(SP), (R20, R19) // <--                                  // ldp	x20, x19, [sp, #32]
-	MOVD  x21spill-48(SP), R21           // <--                                  // ldr	x21, [sp, #16]
-	NOP                                  // (skipped)                            // ldp	x29, x30, [sp], #48
-	MOVD  R8, R0                         // <--                                  // mov	x0, x8
-	MOVD  R0, ret+32(FP)                 // <--
-	RET                                  // <--                                  // ret
+	RBIT  R11, R8        // <--                                  // rbit	x8, x11
+	CLZ   R8, R8         // <--                                  // clz	x8, x8
+	LSR   $2, R8, R8     // <--                                  // lsr	x8, x8, #2
+	ADD   R8, R9, R11    // <--                                  // add	x11, x9, x8
+	SUB   R0, R9, R9     // <--                                  // sub	x9, x9, x0
+	ADD   R8, R9, R8     // <--                                  // add	x8, x9, x8
+	CMP   R10, R11       // <--                                  // cmp	x11, x10
+	CSINV LO, R8, ZR, R8 // <--                                  // csinv	x8, x8, xzr, lo
+	NOP                  // (skipped)                            // ldp	x20, x19, [sp, #32]
+	NOP                  // (skipped)                            // ldr	x21, [sp, #16]
+	NOP                  // (skipped)                            // ldp	x29, x30, [sp], #48
+	MOVD  R8, R0         // <--                                  // mov	x0, x8
+	MOVD  R0, ret+32(FP) // <--
+	RET                  // <--                                  // ret
 
 LBB3_75:
 	MOVD R8, R13         // <--                                  // mov	x13, x8
@@ -884,8 +884,8 @@ LBB3_81:
 	FMOVD F0, R8                         // <--                                  // fmov	x8, d0
 	CMN   $1, R8                         // <--                                  // cmn	x8, #1
 	CSETM NE, R8                         // <--                                  // csetm	x8, ne
-	LDP   x20x19spill-40(SP), (R20, R19) // <--                                  // ldp	x20, x19, [sp, #32]
-	MOVD  x21spill-48(SP), R21           // <--                                  // ldr	x21, [sp, #16]
+	NOP                                  // (skipped)                            // ldp	x20, x19, [sp, #32]
+	NOP                                  // (skipped)                            // ldr	x21, [sp, #16]
 	NOP                                  // (skipped)                            // ldp	x29, x30, [sp], #48
 	MOVD  R8, R0                         // <--                                  // mov	x0, x8
 	MOVD  R0, ret+32(FP)                 // <--
@@ -978,8 +978,8 @@ LBB3_97:
 	ADD   R10, R9, R9                      // <--                                  // add	x9, x9, x10
 	CMP   R8, R10                          // <--                                  // cmp	x10, x8
 	CSINV LO, R9, ZR, R8                   // <--                                  // csinv	x8, x9, xzr, lo
-	LDP   x20x19spill-40(SP), (R20, R19)   // <--                                  // ldp	x20, x19, [sp, #32]
-	MOVD  x21spill-48(SP), R21             // <--                                  // ldr	x21, [sp, #16]
+	NOP                                    // (skipped)                            // ldp	x20, x19, [sp, #32]
+	NOP                                    // (skipped)                            // ldr	x21, [sp, #16]
 	NOP                                    // (skipped)                            // ldp	x29, x30, [sp], #48
 	MOVD  R8, R0                           // <--                                  // mov	x0, x8
 	MOVD  R0, ret+32(FP)                   // <--
@@ -1027,13 +1027,13 @@ LBB3_102:
 	JMP  LBB3_108      // <--                                  // b	.LBB3_108
 
 LBB3_104:
-	MOVD $-1, R8                        // <--                                  // mov	x8, #-1
-	LDP  x20x19spill-40(SP), (R20, R19) // <--                                  // ldp	x20, x19, [sp, #32]
-	MOVD x21spill-48(SP), R21           // <--                                  // ldr	x21, [sp, #16]
-	NOP                                 // (skipped)                            // ldp	x29, x30, [sp], #48
-	MOVD R8, R0                         // <--                                  // mov	x0, x8
-	MOVD R0, ret+32(FP)                 // <--
-	RET                                 // <--                                  // ret
+	MOVD $-1, R8        // <--                                  // mov	x8, #-1
+	NOP                 // (skipped)                            // ldp	x20, x19, [sp, #32]
+	NOP                 // (skipped)                            // ldr	x21, [sp, #16]
+	NOP                 // (skipped)                            // ldp	x29, x30, [sp], #48
+	MOVD R8, R0         // <--                                  // mov	x0, x8
+	MOVD R0, ret+32(FP) // <--
+	RET                 // <--                                  // ret
 
 LBB3_105:
 	WORD $0x394000c6     // MOVBU (R6), R6                       // ldrb	w6, [x6]
@@ -1177,30 +1177,30 @@ LBB3_127:
 	JMP  LBB3_106         // <--                                  // b	.LBB3_106
 
 LBB3_128:
-	LDP  x20x19spill-40(SP), (R20, R19) // <--                                  // ldp	x20, x19, [sp, #32]
-	MOVD x21spill-48(SP), R21           // <--                                  // ldr	x21, [sp, #16]
-	NOP                                 // (skipped)                            // ldp	x29, x30, [sp], #48
-	MOVD R8, R0                         // <--                                  // mov	x0, x8
-	MOVD R0, ret+32(FP)                 // <--
-	RET                                 // <--                                  // ret
+	NOP                 // (skipped)                            // ldp	x20, x19, [sp, #32]
+	NOP                 // (skipped)                            // ldr	x21, [sp, #16]
+	NOP                 // (skipped)                            // ldp	x29, x30, [sp], #48
+	MOVD R8, R0         // <--                                  // mov	x0, x8
+	MOVD R0, ret+32(FP) // <--
+	RET                 // <--                                  // ret
 
 LBB3_129:
-	MOVD ZR, R8                         // <--                                  // mov	x8, xzr
-	LDP  x20x19spill-40(SP), (R20, R19) // <--                                  // ldp	x20, x19, [sp, #32]
-	MOVD x21spill-48(SP), R21           // <--                                  // ldr	x21, [sp, #16]
-	NOP                                 // (skipped)                            // ldp	x29, x30, [sp], #48
-	MOVD R8, R0                         // <--                                  // mov	x0, x8
-	MOVD R0, ret+32(FP)                 // <--
-	RET                                 // <--                                  // ret
+	MOVD ZR, R8         // <--                                  // mov	x8, xzr
+	NOP                 // (skipped)                            // ldp	x20, x19, [sp, #32]
+	NOP                 // (skipped)                            // ldr	x21, [sp, #16]
+	NOP                 // (skipped)                            // ldp	x29, x30, [sp], #48
+	MOVD R8, R0         // <--                                  // mov	x0, x8
+	MOVD R0, ret+32(FP) // <--
+	RET                 // <--                                  // ret
 
 LBB3_130:
-	ADD  $1, R8, R8                     // <--                                  // add	x8, x8, #1
-	LDP  x20x19spill-40(SP), (R20, R19) // <--                                  // ldp	x20, x19, [sp, #32]
-	MOVD x21spill-48(SP), R21           // <--                                  // ldr	x21, [sp, #16]
-	NOP                                 // (skipped)                            // ldp	x29, x30, [sp], #48
-	MOVD R8, R0                         // <--                                  // mov	x0, x8
-	MOVD R0, ret+32(FP)                 // <--
-	RET                                 // <--                                  // ret
+	ADD  $1, R8, R8     // <--                                  // add	x8, x8, #1
+	NOP                 // (skipped)                            // ldp	x20, x19, [sp, #32]
+	NOP                 // (skipped)                            // ldr	x21, [sp, #16]
+	NOP                 // (skipped)                            // ldp	x29, x30, [sp], #48
+	MOVD R8, R0         // <--                                  // mov	x0, x8
+	MOVD R0, ret+32(FP) // <--
+	RET                 // <--                                  // ret
 
 DATA uppercasingTable<>+0x00(SB)/8, $0x2020202020202000
 DATA uppercasingTable<>+0x08(SB)/8, $0x2020202020202020
@@ -1208,7 +1208,7 @@ DATA uppercasingTable<>+0x10(SB)/8, $0x2020202020202020
 DATA uppercasingTable<>+0x18(SB)/8, $0x0000000000202020
 GLOBL uppercasingTable<>(SB), (RODATA|NOPTR), $32
 
-TEXT ·IndexFold(SB), 0, $80-40
+TEXT ·IndexFold(SB), NOSPLIT, $0-40
 	MOVD haystack+0(FP), R0
 	MOVD haystack_len+8(FP), R1
 	MOVD needle+16(FP), R2
@@ -1220,25 +1220,25 @@ TEXT ·IndexFold(SB), 0, $80-40
 	RET                         // <--                                  // ret
 
 LBB4_2:
-	CMP  $1, R3                         // <--                                  // cmp	x3, #1
-	BLT  LBB4_14                        // <--                                  // b.lt	.LBB4_14
-	NOP                                 // (skipped)                            // stp	x29, x30, [sp, #-80]!
-	MOVD $uppercasingTable<>(SB), R8    // <--                                  // adrp	x8, uppercasingTable
-	ADD  $0, R8, R8                     // <--                                  // add	x8, x8, :lo12:uppercasingTable
-	MOVD R25, x25spill-80(SP)           // <--                                  // str	x25, [sp, #16]
-	NOP                                 // (skipped)                            // mov	x29, sp
-	STP  (R24, R23), x24x23spill-72(SP) // <--                                  // stp	x24, x23, [sp, #32]
-	VLD1 (R8), [V0.B16, V1.B16]         // <--                                  // ld1	{ v0.16b, v1.16b }, [x8]
-	SUBS R3, R1, R8                     // <--                                  // subs	x8, x1, x3
-	STP  (R22, R21), x22x21spill-56(SP) // <--                                  // stp	x22, x21, [sp, #48]
-	STP  (R20, R19), x20x19spill-40(SP) // <--                                  // stp	x20, x19, [sp, #64]
-	BNE  LBB4_15                        // <--                                  // b.ne	.LBB4_15
-	ADD  R1, R0, R9                     // <--                                  // add	x9, x0, x1
-	AND  $15, R1, R8                    // <--                                  // and	x8, x1, #0xf
-	SUB  R8, R9, R9                     // <--                                  // sub	x9, x9, x8
-	CMP  R0, R9                         // <--                                  // cmp	x9, x0
-	BLS  LBB4_8                         // <--                                  // b.ls	.LBB4_8
-	WORD $0x4f05e402                    // VMOVI $160, V2.B16                   // movi	v2.16b, #160
+	CMP  $1, R3                      // <--                                  // cmp	x3, #1
+	BLT  LBB4_14                     // <--                                  // b.lt	.LBB4_14
+	NOP                              // (skipped)                            // stp	x29, x30, [sp, #-80]!
+	MOVD $uppercasingTable<>(SB), R8 // <--                                  // adrp	x8, uppercasingTable
+	ADD  $0, R8, R8                  // <--                                  // add	x8, x8, :lo12:uppercasingTable
+	NOP                              // (skipped)                            // str	x25, [sp, #16]
+	NOP                              // (skipped)                            // mov	x29, sp
+	NOP                              // (skipped)                            // stp	x24, x23, [sp, #32]
+	VLD1 (R8), [V0.B16, V1.B16]      // <--                                  // ld1	{ v0.16b, v1.16b }, [x8]
+	SUBS R3, R1, R8                  // <--                                  // subs	x8, x1, x3
+	NOP                              // (skipped)                            // stp	x22, x21, [sp, #48]
+	NOP                              // (skipped)                            // stp	x20, x19, [sp, #64]
+	BNE  LBB4_15                     // <--                                  // b.ne	.LBB4_15
+	ADD  R1, R0, R9                  // <--                                  // add	x9, x0, x1
+	AND  $15, R1, R8                 // <--                                  // and	x8, x1, #0xf
+	SUB  R8, R9, R9                  // <--                                  // sub	x9, x9, x8
+	CMP  R0, R9                      // <--                                  // cmp	x9, x0
+	BLS  LBB4_8                      // <--                                  // b.ls	.LBB4_8
+	WORD $0x4f05e402                 // VMOVI $160, V2.B16                   // movi	v2.16b, #160
 
 LBB4_6:
 	WORD  $0x3dc00003                      // FMOVQ (R0), F3                       // ldr	q3, [x0]
@@ -2503,11 +2503,11 @@ LBB4_225:
 	MOVD $-1, R8 // <--                                  // mov	x8, #-1
 
 LBB4_226:
-	LDP  x20x19spill-40(SP), (R20, R19) // <--                                  // ldp	x20, x19, [sp, #64]
-	LDP  x22x21spill-56(SP), (R22, R21) // <--                                  // ldp	x22, x21, [sp, #48]
-	LDP  x24x23spill-72(SP), (R24, R23) // <--                                  // ldp	x24, x23, [sp, #32]
-	MOVD x25spill-80(SP), R25           // <--                                  // ldr	x25, [sp, #16]
-	NOP                                 // (skipped)                            // ldp	x29, x30, [sp], #80
-	MOVD R8, R0                         // <--                                  // mov	x0, x8
-	MOVD R0, ret+32(FP)                 // <--
-	RET                                 // <--                                  // ret
+	NOP                 // (skipped)                            // ldp	x20, x19, [sp, #64]
+	NOP                 // (skipped)                            // ldp	x22, x21, [sp, #48]
+	NOP                 // (skipped)                            // ldp	x24, x23, [sp, #32]
+	NOP                 // (skipped)                            // ldr	x25, [sp, #16]
+	NOP                 // (skipped)                            // ldp	x29, x30, [sp], #80
+	MOVD R8, R0         // <--                                  // mov	x0, x8
+	MOVD R0, ret+32(FP) // <--
+	RET                 // <--                                  // ret
