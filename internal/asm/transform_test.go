@@ -45,6 +45,18 @@ func TestDataLoadRewrite(t *testing.T) {
 			},
 		},
 		{
+			Name: "arm64-jump-misdecoded-2",
+			Cfg:  config.ARM64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "b.eq\t.LBB7_10", Disassembled: "BEQ shuffleTable_1234(SB)"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "BEQ LBB7_10", Binary: nil},
+			},
+		},
+		{
 			Name: "arm64-jump-cbz",
 			Cfg:  config.ARM64(),
 			Func: Function{
