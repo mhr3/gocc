@@ -65,17 +65,16 @@ bool is_ascii(unsigned char *data, uint64_t length)
         return (data32 & 0x80808080) ? false : true;
     }
 
+    if (length == 0) return true;
+
     uint32_t data32 = 0;
 
-    if (length != 0)
-    {
-        // branchless check for 1-3 bytes
-        uint8_t *data_end = data + length;
-        int idx = length >> 1;
-        data32 |= data[0];
-        data32 |= data[idx];
-        data32 |= data_end[-1];
-    }
+    // branchless check for 1-3 bytes
+    uint8_t *data_end = data + length;
+    int idx = length >> 1;
+    data32 |= data[0];
+    data32 |= data[idx];
+    data32 |= data_end[-1];
 
     return (data32 & 0x80808080) ? false : true;
 }
