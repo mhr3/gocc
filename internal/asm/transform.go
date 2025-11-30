@@ -54,45 +54,24 @@ func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
 		}
 		combined := strings.Join(parts, ";\t")
 
+		// FIXME: cleanup
 		if arch.JumpInstr != nil && arch.JumpInstr.MatchString(combined) {
 			reParams := getRegexpParams(arch.JumpInstr, combined)
 			rewritten := fmt.Sprintf("%s %s", strings.ToUpper(reParams["instr"]), reParams["label"])
 			function.Lines[i].Disassembled = rewritten
 			function.Lines[i].Binary = nil
-		} else if arch.DataLoad != nil && arch.DataLoad.MatchString(combined) {
-			reParams := getRegexpParams(arch.DataLoad, combined)
-			// FIXME: this is extremely fragile
-			op := arch.MovInstr[8]
-			register := reParams["register"]
-			symbol := reParams["var"]
-			addrMode := "$" // absolute addressing
-			if instr, ok := reParams["instr"]; ok {
-				// sigh, why oh why do we have to do this?
-				switch {
-				case instr == "MOVDQA":
-					op = "MOVO"
-				case instr == "MOVDQU":
-					op = "MOVOU"
-				default:
-					op = instr
-				}
+			continue
+		}
 
-				addrMode = ""
+		switch arch.Name {
+		case "amd64":
+			if arch.DataLoad.MatchString(combined) {
+				rewriteLoadAmd64(arch, function, line, combined, function.Lines[i:])
 			}
-			if strings.HasPrefix(register, "X") {
-				// the disassembler gets this wrong sometimes
-				switch {
-				case strings.Contains(line.Assembly, "xmm"):
-					// all good
-				case strings.Contains(line.Assembly, "ymm"):
-					register = "Y" + register[1:]
-				case strings.Contains(line.Assembly, "zmm"):
-					register = "Z" + register[1:] // does go even support this?
-				}
+		case "arm64":
+			if arch.DataLoad.MatchString(combined) {
+				rewriteLoadArm64(arch, function, line, combined, function.Lines[i:])
 			}
-			rewritten := fmt.Sprintf("%s %s%s<>(SB), %s", op, addrMode, symbol, register)
-			function.Lines[i].Disassembled = rewritten
-			function.Lines[i].Binary = nil
 		}
 	}
 
@@ -105,10 +84,10 @@ func checkStackManipulation(arch *config.Arch, function Function) Function {
 	}
 
 	switch arch.Name {
-	case "arm64":
-		return checkStackArm64(arch, function)
 	case "amd64":
 		return checkStackAmd64(arch, function)
+	case "arm64":
+		return checkStackArm64(arch, function)
 	}
 
 	return function

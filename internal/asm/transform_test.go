@@ -23,13 +23,13 @@ func TestDataLoadRewrite(t *testing.T) {
 			Cfg:  config.ARM64(),
 			Func: Function{
 				Lines: []Line{
-					{Assembly: "adrp\tx10, lengthTable", Disassembled: "ADRP 0(PC), R10"},
-					{Assembly: "add	x10, x10, :lo12:shuffleTable", Disassembled: "ADD $0, R10, R10"},
+					{Assembly: "adrp\tx9, lengthTable", Disassembled: "ADRP 0(PC), R9"},
+					{Assembly: "add	x9, x9, :lo12:shuffleTable", Disassembled: "ADD $0, R9, R9", Binary: binaryFromHex("29 01 00 91")},
 				},
 			},
 			ExpectedLines: []Line{
-				{Disassembled: "MOVD $lengthTable<>(SB), R10", Binary: nil},
-				{Disassembled: "ADD $0, R10, R10", Binary: nil},
+				{Disassembled: "MOVD $lengthTable<>(SB), R9", Binary: nil},
+				{Disassembled: "NOP", Binary: nil},
 			},
 		},
 		{
