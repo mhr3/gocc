@@ -116,6 +116,30 @@ func TestDataLoadRewrite(t *testing.T) {
 				{Disassembled: "LEAQ lengthTable_1234<>(SB), BX", Binary: nil},
 			},
 		},
+		{
+			Name: "amd64-vpand-2registers",
+			Cfg:  config.AMD64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "vpand\tymm3, ymm7, ymmword ptr [rip + .LCPI0_0]", Disassembled: "VPAND 0(IP), Y7, Y3"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "VPAND LCPI0_0<>(SB), Y7, Y3", Binary: nil},
+			},
+		},
+		{
+			Name: "amd64-vpsubusb-2registers",
+			Cfg:  config.AMD64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "vpsubusb\tymm4, ymm4, ymmword ptr [rip + .LCPI0_3]", Disassembled: "VPSUBUSB 0(IP), Y4, Y4"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "VPSUBUSB LCPI0_3<>(SB), Y4, Y4", Binary: nil},
+			},
+		},
 	}
 
 	for _, tc := range testCases {

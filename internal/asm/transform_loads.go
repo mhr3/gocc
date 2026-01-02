@@ -13,6 +13,7 @@ func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string,
 	// FIXME: this is extremely fragile
 	op := arch.MovInstr[8]
 	register := reParams["register"]
+	register2 := reParams["register2"]
 	symbol := reParams["var"]
 
 	// sigh, why oh why do we have to do this?
@@ -37,7 +38,12 @@ func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string,
 		}
 	}
 
-	rewritten := fmt.Sprintf("%s %s<>(SB), %s", op, symbol, register)
+	var rewritten string
+	if register2 == "" {
+		rewritten = fmt.Sprintf("%s %s<>(SB), %s", op, symbol, register)
+	} else {
+		rewritten = fmt.Sprintf("%s %s<>(SB), %s, %s", op, symbol, register2, register)
+	}
 	lines[0].Disassembled = rewritten
 	lines[0].Binary = nil
 }
