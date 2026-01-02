@@ -67,4 +67,4 @@ require (
 	modernc.org/token v1.1.0 // indirect
 )
 
-replace golang.org/x/arch => github.com/mhr3/arch v0.0.0-20241019131242-b17390372d21
+replace golang.org/x/arch => github.com/mhr3/arch v0.0.0-20260102151416-940906d6a466
