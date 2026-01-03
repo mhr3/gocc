@@ -123,33 +123,38 @@ func TestParseConst(t *testing.T) {
 		ExpectedVal string
 	}{
 		{
-			Name:        "zero",
-			Const:       `	.zero	16,255`,
+			Name: "zero",
+			Const: `	.zero	16,255`,
 			ExpectedVal: "ffffffffffffffffffffffffffffffff",
 		},
 		{
-			Name:        "byte",
-			Const:       `	.byte	255`,
+			Name: "byte",
+			Const: `	.byte	255`,
 			ExpectedVal: "ff",
 		},
 		{
-			Name:        "hword",
-			Const:       `	.hword  30`,
+			Name: "hword",
+			Const: `	.hword  30`,
 			ExpectedVal: "1e00",
 		},
 		{
-			Name:        "int",
-			Const:       `	.int	42`,
+			Name: "int",
+			Const: `	.int	42`,
 			ExpectedVal: "2a000000",
 		},
 		{
-			Name:        "ascii",
-			Const:       `	.ascii	"\000\377\377\377\001\377\377\377\002\377\377\377\003\377\377\377"`,
+			Name: "quad",
+			Const: `	.quad   -9187201950435737472            # 0x8080808080808080`,
+			ExpectedVal: "8080808080808080",
+		},
+		{
+			Name: "ascii",
+			Const: `	.ascii	"\000\377\377\377\001\377\377\377\002\377\377\377\003\377\377\377"`,
 			ExpectedVal: "00ffffff01ffffff02ffffff03ffffff",
 		},
 		{
-			Name:        "asciz",
-			Const:       `	.asciz	"\002\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\003\000\000\000\000"`,
+			Name: "asciz",
+			Const: `	.asciz	"\002\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\003\000\000\000\000"`,
 			ExpectedVal: "0203000000000000000400000000000000000000000000000000030000000000",
 		},
 	}

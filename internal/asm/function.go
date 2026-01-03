@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/types"
@@ -486,6 +487,13 @@ func parseConstLine(arch *config.Arch, constType string, line string) ConstLine 
 	}
 
 	value, err := strconv.ParseUint(match[3], 10, 64)
+	if errors.Is(err, strconv.ErrSyntax) {
+		val, parseErr := strconv.ParseInt(match[3], 10, 64)
+		if parseErr == nil {
+			value = uint64(val)
+			err = nil
+		}
+	}
 	if err != nil {
 		panic(fmt.Sprintf("gocc: invalid constant value in data: %v", err))
 	}
