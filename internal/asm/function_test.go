@@ -153,6 +153,11 @@ func TestParseConst(t *testing.T) {
 			ExpectedVal: "00ffffff01ffffff02ffffff03ffffff",
 		},
 		{
+			Name: "ascii-escape",
+			Const: `	.ascii	"\000\377\"\003\377\377\377"`,
+			ExpectedVal: "00ff2203ffffff",
+		},
+		{
 			Name: "asciz",
 			Const: `	.asciz	"\002\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\003\000\000\000\000"`,
 			ExpectedVal: "0203000000000000000400000000000000000000000000000000030000000000",
