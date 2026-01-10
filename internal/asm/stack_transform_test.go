@@ -135,6 +135,127 @@ func TestStackGrowthAmd64(t *testing.T) {
 	assert.Equal(t, "RET", modified.Lines[20].Disassembled)
 }
 
+func TestQuickStackManipulationArm64(t *testing.T) {
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "stp	x29, x30, [sp, #-48]!", Binary: wordToLineBinary(0xa9bd7bfd)},
+			{Assembly: "cmp	x1, x3", Disassembled: "CMP X1, X3", Binary: wordToLineBinary(0xeb03003f)},
+			{Assembly: "str	x21, [sp, #16]", Disassembled: "MOVD R21, 16(RSP)", Binary: wordToLineBinary(0xf9000bf5)},
+			{Assembly: "mov	x29, sp", Binary: wordToLineBinary(0x910003fd)},
+			{Assembly: "stp	x20, x19, [sp, #32]", Binary: wordToLineBinary(0xa9024ff4)},
+			{Assembly: "b.ge\t.LBB3_3", Disassembled: "B.GE .LBB3_3", Binary: wordToLineBinary(0x540000ea)},
+			{Assembly: "mov	x8, #-1", Disassembled: "MOVD X8, #-1", Binary: wordToLineBinary(0x92800008)},
+			{Assembly: "ldp	x20, x19, [sp, #32]", Binary: wordToLineBinary(0xa9424ff4)},
+			{Assembly: "mov	x0, x8", Disassembled: "MOV X0, X8", Binary: wordToLineBinary(0xaa0803e0)},
+			{Assembly: "ldr	x21, [sp, #16]", Binary: wordToLineBinary(0xf9400bf5)},
+			{Assembly: "ldp	x29, x30, [sp], #48", Binary: wordToLineBinary(0xa8c37bfd)},
+			{Assembly: "ret", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackUnified(config.ARM64(), testFn)
+
+	// All saves are callee-saved and NOPed, so GoFrameSize should be 0
+	require.Equal(t, 0, modified.LocalsSize)
+
+	require.Len(t, modified.Lines, 12)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
+	assert.NotEqual(t, "NOP", modified.Lines[1].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled)
+}
+
+/*
+
+     ef8: a9bb7bfd      stp     x29, x30, [sp, #-0x50]!
+     efc: a90167fa      stp     x26, x25, [sp, #0x10]
+     f00: 910003fd      mov     x29, sp
+     f10: d10043ff      sub     sp, sp, #0x10
+    1074: 54fffec3      b.lo    0x104c <index_fold+0x154>
+    1078: b4fff528      cbz     x8, 0xf1c <index_fold+0x24>
+    107c: 910003ea      mov     x10, sp
+    1080: 8b08012b      add     x11, x9, x8
+    1084: a9007fff      stp     xzr, xzr, [sp]
+    1088: aa08014a      orr     x10, x10, x8
+    108c: 37184f81      tbnz    w1, #0x3, 0x1a7c <index_fold+0xb84>
+    1090: 37105701      tbnz    w1, #0x2, 0x1b70 <index_fold+0xc78>
+    1094: 3940012c      ldrb    w12, [x9]
+    1098: d341fd0d      lsr     x13, x8, #1
+    109c: 910003ee      mov     x14, sp
+    10a0: 390003ec      strb    w12, [sp]
+    10a4: 386d692c      ldrb    w12, [x9, x13]
+    10a8: aa0d01cd      orr     x13, x14, x13
+    10ac: 390001ac      strb    w12, [x13]
+    10b0: 385ff16b      ldurb   w11, [x11, #-0x1]
+    10b4: 381ff14b      sturb   w11, [x10, #-0x1]
+
+		stp     x29, x30, [sp, #-80]!           // 16-byte Folded Spill
+        stp     x26, x25, [sp, #16]             // 16-byte Folded Spill
+        mov     x29, sp
+        sub     sp, sp, #16
+	    b.lo    .LBB4_19
+.LBB4_21:
+        cbz     x8, .LBB4_1
+// %bb.22:
+        mov     x10, sp
+        add     x11, x9, x8
+        stp     xzr, xzr, [sp]
+        orr     x10, x10, x8
+        tbnz    w1, #3, .LBB4_143
+// %bb.23:
+        tbnz    w1, #2, .LBB4_154
+// %bb.24:
+        ldrb    w12, [x9]
+        lsr     x13, x8, #1
+        mov     x14, sp
+        strb    w12, [sp]
+        ldrb    w12, [x9, x13]
+        orr     x13, x14, x13
+        strb    w12, [x13]
+        ldurb   w11, [x11, #-1]
+        sturb   w11, [x10, #-1]
+*/
+
+func TestStackOpsArm64(t *testing.T) {
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "stp\tx29, x30, [sp, #-80]!", Binary: wordToLineBinary(0xa9bb7bfd)},
+			{Assembly: "stp\tx26, x25, [sp, #16]", Binary: wordToLineBinary(0xa90167fa)},
+			{Assembly: "mov\tx29, sp", Binary: wordToLineBinary(0x910003fd)},
+			{Assembly: "sub\tsp, sp, #16", Binary: wordToLineBinary(0xd10043ff)},
+			{Assembly: "b.lo\t.LBB4_19", Binary: wordToLineBinary(0x54fffec3)},
+			{Assembly: "cbz\tx8, .LBB4_1", Binary: wordToLineBinary(0xb4fff528)},
+			{Assembly: "mov\tx10, sp", Binary: wordToLineBinary(0x910003ea)},
+			{Assembly: "add\tx11, x9, x8", Binary: wordToLineBinary(0x8b08012b)},
+			{Assembly: "stp\txzr, xzr, [sp]", Binary: wordToLineBinary(0xa9007fff)},
+			{Assembly: "orr\tx10, x10, x8", Binary: wordToLineBinary(0xaa08014a)},
+			{Assembly: "tbnz\tw1, #3, .LBB4_143", Binary: wordToLineBinary(0x37184f81)},
+			{Assembly: "tbnz\tw1, #2, .LBB4_154", Binary: wordToLineBinary(0x37105701)},
+			{Assembly: "ldrb\tw12, [x9]", Binary: wordToLineBinary(0x3940012c)},
+			{Assembly: "lsr\tx13, x8, #1", Binary: wordToLineBinary(0xd341fd0d)},
+			{Assembly: "mov\tx14, sp", Binary: wordToLineBinary(0x910003ee)},
+			{Assembly: "strb\tw12, [sp]", Binary: wordToLineBinary(0x390003ec)},
+			{Assembly: "ldrb\tw12, [x9, x13]", Binary: wordToLineBinary(0x386d692c)},
+			{Assembly: "orr\tx13, x14, x13", Binary: wordToLineBinary(0xaa0d01cd)},
+			{Assembly: "strb\tw12, [x13]", Binary: wordToLineBinary(0x390001ac)},
+			{Assembly: "ldurb\tw11, [x11, #-0x1]", Binary: wordToLineBinary(0x385ff16b)},
+			{Assembly: "sturb\tw11, [x10, #-0x1]", Binary: wordToLineBinary(0x381ff14b)},
+		},
+	}
+
+	modified := checkStackUnified(config.ARM64(), testFn)
+
+	require.Equal(t, 96, modified.LocalsSize)
+
+	require.Len(t, modified.Lines, 21)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
+	// This excerpt has no matching restore, so it is not safe to assume that
+	// the fixed-offset store is only a C-ABI register save.
+	assert.Equal(t, testFn.Lines[1].Binary, modified.Lines[1].Binary)
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled)
+	assert.Equal(t, testFn.Lines[8].Binary, modified.Lines[8].Binary)
+	assert.Equal(t, testFn.Lines[15].Binary, modified.Lines[15].Binary)
+}
+
 func TestStackManipulationArm64(t *testing.T) {
 	testFn := Function{
 		Lines: []Line{
@@ -163,7 +284,9 @@ func TestStackManipulationArm64(t *testing.T) {
 
 	require.Len(t, modified.Lines, 15)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
-	assert.Equal(t, "MOVD $stack-64(SP), R9", modified.Lines[1].Disassembled)
+	// Reading SP into a general register is safe; keeping the original
+	// instruction also avoids mixing hardware RSP with Go's pseudo-SP.
+	assert.Equal(t, testFn.Lines[1].Binary, modified.Lines[1].Binary)
 	assert.Equal(t, "NOP", modified.Lines[2].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[4].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[5].Disassembled)
@@ -172,6 +295,76 @@ func TestStackManipulationArm64(t *testing.T) {
 	assert.Equal(t, "NOP", modified.Lines[12].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[13].Disassembled)
 	assert.Equal(t, "RET", modified.Lines[14].Disassembled)
+}
+
+func TestArm64StackDataKeepsFrame(t *testing.T) {
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "stp\tx29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
+			{Assembly: "mov\tx29, sp", Binary: wordToLineBinary(0x910003fd)},
+			{Assembly: "stp\txzr, xzr, [sp]", Binary: wordToLineBinary(0xa9007fff)},
+			{Assembly: "stp\tq0, q0, [sp]", Binary: wordToLineBinary(0xad0003e0)},
+			{Assembly: "str\tx0, [sp, #16]", Binary: wordToLineBinary(0xf9000be0)},
+			{Assembly: "ldr\tx0, [sp, #16]", Binary: wordToLineBinary(0xf9400be0)},
+			{Assembly: "ldp\tx29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackUnified(config.ARM64(), testFn)
+
+	require.Equal(t, 32, modified.LocalsSize)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
+	assert.Equal(t, testFn.Lines[2].Binary, modified.Lines[2].Binary)
+	assert.Equal(t, testFn.Lines[3].Binary, modified.Lines[3].Binary)
+	assert.Equal(t, testFn.Lines[4].Binary, modified.Lines[4].Binary)
+	assert.Equal(t, testFn.Lines[5].Binary, modified.Lines[5].Binary)
+	assert.Equal(t, "NOP", modified.Lines[6].Disassembled)
+}
+
+func TestArm64PreindexedDataStoreUsesFixedGoFrame(t *testing.T) {
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "stp\txzr, xzr, [sp, #-16]!", Binary: wordToLineBinary(0xa9bf7fff)},
+			{Assembly: "add\tsp, sp, #16", Binary: wordToLineBinary(0x910043ff)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackUnified(config.ARM64(), testFn)
+
+	require.Equal(t, 16, modified.LocalsSize)
+	assert.Empty(t, modified.Lines[0].Binary)
+	assert.Contains(t, modified.Lines[0].Disassembled, "(ZR, ZR)")
+	assert.Contains(t, modified.Lines[0].Disassembled, "0(RSP)")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
+}
+
+func TestArm64FramePointerIsRebasedToGoFrame(t *testing.T) {
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "stp\tx29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
+			{Assembly: "str\tx19, [sp, #16]", Binary: wordToLineBinary(0xf9000bf3)},
+			{Assembly: "mov\tx29, sp", Binary: wordToLineBinary(0x910003fd)},
+			{Assembly: "sub\tsp, sp, #48", Binary: wordToLineBinary(0xd100c3ff)},
+			{Assembly: "add\tx5, x29, #24", Binary: wordToLineBinary(0x910063a5)},
+			{Assembly: "add\tsp, sp, #48", Binary: wordToLineBinary(0x9100c3ff)},
+			{Assembly: "ldr\tx19, [sp, #16]", Binary: wordToLineBinary(0xf9400bf3)},
+			{Assembly: "ldp\tx29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackUnified(config.ARM64(), testFn)
+
+	require.Equal(t, 80, modified.LocalsSize)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
+	assert.Equal(t, "ADD $48, RSP, R29", modified.Lines[2].Disassembled)
+	assert.Equal(t, testFn.Lines[4].Binary, modified.Lines[4].Binary)
+	assert.Equal(t, "NOP", modified.Lines[6].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[7].Disassembled)
 }
 
 func TestStackRegisterSavingArm64(t *testing.T) {
@@ -189,8 +382,8 @@ func TestStackRegisterSavingArm64(t *testing.T) {
 
 	modified := checkStackUnified(config.ARM64(), testFn)
 
-	// FIXME: this is wrong, should be 0
-	require.Equal(t, 32, modified.LocalsSize)
+	// All saves are callee-saved and NOPed, so GoFrameSize should be 0
+	require.Equal(t, 0, modified.LocalsSize)
 
 	require.Len(t, modified.Lines, 6)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
@@ -314,6 +507,43 @@ func TestAlignedToUnalignedConversion(t *testing.T) {
 
 	result = archInfo.ToUnalignedInsn("VMOVUPS")
 	assert.Nil(t, result)
+}
+
+func TestAlignedToUnalignedOnlyForStackMemory(t *testing.T) {
+	// Test that aligned instructions are only converted when there's a STACK memory operand
+	// Register-to-register and non-stack memory accesses should be kept as-is
+	testFn := Function{
+		Lines: []Line{
+			// Register-to-register: should NOT be converted
+			{Disassembled: "VMOVDQA X4, X5"},
+			{Disassembled: "MOVAPS X0, X1"},
+			// Non-stack memory operand: should NOT be converted
+			{Disassembled: "MOVAPS 0(AX), X0"},
+			{Disassembled: "VMOVDQA X4, 0(BX)"},
+			// Stack memory operand (Go syntax): should be converted
+			{Disassembled: "VMOVDQA X4, 16(SP)"},
+			{Disassembled: "MOVAPS 0(SP), X0"},
+			// Stack memory operand (x86 syntax in Assembly field): check Disassembled
+			{Assembly: "vmovdqa xmm4, [rsp+16]", Disassembled: "VMOVDQA X4, 16(SP)"},
+		},
+	}
+
+	modified := checkStackUnified(config.AMD64(), testFn)
+
+	require.Len(t, modified.Lines, 7)
+
+	// Register-to-register: unchanged
+	assert.Equal(t, "VMOVDQA X4, X5", modified.Lines[0].Disassembled)
+	assert.Equal(t, "MOVAPS X0, X1", modified.Lines[1].Disassembled)
+
+	// Non-stack memory: unchanged
+	assert.Equal(t, "MOVAPS 0(AX), X0", modified.Lines[2].Disassembled)
+	assert.Equal(t, "VMOVDQA X4, 0(BX)", modified.Lines[3].Disassembled)
+
+	// Stack memory: converted to unaligned
+	assert.Equal(t, "VMOVDQU X4, 16(SP)", modified.Lines[4].Disassembled)
+	assert.Equal(t, "MOVUPS 0(SP), X0", modified.Lines[5].Disassembled)
+	assert.Equal(t, "VMOVDQU X4, 16(SP)", modified.Lines[6].Disassembled)
 }
 
 func TestStackLayoutOffsetTranslation(t *testing.T) {
