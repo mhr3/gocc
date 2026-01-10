@@ -111,25 +111,32 @@ type ArchStackInfo interface {
 
 	// SPRegex returns a regex that matches the stack pointer register
 	SPRegex() *regexp.Regexp
+
+	// HasStackMemoryRef returns true if the operands contain a stack-relative memory reference
+	HasStackMemoryRef(operands string) bool
 }
 
 // amd64StackInfo implements ArchStackInfo for AMD64
 type amd64StackInfo struct {
-	spRegex *regexp.Regexp
+	spRegex    *regexp.Regexp
+	spMemRegex *regexp.Regexp // matches stack memory references
 }
 
 func newAmd64StackInfo() *amd64StackInfo {
 	return &amd64StackInfo{
 		spRegex: regexp.MustCompile(`\brsp\b`),
+		// Matches Go syntax: (SP) or x86 syntax: [rsp...]
+		spMemRegex: regexp.MustCompile(`\(SP\)|\[rsp[^\]]*\]`),
 	}
 }
 
-func (a *amd64StackInfo) Name() string            { return "amd64" }
-func (a *amd64StackInfo) FramePointerReg() string { return "rbp" }
-func (a *amd64StackInfo) StackPointerReg() string { return "rsp" }
-func (a *amd64StackInfo) LinkReg() string         { return "" }
-func (a *amd64StackInfo) PtrSize() int            { return 8 }
-func (a *amd64StackInfo) SPRegex() *regexp.Regexp { return a.spRegex }
+func (a *amd64StackInfo) Name() string                    { return "amd64" }
+func (a *amd64StackInfo) FramePointerReg() string         { return "rbp" }
+func (a *amd64StackInfo) StackPointerReg() string         { return "rsp" }
+func (a *amd64StackInfo) LinkReg() string                 { return "" }
+func (a *amd64StackInfo) PtrSize() int                    { return 8 }
+func (a *amd64StackInfo) SPRegex() *regexp.Regexp         { return a.spRegex }
+func (a *amd64StackInfo) HasStackMemoryRef(s string) bool { return a.spMemRegex.MatchString(s) }
 
 func (a *amd64StackInfo) IsCalleeSaved(reg string) bool {
 	switch strings.ToLower(reg) {
@@ -304,21 +311,25 @@ func (a *amd64StackInfo) ParseStackOp(idx int, line Line) *StackOp {
 
 // arm64StackInfo implements ArchStackInfo for ARM64
 type arm64StackInfo struct {
-	spRegex *regexp.Regexp
+	spRegex    *regexp.Regexp
+	spMemRegex *regexp.Regexp // matches stack memory references
 }
 
 func newArm64StackInfo() *arm64StackInfo {
 	return &arm64StackInfo{
 		spRegex: regexp.MustCompile(`\bsp\b`),
+		// Matches Go syntax: (RSP) or (SP), or ARM syntax: [sp...]
+		spMemRegex: regexp.MustCompile(`\(R?SP\)|\[sp[^\]]*\]`),
 	}
 }
 
-func (a *arm64StackInfo) Name() string            { return "arm64" }
-func (a *arm64StackInfo) FramePointerReg() string { return "x29" }
-func (a *arm64StackInfo) StackPointerReg() string { return "sp" }
-func (a *arm64StackInfo) LinkReg() string         { return "x30" }
-func (a *arm64StackInfo) PtrSize() int            { return 8 }
-func (a *arm64StackInfo) SPRegex() *regexp.Regexp { return a.spRegex }
+func (a *arm64StackInfo) Name() string                    { return "arm64" }
+func (a *arm64StackInfo) FramePointerReg() string         { return "x29" }
+func (a *arm64StackInfo) StackPointerReg() string         { return "sp" }
+func (a *arm64StackInfo) LinkReg() string                 { return "x30" }
+func (a *arm64StackInfo) PtrSize() int                    { return 8 }
+func (a *arm64StackInfo) SPRegex() *regexp.Regexp         { return a.spRegex }
+func (a *arm64StackInfo) HasStackMemoryRef(s string) bool { return a.spMemRegex.MatchString(s) }
 
 func (a *arm64StackInfo) IsCalleeSaved(reg string) bool {
 	switch strings.ToLower(reg) {
@@ -752,15 +763,21 @@ func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLay
 		}
 
 		// Check for aligned instructions that need to be converted to unaligned
+		// Only convert if there's a stack memory operand (register-to-register or
+		// non-stack memory accesses don't need alignment adjustment)
 		if line.Disassembled != "" {
 			fields := strings.Fields(line.Disassembled)
 			if len(fields) > 0 {
 				if unaligned := archInfo.ToUnalignedInsn(fields[0]); unaligned != nil {
-					lineCpy := line
-					lineCpy.Disassembled = *unaligned + line.Disassembled[len(fields[0]):]
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
+					operands := line.Disassembled[len(fields[0]):]
+					// Only convert if operands reference the stack
+					if archInfo.HasStackMemoryRef(operands) {
+						lineCpy := line
+						lineCpy.Disassembled = *unaligned + operands
+						lineCpy.Binary = nil
+						newLines = append(newLines, lineCpy)
+						continue
+					}
 				}
 			}
 		}

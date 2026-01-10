@@ -345,6 +345,43 @@ func TestAlignedToUnalignedConversion(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+func TestAlignedToUnalignedOnlyForStackMemory(t *testing.T) {
+	// Test that aligned instructions are only converted when there's a STACK memory operand
+	// Register-to-register and non-stack memory accesses should be kept as-is
+	testFn := Function{
+		Lines: []Line{
+			// Register-to-register: should NOT be converted
+			{Disassembled: "VMOVDQA X4, X5"},
+			{Disassembled: "MOVAPS X0, X1"},
+			// Non-stack memory operand: should NOT be converted
+			{Disassembled: "MOVAPS 0(AX), X0"},
+			{Disassembled: "VMOVDQA X4, 0(BX)"},
+			// Stack memory operand (Go syntax): should be converted
+			{Disassembled: "VMOVDQA X4, 16(SP)"},
+			{Disassembled: "MOVAPS 0(SP), X0"},
+			// Stack memory operand (x86 syntax in Assembly field): check Disassembled
+			{Assembly: "vmovdqa xmm4, [rsp+16]", Disassembled: "VMOVDQA X4, 16(SP)"},
+		},
+	}
+
+	modified := checkStackUnified(config.AMD64(), testFn)
+
+	require.Len(t, modified.Lines, 7)
+
+	// Register-to-register: unchanged
+	assert.Equal(t, "VMOVDQA X4, X5", modified.Lines[0].Disassembled)
+	assert.Equal(t, "MOVAPS X0, X1", modified.Lines[1].Disassembled)
+
+	// Non-stack memory: unchanged
+	assert.Equal(t, "MOVAPS 0(AX), X0", modified.Lines[2].Disassembled)
+	assert.Equal(t, "VMOVDQA X4, 0(BX)", modified.Lines[3].Disassembled)
+
+	// Stack memory: converted to unaligned
+	assert.Equal(t, "VMOVDQU X4, 16(SP)", modified.Lines[4].Disassembled)
+	assert.Equal(t, "MOVUPS 0(SP), X0", modified.Lines[5].Disassembled)
+	assert.Equal(t, "VMOVDQU X4, 16(SP)", modified.Lines[6].Disassembled)
+}
+
 func TestStackLayoutOffsetTranslation(t *testing.T) {
 	layout := &StackLayout{
 		GoFrameSize: 48,
