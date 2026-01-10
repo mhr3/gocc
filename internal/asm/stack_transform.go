@@ -613,7 +613,38 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line) *StackLayout {
 	}
 
 	// Calculate Go frame size: locals + space for non-callee-saved spills
-	layout.GoFrameSize += layout.LocalsSize
+	// But if all saved registers are callee-saved (NOPed) and there are no
+	// other stack-referencing operations, we don't need stack space
+	allCalleeSaved := true
+	for _, reg := range layout.SavedRegs {
+		if !reg.IsCalleeSaved {
+			allCalleeSaved = false
+			break
+		}
+	}
+
+	// Check if any operations still need the stack frame
+	hasStackRefs := false
+	for _, op := range ops {
+		switch op.Kind {
+		case StackOpAlignPrep:
+			// Address computation that references stack
+			hasStackRefs = true
+		case StackOpAlloc:
+			// Explicit stack allocation (sub rsp, N) means we have locals
+			hasStackRefs = true
+		}
+		if hasStackRefs {
+			break
+		}
+	}
+
+	if allCalleeSaved && len(layout.SavedRegs) > 0 && !hasStackRefs {
+		// All register saves are callee-saved and no stack references, so we don't need any stack space
+		layout.GoFrameSize = 0
+	} else {
+		layout.GoFrameSize += layout.LocalsSize
+	}
 
 	return layout
 }

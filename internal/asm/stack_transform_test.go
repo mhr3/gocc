@@ -155,7 +155,8 @@ func TestQuickStackManipulationArm64(t *testing.T) {
 
 	modified := checkStackUnified(config.ARM64(), testFn)
 
-	require.Equal(t, 48, modified.LocalsSize)
+	// All saves are callee-saved and NOPed, so GoFrameSize should be 0
+	require.Equal(t, 0, modified.LocalsSize)
 
 	require.Len(t, modified.Lines, 12)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
@@ -217,8 +218,8 @@ func TestStackRegisterSavingArm64(t *testing.T) {
 
 	modified := checkStackUnified(config.ARM64(), testFn)
 
-	// FIXME: this is wrong, should be 0
-	require.Equal(t, 32, modified.LocalsSize)
+	// All saves are callee-saved and NOPed, so GoFrameSize should be 0
+	require.Equal(t, 0, modified.LocalsSize)
 
 	require.Len(t, modified.Lines, 6)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
