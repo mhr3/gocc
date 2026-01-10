@@ -135,6 +135,34 @@ func TestStackGrowthAmd64(t *testing.T) {
 	assert.Equal(t, "RET", modified.Lines[20].Disassembled)
 }
 
+func TestQuickStackManipulationArm64(t *testing.T) {
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "stp	x29, x30, [sp, #-48]!", Binary: wordToLineBinary(0xa9bd7bfd)},
+			{Assembly: "cmp	x1, x3", Disassembled: "CMP X1, X3", Binary: wordToLineBinary(0xeb03003f)},
+			{Assembly: "str	x21, [sp, #16]", Disassembled: "MOVD R21, 16(RSP)", Binary: wordToLineBinary(0xf9000bf5)},
+			{Assembly: "mov	x29, sp", Binary: wordToLineBinary(0x910003fd)},
+			{Assembly: "stp	x20, x19, [sp, #32]", Binary: wordToLineBinary(0xa9024ff4)},
+			{Assembly: "b.ge\t.LBB3_3", Disassembled: "B.GE .LBB3_3", Binary: wordToLineBinary(0x540000ea)},
+			{Assembly: "mov	x8, #-1", Disassembled: "MOVD X8, #-1", Binary: wordToLineBinary(0x92800008)},
+			{Assembly: "ldp	x20, x19, [sp, #32]", Binary: wordToLineBinary(0xa9424ff4)},
+			{Assembly: "mov	x0, x8", Disassembled: "MOV X0, X8", Binary: wordToLineBinary(0xaa0803e0)},
+			{Assembly: "ldr	x21, [sp, #16]", Binary: wordToLineBinary(0xf9400bf5)},
+			{Assembly: "ldp	x29, x30, [sp], #48", Binary: wordToLineBinary(0xa8c37bfd)},
+			{Assembly: "ret", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackUnified(config.ARM64(), testFn)
+
+	require.Equal(t, 48, modified.LocalsSize)
+
+	require.Len(t, modified.Lines, 12)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
+	assert.NotEqual(t, "NOP", modified.Lines[1].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled)
+}
+
 func TestStackManipulationArm64(t *testing.T) {
 	testFn := Function{
 		Lines: []Line{

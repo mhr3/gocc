@@ -26,8 +26,6 @@ const (
 	StackOpAlignPrep                 // sub xN, sp, #M (ARM64) - preparation for alignment, rewrite to MOV
 	StackOpFrameSetup                // mov rbp, rsp (AMD64) or mov x29, sp (ARM64)
 	StackOpFrameTeardown             // mov rsp, rbp (AMD64) or mov sp, x29 (ARM64)
-	StackOpSpill                     // mov [rsp+N], reg or str reg, [sp, #N]
-	StackOpReload                    // mov reg, [rsp+N] or ldr reg, [sp, #N]
 )
 
 // StackOp represents a parsed stack-related operation
@@ -396,13 +394,14 @@ func (a *arm64StackInfo) ParseStackOp(idx int, line Line) *StackOp {
 		}
 
 	case arm64asm.STR:
+		// Single register store - treat like STP but with one register
 		if len(inst.Args) >= 2 {
 			reg, regOk := inst.Args[0].(arm64asm.Reg)
 			mem, memOk := inst.Args[1].(arm64asm.MemImmediate)
 			if regOk && memOk && mem.Base == arm64asm.RegSP(arm64asm.SP) {
 				imm := immFromMemImmediate(mem)
 				return &StackOp{
-					Kind:      StackOpSpill,
+					Kind:      StackOpPush,
 					Reg:       strings.ToLower(reg.String()),
 					Size:      8,
 					Offset:    imm,
@@ -412,13 +411,14 @@ func (a *arm64StackInfo) ParseStackOp(idx int, line Line) *StackOp {
 		}
 
 	case arm64asm.LDR:
+		// Single register load - treat like LDP but with one register
 		if len(inst.Args) >= 2 {
 			reg, regOk := inst.Args[0].(arm64asm.Reg)
 			mem, memOk := inst.Args[1].(arm64asm.MemImmediate)
 			if regOk && memOk && mem.Base == arm64asm.RegSP(arm64asm.SP) {
 				imm := immFromMemImmediate(mem)
 				return &StackOp{
-					Kind:      StackOpReload,
+					Kind:      StackOpPop,
 					Reg:       strings.ToLower(reg.String()),
 					Size:      8,
 					Offset:    imm,
