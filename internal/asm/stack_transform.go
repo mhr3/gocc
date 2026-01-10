@@ -13,6 +13,770 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
+// StackOpKind represents the type of stack-related operation
+type StackOpKind int
+
+const (
+	StackOpNone          StackOpKind = iota
+	StackOpPush                      // push reg (AMD64) or str/stp with pre-decrement (ARM64)
+	StackOpPop                       // pop reg (AMD64) or ldr/ldp with post-increment (ARM64)
+	StackOpAlloc                     // sub rsp, N (AMD64) or sub sp, sp, N (ARM64)
+	StackOpDealloc                   // add rsp, N (AMD64) or add sp, sp, N (ARM64)
+	StackOpAlign                     // and rsp, -N (AMD64) or and sp, xN, -N (ARM64)
+	StackOpAlignPrep                 // sub xN, sp, #M (ARM64) - preparation for alignment, rewrite to MOV
+	StackOpFrameSetup                // mov rbp, rsp (AMD64) or mov x29, sp (ARM64)
+	StackOpFrameTeardown             // mov rsp, rbp (AMD64) or mov sp, x29 (ARM64)
+	StackOpSpill                     // mov [rsp+N], reg or str reg, [sp, #N]
+	StackOpReload                    // mov reg, [rsp+N] or ldr reg, [sp, #N]
+)
+
+// StackOp represents a parsed stack-related operation
+type StackOp struct {
+	Kind      StackOpKind // Type of stack operation
+	Reg       string      // Register involved (if any)
+	Reg2      string      // Second register (for stp/ldp)
+	Size      int         // Size of operation in bytes
+	Offset    int         // Offset for memory operations
+	Immediate int64       // Immediate value (for sub/and)
+	LineIndex int         // Index of the line in the function
+}
+
+// SavedReg represents a register saved to the stack
+type SavedReg struct {
+	Reg           string // Architecture-neutral name (e.g., "R12", "X19")
+	COffset       int    // Original C offset from SP after push
+	IsCalleeSaved bool   // Can be removed in Go (no callee-saved regs in Go ABI0)
+}
+
+// StackSlot represents a named stack slot in Go assembly
+type StackSlot struct {
+	Name     string // Symbolic name for Go asm (e.g., "local", "spill")
+	COffset  int    // Original C offset
+	GoOffset int    // Go offset for name-N(SP) format
+	Size     int    // Size in bytes
+}
+
+// StackLayout captures the C function's stack frame structure
+type StackLayout struct {
+	// Frame pointer setup detected
+	FramePointerUsed bool
+
+	// Registers saved to stack (callee-saved in C, not needed in Go)
+	SavedRegs []SavedReg
+
+	// Stack space allocated via sub rsp, N / stp with pre-decrement
+	LocalsSize int
+
+	// Alignment requirement detected (from and sp, -N)
+	// Go can only guarantee 8-byte alignment, so we'll use unaligned instructions
+	Alignment int64
+
+	// Total frame size needed for Go (declared in TEXT $N-M)
+	GoFrameSize int
+
+	// Named stack slots for Go output
+	Slots []StackSlot
+
+	// Indices of lines that should be NOPed out
+	NopIndices map[int]bool
+
+	// Indices of lines with stack allocation (sub rsp, N)
+	AllocIndices map[int]bool
+}
+
+// ArchStackInfo provides architecture-specific stack details
+type ArchStackInfo interface {
+	// Name returns the architecture name ("amd64" or "arm64")
+	Name() string
+
+	// FramePointerReg returns the frame pointer register name (RBP, X29)
+	FramePointerReg() string
+
+	// StackPointerReg returns the stack pointer register name (RSP, SP)
+	StackPointerReg() string
+
+	// LinkReg returns the link register name (empty for AMD64, X30 for ARM64)
+	LinkReg() string
+
+	// IsCalleeSaved checks if a register is callee-saved in C ABI
+	IsCalleeSaved(reg string) bool
+
+	// ParseStackOp parses a line and returns a StackOp if it's stack-related
+	ParseStackOp(idx int, line Line) *StackOp
+
+	// PtrSize returns the pointer size (8 for 64-bit)
+	PtrSize() int
+
+	// ToUnalignedInsn converts an aligned instruction to its unaligned equivalent
+	// Returns nil if the instruction doesn't need conversion
+	ToUnalignedInsn(insn string) *string
+
+	// SPRegex returns a regex that matches the stack pointer register
+	SPRegex() *regexp.Regexp
+}
+
+// amd64StackInfo implements ArchStackInfo for AMD64
+type amd64StackInfo struct {
+	spRegex *regexp.Regexp
+}
+
+func newAmd64StackInfo() *amd64StackInfo {
+	return &amd64StackInfo{
+		spRegex: regexp.MustCompile(`\brsp\b`),
+	}
+}
+
+func (a *amd64StackInfo) Name() string            { return "amd64" }
+func (a *amd64StackInfo) FramePointerReg() string { return "rbp" }
+func (a *amd64StackInfo) StackPointerReg() string { return "rsp" }
+func (a *amd64StackInfo) LinkReg() string         { return "" }
+func (a *amd64StackInfo) PtrSize() int            { return 8 }
+func (a *amd64StackInfo) SPRegex() *regexp.Regexp { return a.spRegex }
+
+func (a *amd64StackInfo) IsCalleeSaved(reg string) bool {
+	switch strings.ToLower(reg) {
+	case "rbp", "rbx", "r12", "r13", "r14", "r15",
+		"bp", "bx": // Go register names
+		return true
+	}
+	return false
+}
+
+// amd64AlignedToUnaligned maps aligned SIMD instructions to unaligned equivalents
+var amd64AlignedToUnaligned = map[string]string{
+	// SSE
+	"MOVAPS": "MOVUPS",
+	"MOVAPD": "MOVUPD",
+	"MOVDQA": "MOVDQU",
+	"movaps": "movups",
+	"movapd": "movupd",
+	"movdqa": "movdqu",
+	// AVX
+	"VMOVAPS": "VMOVUPS",
+	"VMOVAPD": "VMOVUPD",
+	"VMOVDQA": "VMOVDQU",
+	"vmovaps": "vmovups",
+	"vmovapd": "vmovupd",
+	"vmovdqa": "vmovdqu",
+	// AVX-512
+	"VMOVDQA32": "VMOVDQU32",
+	"VMOVDQA64": "VMOVDQU64",
+	"vmovdqa32": "vmovdqu32",
+	"vmovdqa64": "vmovdqu64",
+}
+
+func (a *amd64StackInfo) ToUnalignedInsn(insn string) *string {
+	if unaligned, ok := amd64AlignedToUnaligned[insn]; ok {
+		return &unaligned
+	}
+	return nil
+}
+
+func (a *amd64StackInfo) ParseStackOp(idx int, line Line) *StackOp {
+	asm := line.Assembly
+	if asm == "" {
+		return nil
+	}
+
+	fields := strings.Fields(asm)
+	if len(fields) == 0 {
+		return nil
+	}
+
+	instr := strings.ToLower(fields[0])
+
+	// Handle push/pop
+	if instr == "push" {
+		inst := decodeAmd64Line(line)
+		if inst.Op != x86asm.PUSH {
+			return nil
+		}
+		reg, ok := inst.Args[0].(x86asm.Reg)
+		if !ok {
+			return nil
+		}
+		return &StackOp{
+			Kind:      StackOpPush,
+			Reg:       strings.ToLower(reg.String()),
+			Size:      8,
+			LineIndex: idx,
+		}
+	}
+
+	if instr == "pop" {
+		inst := decodeAmd64Line(line)
+		if inst.Op != x86asm.POP {
+			return nil
+		}
+		reg, ok := inst.Args[0].(x86asm.Reg)
+		if !ok {
+			return nil
+		}
+		return &StackOp{
+			Kind:      StackOpPop,
+			Reg:       strings.ToLower(reg.String()),
+			Size:      8,
+			LineIndex: idx,
+		}
+	}
+
+	// Check if instruction involves SP
+	if !a.spRegex.MatchString(asm) {
+		return nil
+	}
+
+	// Handle mov rbp, rsp (frame setup)
+	if strings.HasPrefix(instr, "mov") && strings.Contains(asm, "rbp") {
+		inst := decodeAmd64Line(line)
+		if inst.Op == x86asm.MOV {
+			dst, dstOk := inst.Args[0].(x86asm.Reg)
+			src, srcOk := inst.Args[1].(x86asm.Reg)
+			if dstOk && srcOk {
+				if dst == x86asm.RBP && src == x86asm.RSP {
+					return &StackOp{Kind: StackOpFrameSetup, LineIndex: idx}
+				}
+				if dst == x86asm.RSP && src == x86asm.RBP {
+					return &StackOp{Kind: StackOpFrameTeardown, LineIndex: idx}
+				}
+			}
+		}
+	}
+
+	// Handle sub rsp, N (stack allocation)
+	if instr == "sub" {
+		inst := decodeAmd64Line(line)
+		if inst.Op == x86asm.SUB {
+			dst, dstOk := inst.Args[0].(x86asm.Reg)
+			imm, immOk := inst.Args[1].(x86asm.Imm)
+			if dstOk && immOk && dst == x86asm.RSP {
+				return &StackOp{
+					Kind:      StackOpAlloc,
+					Immediate: int64(imm),
+					LineIndex: idx,
+				}
+			}
+		}
+	}
+
+	// Handle add rsp, N (stack deallocation)
+	if instr == "add" {
+		inst := decodeAmd64Line(line)
+		if inst.Op == x86asm.ADD {
+			dst, dstOk := inst.Args[0].(x86asm.Reg)
+			imm, immOk := inst.Args[1].(x86asm.Imm)
+			if dstOk && immOk && dst == x86asm.RSP {
+				return &StackOp{
+					Kind:      StackOpDealloc,
+					Immediate: int64(imm),
+					LineIndex: idx,
+				}
+			}
+		}
+	}
+
+	// Handle and rsp, -N (stack alignment)
+	if instr == "and" {
+		inst := decodeAmd64Line(line)
+		if inst.Op == x86asm.AND {
+			dst, dstOk := inst.Args[0].(x86asm.Reg)
+			imm, immOk := inst.Args[1].(x86asm.Imm)
+			if dstOk && immOk && dst == x86asm.RSP {
+				return &StackOp{
+					Kind:      StackOpAlign,
+					Immediate: int64(imm),
+					LineIndex: idx,
+				}
+			}
+		}
+	}
+
+	// Handle lea rsp, [rbp - N] (frame teardown variant)
+	if instr == "lea" {
+		inst := decodeAmd64Line(line)
+		if inst.Op == x86asm.LEA {
+			dst, dstOk := inst.Args[0].(x86asm.Reg)
+			if dstOk && dst == x86asm.RSP {
+				return &StackOp{Kind: StackOpFrameTeardown, LineIndex: idx}
+			}
+		}
+	}
+
+	return nil
+}
+
+// arm64StackInfo implements ArchStackInfo for ARM64
+type arm64StackInfo struct {
+	spRegex *regexp.Regexp
+}
+
+func newArm64StackInfo() *arm64StackInfo {
+	return &arm64StackInfo{
+		spRegex: regexp.MustCompile(`\bsp\b`),
+	}
+}
+
+func (a *arm64StackInfo) Name() string            { return "arm64" }
+func (a *arm64StackInfo) FramePointerReg() string { return "x29" }
+func (a *arm64StackInfo) StackPointerReg() string { return "sp" }
+func (a *arm64StackInfo) LinkReg() string         { return "x30" }
+func (a *arm64StackInfo) PtrSize() int            { return 8 }
+func (a *arm64StackInfo) SPRegex() *regexp.Regexp { return a.spRegex }
+
+func (a *arm64StackInfo) IsCalleeSaved(reg string) bool {
+	switch strings.ToLower(reg) {
+	case "x19", "x20", "x21", "x22", "x23", "x24",
+		"x25", "x26", "x27", "x28", "x29", "x30":
+		return true
+	}
+	return false
+}
+
+func (a *arm64StackInfo) ToUnalignedInsn(insn string) *string {
+	// ARM64 NEON doesn't require alignment for most instructions
+	// SVE might, but we'll handle that if needed
+	return nil
+}
+
+func (a *arm64StackInfo) ParseStackOp(idx int, line Line) *StackOp {
+	asm := line.Assembly
+	if asm == "" {
+		return nil
+	}
+
+	// Check if instruction involves SP
+	if !a.spRegex.MatchString(asm) {
+		return nil
+	}
+
+	inst := decodeArm64Line(line)
+	fields := strings.Fields(asm)
+	if len(fields) == 0 {
+		return nil
+	}
+
+	switch inst.Op {
+	case arm64asm.STP:
+		// Check for frame pointer save: stp x29, x30, [sp, #-N]!
+		if len(inst.Args) >= 3 {
+			reg1, ok1 := inst.Args[0].(arm64asm.Reg)
+			reg2, ok2 := inst.Args[1].(arm64asm.Reg)
+			mem, memOk := inst.Args[2].(arm64asm.MemImmediate)
+			if ok1 && ok2 && memOk && mem.Base == arm64asm.RegSP(arm64asm.SP) {
+				imm := immFromMemImmediate(mem)
+				isPreIndex := mem.Mode == arm64asm.AddrPreIndex
+				return &StackOp{
+					Kind:      StackOpPush,
+					Reg:       strings.ToLower(reg1.String()),
+					Reg2:      strings.ToLower(reg2.String()),
+					Size:      16,
+					Offset:    imm,
+					Immediate: int64(-imm) * boolToInt(isPreIndex),
+					LineIndex: idx,
+				}
+			}
+		}
+
+	case arm64asm.LDP:
+		// Check for frame pointer restore: ldp x29, x30, [sp], #N
+		if len(inst.Args) >= 3 {
+			reg1, ok1 := inst.Args[0].(arm64asm.Reg)
+			reg2, ok2 := inst.Args[1].(arm64asm.Reg)
+			mem, memOk := inst.Args[2].(arm64asm.MemImmediate)
+			if ok1 && ok2 && memOk && mem.Base == arm64asm.RegSP(arm64asm.SP) {
+				imm := immFromMemImmediate(mem)
+				return &StackOp{
+					Kind:      StackOpPop,
+					Reg:       strings.ToLower(reg1.String()),
+					Reg2:      strings.ToLower(reg2.String()),
+					Size:      16,
+					Offset:    imm,
+					LineIndex: idx,
+				}
+			}
+		}
+
+	case arm64asm.STR:
+		if len(inst.Args) >= 2 {
+			reg, regOk := inst.Args[0].(arm64asm.Reg)
+			mem, memOk := inst.Args[1].(arm64asm.MemImmediate)
+			if regOk && memOk && mem.Base == arm64asm.RegSP(arm64asm.SP) {
+				imm := immFromMemImmediate(mem)
+				return &StackOp{
+					Kind:      StackOpSpill,
+					Reg:       strings.ToLower(reg.String()),
+					Size:      8,
+					Offset:    imm,
+					LineIndex: idx,
+				}
+			}
+		}
+
+	case arm64asm.LDR:
+		if len(inst.Args) >= 2 {
+			reg, regOk := inst.Args[0].(arm64asm.Reg)
+			mem, memOk := inst.Args[1].(arm64asm.MemImmediate)
+			if regOk && memOk && mem.Base == arm64asm.RegSP(arm64asm.SP) {
+				imm := immFromMemImmediate(mem)
+				return &StackOp{
+					Kind:      StackOpReload,
+					Reg:       strings.ToLower(reg.String()),
+					Size:      8,
+					Offset:    imm,
+					LineIndex: idx,
+				}
+			}
+		}
+
+	case arm64asm.SUB:
+		// sub sp, sp, #N or sub xN, sp, #N
+		if len(inst.Args) >= 3 {
+			dst := inst.Args[0]
+			src := inst.Args[1]
+			if dst == arm64asm.RegSP(arm64asm.SP) || src == arm64asm.RegSP(arm64asm.SP) {
+				// Parse immediate from assembly since Args[2] might be complex
+				if len(fields) > 3 {
+					immStr := strings.TrimPrefix(fields[3], "#")
+					if n, err := strconv.ParseInt(immStr, 0, 64); err == nil {
+						kind := StackOpAlloc
+						reg := ""
+						if dst != arm64asm.RegSP(arm64asm.SP) {
+							// sub xN, sp, #M - computing an address for alignment
+							// This should be rewritten to MOV xN, SP
+							kind = StackOpAlignPrep
+							if dstReg, ok := dst.(arm64asm.Reg); ok {
+								reg = strings.ToLower(dstReg.String())
+							}
+						}
+						return &StackOp{
+							Kind:      kind,
+							Reg:       reg,
+							Immediate: n,
+							LineIndex: idx,
+						}
+					}
+				}
+			}
+		}
+
+	case arm64asm.ADD:
+		// add sp, sp, #N (dealloc)
+		if len(inst.Args) >= 3 {
+			dst := inst.Args[0]
+			src := inst.Args[1]
+			if dst == arm64asm.RegSP(arm64asm.SP) && src == arm64asm.RegSP(arm64asm.SP) {
+				if len(fields) > 3 {
+					immStr := strings.TrimPrefix(fields[3], "#")
+					if n, err := strconv.ParseInt(immStr, 0, 64); err == nil {
+						return &StackOp{
+							Kind:      StackOpDealloc,
+							Immediate: n,
+							LineIndex: idx,
+						}
+					}
+				}
+			}
+		}
+
+	case arm64asm.AND:
+		// and sp, xN, #-M (alignment)
+		if len(inst.Args) >= 1 {
+			dst := inst.Args[0]
+			if dst == arm64asm.RegSP(arm64asm.SP) || dst == arm64asm.SP {
+				return &StackOp{
+					Kind:      StackOpAlign,
+					LineIndex: idx,
+				}
+			}
+		}
+
+	case arm64asm.MOV:
+		// mov x29, sp (frame setup) or mov sp, x29 (frame teardown)
+		if len(inst.Args) >= 2 {
+			dst := inst.Args[0]
+			src := inst.Args[1]
+			if dst == arm64asm.RegSP(arm64asm.X29) && src == arm64asm.RegSP(arm64asm.SP) {
+				return &StackOp{Kind: StackOpFrameSetup, LineIndex: idx}
+			}
+			if dst == arm64asm.RegSP(arm64asm.SP) && src == arm64asm.RegSP(arm64asm.X29) {
+				return &StackOp{Kind: StackOpFrameTeardown, LineIndex: idx}
+			}
+		}
+	}
+
+	return nil
+}
+
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// getArchStackInfo returns the appropriate ArchStackInfo for the given architecture
+func getArchStackInfo(arch *config.Arch) ArchStackInfo {
+	if arch == nil {
+		return newAmd64StackInfo()
+	}
+	switch arch.Name {
+	case "arm64":
+		return newArm64StackInfo()
+	case "amd64":
+		return newAmd64StackInfo()
+	}
+	panic(fmt.Sprintf("no ArchStackInfo for architecture: %s", arch.Name))
+}
+
+// analyzeStackLayout performs the first pass analysis to build StackLayout
+func analyzeStackLayout(archInfo ArchStackInfo, lines []Line) *StackLayout {
+	layout := &StackLayout{
+		NopIndices:   make(map[int]bool),
+		AllocIndices: make(map[int]bool),
+	}
+
+	// Parse all stack operations
+	var ops []*StackOp
+	for i, line := range lines {
+		if op := archInfo.ParseStackOp(i, line); op != nil {
+			ops = append(ops, op)
+		}
+	}
+
+	// Analyze the operations
+	for _, op := range ops {
+		switch op.Kind {
+		case StackOpFrameSetup:
+			layout.FramePointerUsed = true
+			layout.NopIndices[op.LineIndex] = true
+
+		case StackOpFrameTeardown:
+			layout.NopIndices[op.LineIndex] = true
+
+		case StackOpPush:
+			isCalleeSaved := archInfo.IsCalleeSaved(op.Reg)
+			if op.Reg2 != "" {
+				isCalleeSaved = isCalleeSaved && archInfo.IsCalleeSaved(op.Reg2)
+			}
+
+			layout.SavedRegs = append(layout.SavedRegs, SavedReg{
+				Reg:           op.Reg,
+				IsCalleeSaved: isCalleeSaved,
+			})
+			if op.Reg2 != "" {
+				layout.SavedRegs = append(layout.SavedRegs, SavedReg{
+					Reg:           op.Reg2,
+					IsCalleeSaved: isCalleeSaved,
+				})
+			}
+
+			// If this is a callee-saved register push, NOP it
+			if isCalleeSaved {
+				layout.NopIndices[op.LineIndex] = true
+			} else {
+				// Non-callee-saved push contributes to GoFrameSize
+				layout.GoFrameSize += op.Size
+			}
+
+			// If this is a pre-indexed push (stp x29, x30, [sp, #-N]!)
+			// the immediate tells us about stack allocation
+			if op.Immediate > 0 {
+				layout.LocalsSize += int(op.Immediate)
+			}
+
+		case StackOpPop:
+			isCalleeSaved := archInfo.IsCalleeSaved(op.Reg)
+			if op.Reg2 != "" {
+				isCalleeSaved = isCalleeSaved && archInfo.IsCalleeSaved(op.Reg2)
+			}
+
+			// If this is a callee-saved register pop, NOP it
+			if isCalleeSaved {
+				layout.NopIndices[op.LineIndex] = true
+			}
+
+		case StackOpAlloc:
+			layout.LocalsSize += int(op.Immediate)
+			layout.AllocIndices[op.LineIndex] = true
+			layout.NopIndices[op.LineIndex] = true
+
+		case StackOpDealloc:
+			// Stack deallocation is part of epilogue, NOP it
+			layout.NopIndices[op.LineIndex] = true
+
+		case StackOpAlign:
+			if op.Immediate != 0 && op.Immediate != -8 {
+				layout.Alignment = op.Immediate
+			}
+			// NOP out alignment instructions since Go handles alignment differently
+			layout.NopIndices[op.LineIndex] = true
+		}
+	}
+
+	// Calculate Go frame size: locals + space for non-callee-saved spills
+	layout.GoFrameSize += layout.LocalsSize
+
+	return layout
+}
+
+// TranslateOffset converts a C stack offset to Go's stack-N(SP) format
+// cOffset is the offset from the C stack pointer after prologue
+// Returns the offset for use in stack-N(SP) notation
+func (s *StackLayout) TranslateOffset(cOffset int) int {
+	// In Go asm, stack-0(SP) is at the top of the frame (highest address)
+	// stack-N(SP) is N bytes below the top
+	// We need to map C's [rsp+offset] to Go's stack-(GoFrameSize-offset)(SP)
+	return s.GoFrameSize - cOffset
+}
+
+// FormatStackRef formats a stack reference in Go assembly style
+// Returns format like "stack-N(SP)" where N is the offset from top of frame
+func (s *StackLayout) FormatStackRef(cOffset int, name string) string {
+	goOffset := s.TranslateOffset(cOffset)
+	if name == "" {
+		name = "stack"
+	}
+	return fmt.Sprintf("%s-%d(SP)", name, goOffset)
+}
+
+// rewriteStackOps performs the second pass to rewrite stack operations
+func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLayout, function Function) Function {
+	newLines := make([]Line, 0, len(function.Lines))
+
+	// Track push offset for rewriting non-callee-saved pushes to MOVs
+	pushOffset := layout.LocalsSize
+
+	for i, line := range function.Lines {
+		// Check if this line should be NOPed
+		if layout.NopIndices[i] {
+			lineCpy := line
+			lineCpy.Disassembled = "NOP"
+			lineCpy.Binary = nil
+			newLines = append(newLines, lineCpy)
+			continue
+		}
+
+		// Parse this line's stack operation (if any)
+		op := archInfo.ParseStackOp(i, line)
+		if op != nil {
+			switch op.Kind {
+			case StackOpPush:
+				// Non-callee-saved push: rewrite to MOV
+				if !archInfo.IsCalleeSaved(op.Reg) {
+					movInstr := arch.MovInstr[8]
+					parts := strings.Fields(line.Disassembled)
+					var reg string
+					if len(parts) > 1 {
+						reg = parts[1]
+					} else {
+						reg = strings.ToUpper(op.Reg)
+					}
+					instr := fmt.Sprintf("%s %s, stack-%d(SP)", movInstr, reg, layout.GoFrameSize-pushOffset)
+					pushOffset += 8
+					lineCpy := line
+					lineCpy.Disassembled = instr
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				}
+
+			case StackOpPop:
+				// Non-callee-saved pop: rewrite to MOV
+				if !archInfo.IsCalleeSaved(op.Reg) {
+					pushOffset -= 8
+					movInstr := arch.MovInstr[8]
+					parts := strings.Fields(line.Disassembled)
+					var reg string
+					if len(parts) > 1 {
+						reg = parts[1]
+					} else {
+						reg = strings.ToUpper(op.Reg)
+					}
+					instr := fmt.Sprintf("%s stack-%d(SP), %s", movInstr, layout.GoFrameSize-pushOffset, reg)
+					lineCpy := line
+					lineCpy.Disassembled = instr
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				}
+
+			case StackOpAlignPrep:
+				// sub xN, sp, #M - compute the translated address into xN
+				// In C: xN = sp - M (address M bytes below current SP)
+				// In Go: the top of stack is stack-LocalsSize(SP), so M bytes
+				// "below" (toward SP) is stack-(LocalsSize-M)(SP)
+				reg := strings.ToUpper(op.Reg)
+				if reg == "" {
+					reg = "R9" // fallback
+				}
+				// Load effective address of the stack slot into the register
+				// Using MOVD with $ prefix to get the address
+				goOffset := layout.LocalsSize - int(op.Immediate)
+				instr := fmt.Sprintf("MOVD $stack-%d(SP), %s", goOffset, reg)
+				lineCpy := line
+				lineCpy.Disassembled = instr
+				lineCpy.Binary = nil
+				newLines = append(newLines, lineCpy)
+				continue
+			}
+		}
+
+		// Check for aligned instructions that need to be converted to unaligned
+		if line.Disassembled != "" {
+			fields := strings.Fields(line.Disassembled)
+			if len(fields) > 0 {
+				if unaligned := archInfo.ToUnalignedInsn(fields[0]); unaligned != nil {
+					lineCpy := line
+					lineCpy.Disassembled = *unaligned + line.Disassembled[len(fields[0]):]
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				}
+			}
+		}
+
+		// Keep the line as-is
+		newLines = append(newLines, line)
+	}
+
+	function.Lines = newLines
+	function.LocalsSize = layout.GoFrameSize
+
+	return function
+}
+
+// checkStackUnified is the new unified stack checking function
+func checkStackUnified(arch *config.Arch, function Function) Function {
+	archInfo := getArchStackInfo(arch)
+
+	// Pass 1: Analyze stack layout
+	layout := analyzeStackLayout(archInfo, function.Lines)
+
+	// Check if we need complex rewrite
+	needsComplexRewrite := false
+	for _, reg := range layout.SavedRegs {
+		if !reg.IsCalleeSaved {
+			needsComplexRewrite = true
+			break
+		}
+	}
+
+	// Also need complex rewrite if alignment > 8
+	if layout.Alignment != 0 && layout.Alignment != -8 {
+		needsComplexRewrite = true
+	}
+
+	if needsComplexRewrite {
+		fnName := function.Name
+		if fnName == "" {
+			fnName = "[unknown]"
+		}
+		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", fnName)
+	}
+
+	// Pass 2: Rewrite stack operations
+	return rewriteStackOps(arch, archInfo, layout, function)
+}
+
 func checkStackAmd64(arch *config.Arch, function Function) Function {
 	var (
 		rewriteRequired bool

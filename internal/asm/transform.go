@@ -85,12 +85,12 @@ func checkStackManipulation(arch *config.Arch, function Function) Function {
 
 	switch arch.Name {
 	case "amd64":
-		return checkStackAmd64(arch, function)
+		return checkStackUnified(arch, function)
 	case "arm64":
-		return checkStackArm64(arch, function)
+		return checkStackUnified(arch, function)
 	}
 
-	return function
+	panic(fmt.Sprintf("no stack checking function for architecture: %s", arch.Name))
 }
 
 func removeBinaryInstructions(arch *config.Arch, function Function) Function {
