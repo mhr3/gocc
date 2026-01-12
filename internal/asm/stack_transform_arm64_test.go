@@ -171,9 +171,9 @@ func TestArm64SimpleStackAllocation(t *testing.T) {
 	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "stp x22,x21 should be NOPed")
 	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "stp x20,x19 should be NOPed")
 
-	// Function body stack accesses should be transformed (not NOPed)
-	assert.NotEqual(t, "NOP", modified.Lines[6].Disassembled, "str x8,[sp] should be transformed, not NOPed")
-	assert.NotEqual(t, "NOP", modified.Lines[7].Disassembled, "ldr x8,[sp] should be transformed, not NOPed")
+	// Function body stack accesses should be transformed to Go syntax with RSP
+	assert.Equal(t, "MOVD R8, 8(RSP)", modified.Lines[6].Disassembled, "str x8,[sp,#8] should become MOVD with RSP")
+	assert.Equal(t, "MOVD 8(RSP), R8", modified.Lines[7].Disassembled, "ldr x8,[sp,#8] should become MOVD with RSP")
 
 	// Epilogue
 	assert.Equal(t, "NOP", modified.Lines[8].Disassembled, "ldp x20,x19 should be NOPed")
@@ -362,10 +362,11 @@ func TestArm64NonCalleeSavedRegisters(t *testing.T) {
 	require.Len(t, modified.Lines, 7)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
 	// x0 and x8 are NOT callee-saved, so their str/ldr should be kept
-	assert.NotEqual(t, "NOP", modified.Lines[1].Disassembled, "str x0 should be kept (not callee-saved)")
-	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "str x8 should be kept (not callee-saved)")
-	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "ldr x8 should be kept")
-	assert.NotEqual(t, "NOP", modified.Lines[4].Disassembled, "ldr x0 should be kept")
+	// Non-complexManip path uses virtualSP with spill naming convention for stack layout
+	assert.Equal(t, "MOVD R0, x0spill-32(SP)", modified.Lines[1].Disassembled, "str x0 should use spill naming")
+	assert.Equal(t, "MOVD R8, x8spill-24(SP)", modified.Lines[2].Disassembled, "str x8 should use spill naming")
+	assert.Equal(t, "MOVD x8spill-24(SP), R8", modified.Lines[3].Disassembled, "ldr x8 should use spill naming")
+	assert.Equal(t, "MOVD x0spill-32(SP), R0", modified.Lines[4].Disassembled, "ldr x0 should use spill naming")
 	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x29,x30 should be NOPed")
 	assert.Equal(t, "RET", modified.Lines[6].Disassembled)
 }
@@ -403,16 +404,17 @@ func TestArm64LRUsedAsScratchSTR(t *testing.T) {
 	require.Len(t, modified.Lines, 10)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "sub sp should be NOPed")
 	// CRITICAL: LR save/restore must be KEPT because x30 is used as scratch
-	assert.NotEqual(t, "NOP", modified.Lines[1].Disassembled, "str x30 (LR save) MUST be kept when x30 is scratch")
+	// Note: STR encoding uses scaled offset, so [sp, #48] in assembly becomes 96 in Go syntax
+	assert.Equal(t, "MOVD R30, 96(RSP)", modified.Lines[1].Disassembled, "str x30 (LR save) should use RSP")
 	assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "stp x20,x19 should be NOPed")
-	// Function body - scratch operations
+	// Function body - scratch operations (not SP-based, keep as-is)
 	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "sub w30 should be kept")
 	assert.NotEqual(t, "NOP", modified.Lines[4].Disassembled, "cmp w30 should be kept")
 	assert.NotEqual(t, "NOP", modified.Lines[5].Disassembled, "body should be kept")
 	// Epilogue
 	assert.Equal(t, "NOP", modified.Lines[6].Disassembled, "ldp x20,x19 should be NOPed")
 	// CRITICAL: LR restore must be KEPT
-	assert.NotEqual(t, "NOP", modified.Lines[7].Disassembled, "ldr x30 (LR restore) MUST be kept when x30 is scratch")
+	assert.Equal(t, "MOVD 96(RSP), R30", modified.Lines[7].Disassembled, "ldr x30 (LR restore) should use RSP")
 	assert.Equal(t, "NOP", modified.Lines[8].Disassembled, "add sp should be NOPed")
 	assert.Equal(t, "RET", modified.Lines[9].Disassembled)
 }
@@ -439,15 +441,15 @@ func TestArm64LRUsedAsScratchSTP(t *testing.T) {
 
 	require.Len(t, modified.Lines, 7)
 	// CRITICAL: STP/LDP containing LR must be KEPT when x30 is used as scratch
-	assert.NotEqual(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 MUST be kept when x30 is scratch")
+	assert.Equal(t, "STP.W (R29, R30), -48(RSP)", modified.Lines[0].Disassembled, "stp x29,x30 should use RSP")
 	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x20,x19 should be NOPed")
-	// Function body
+	// Function body (not SP-based, keep as-is)
 	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "add x30 should be kept")
 	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "str x30 should be kept")
 	// Epilogue
 	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldp x20,x19 should be NOPed")
 	// CRITICAL: LDP containing LR must be KEPT
-	assert.NotEqual(t, "NOP", modified.Lines[5].Disassembled, "ldp x29,x30 MUST be kept when x30 is scratch")
+	assert.Equal(t, "LDP.P 48(RSP), (R29, R30)", modified.Lines[5].Disassembled, "ldp x29,x30 should use RSP")
 	assert.Equal(t, "RET", modified.Lines[6].Disassembled)
 }
 
