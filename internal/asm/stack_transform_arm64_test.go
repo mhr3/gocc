@@ -1064,3 +1064,93 @@ func TestArm64IndirectDynamicStackAllocationPanics(t *testing.T) {
 		},
 		"indirect VLA pattern (mov sp, <non-x29>) should panic with clear error message")
 }
+
+// TestArm64IntraFunctionSpillPreserved is a regression test for the bug where
+// single-register STR/LDR of x19-x28 were incorrectly NOPed, causing crashes.
+//
+// The bug: gocc was treating single-register STR/LDR of callee-saved registers
+// (x19-x28) as prologue/epilogue saves and NOPing them when a matching pair was
+// found. But these are actually intra-function spills where a callee-saved
+// register is temporarily used as scratch and MUST be preserved.
+//
+// Clang saves x19-x28 via STP (paired) in prologues, so single-register STR/LDR
+// of these registers are NOT prologue saves - they're mid-function spills.
+//
+// This test reproduces the exact crash scenario from veloz-sve2/ascii:
+//
+//	str x26, [sp, #48]  // save x26 before using as scratch
+//	...                 // use x26 as scratch (value is clobbered)
+//	ldr x26, [sp, #48]  // restore x26 - MUST NOT be NOPed!
+//
+// If the ldr x26 is NOPed, x26 will contain garbage after the function returns,
+// causing crashes in code that depends on callee-saved register preservation.
+func TestArm64IntraFunctionSpillPreserved(t *testing.T) {
+	// This test case simulates a function where x26 is used as scratch
+	// mid-function, requiring a single-register spill that MUST be preserved.
+	//
+	// IMPORTANT: The bug only manifests with pre-index/post-index STR/LDR
+	// because the ARM64 decoder returns different base register representations:
+	// - Offset mode STR/LDR: base = X15 (doesn't match SP comparison)
+	// - Pre/post-index STR/LDR: base = SP (matches SP comparison)
+	//
+	// To trigger the bug, we use pre-index STR and post-index LDR with matching
+	// (register, offset=0) which the old buggy code would NOP.
+	//
+	// To trigger the two-pass matching logic, we need rewriteRequired=true but
+	// complexManip=false. This happens when there's a STP of callee-saved
+	// registers other than x29,x30.
+	testFn := Function{
+		Name: "intra_function_spill",
+		Lines: []Line{
+			// Prologue - paired saves (sets rewriteRequired=true)
+			{Assembly: "stp x29, x30, [sp, #-64]!", Binary: wordToLineBinary(0xa9bc7bfd)},
+			{Assembly: "stp x19, x20, [sp, #16]", Binary: wordToLineBinary(0xa90153f3)}, // triggers rewriteRequired
+
+			// Mid-function: save x26 before using as scratch (pre-index STR)
+			// str x26, [sp, #-16]! = 0xf81f0ffa
+			// For pre-index, the effective offset is 0 in calleeSaveKey
+			{Assembly: "str x26, [sp, #-16]!", Binary: wordToLineBinary(0xf81f0ffa)},
+
+			// Use x26 as scratch - its value is now clobbered
+			{Assembly: "mov x26, #0x1234", Binary: wordToLineBinary(0xd28246ba)},
+			{Assembly: "str x26, [x0]", Binary: wordToLineBinary(0xf900001a)},
+
+			// Restore x26 from spill (post-index LDR) - MUST NOT be NOPed!
+			// ldr x26, [sp], #16 = 0xf84107fa
+			// For post-index, the effective offset is 0 in calleeSaveKey
+			{Assembly: "ldr x26, [sp], #16", Binary: wordToLineBinary(0xf84107fa)},
+
+			// Epilogue - paired restores
+			{Assembly: "ldp x19, x20, [sp, #16]", Binary: wordToLineBinary(0xa94153f3)},
+			{Assembly: "ldp x29, x30, [sp], #64", Binary: wordToLineBinary(0xa8c47bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	// Find the spill STR and LDR by their original assembly
+	var spillStrIdx, spillLdrIdx int
+	for i, line := range modified.Lines {
+		if strings.Contains(line.Assembly, "str x26, [sp, #-16]!") {
+			spillStrIdx = i
+		}
+		if strings.Contains(line.Assembly, "ldr x26, [sp], #16") {
+			spillLdrIdx = i
+		}
+	}
+
+	// THE CRITICAL ASSERTIONS:
+	// The intra-function spill STR/LDR MUST NOT be NOPed.
+	// If these fail, the bug has regressed.
+	assert.NotEqual(t, "NOP", modified.Lines[spillStrIdx].Disassembled,
+		"REGRESSION: single-register STR x26 (intra-function spill) was incorrectly NOPed! "+
+			"This will cause x26 to contain garbage after the function returns.")
+	assert.NotEqual(t, "NOP", modified.Lines[spillLdrIdx].Disassembled,
+		"REGRESSION: single-register LDR x26 (intra-function spill) was incorrectly NOPed! "+
+			"This will cause x26 to contain garbage after the function returns.")
+
+	// Prologue/epilogue paired STP/LDP CAN be NOPed (Go ABI doesn't need them)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 prologue should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x19,x20 prologue should be NOPed")
+}
