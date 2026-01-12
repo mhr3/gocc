@@ -139,17 +139,13 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 
 		function.Lines = newLines
 	} else {
+		// Complex stack manipulation (amd64): rewrite push/pop to use stack offsets
+		// Note: This path has known limitations (see FIXME below), warn the user.
 		fnName := function.Name
 		if fnName == "" {
 			fnName = "[unknown]"
 		}
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", fnName)
-		// go really doesn't like messing with SP, so we have two options:
-		// 1) skip instructions that change it
-		// 2) copy SP to BP and rewrite any instructions working with SP
-		//    to refer to BP instead
-
-		// we still need to remove the prologue/epilogue instructions
+		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, rewriting push/pop\n", fnName)
 		newLines := make([]Line, 0, len(function.Lines))
 		pushOffsetStart := extraStack
 		//pushOffsetStart += -pushOffsetStart & (15)
@@ -385,12 +381,6 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 
 		function.Lines = newLines
 	} else if !complexManip {
-		fnName := function.Name
-		if fnName == "" {
-			fnName = "[unknown]"
-		}
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains stack manipulation, running experimental transform\n", fnName)
-
 		newLines := make([]Line, 0, len(function.Lines))
 		stackAllocator := map[string]int{}
 		stackSpace := -extraStack
@@ -402,34 +392,13 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				inst := decodeArm64Line(line)
 				doSkip := false
 
-				switch inst.Op {
-				case arm64asm.STP, arm64asm.LDP:
-					switch {
-					// go's ABI0 doesn't require callee-saved registers
-					case inst.Args[0] == arm64asm.X20 && inst.Args[1] == arm64asm.X19:
-						fallthrough
-					case inst.Args[0] == arm64asm.X22 && inst.Args[1] == arm64asm.X21:
-						fallthrough
-					case inst.Args[0] == arm64asm.X24 && inst.Args[1] == arm64asm.X23:
-						fallthrough
-					case inst.Args[0] == arm64asm.X26 && inst.Args[1] == arm64asm.X25:
-						fallthrough
-					case inst.Args[0] == arm64asm.X28 && inst.Args[1] == arm64asm.X27:
-						fallthrough
-					case inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30:
-						doSkip = true
-					}
-				case arm64asm.STR, arm64asm.LDR:
-					switch inst.Args[0] {
-					// go's ABI0 doesn't require callee-saved registers
-					case arm64asm.X19, arm64asm.X20, arm64asm.X21, arm64asm.X22, arm64asm.X23, arm64asm.X24,
-						arm64asm.X25, arm64asm.X26, arm64asm.X27, arm64asm.X28, arm64asm.X29, arm64asm.X30:
-						doSkip = true
-					}
-				case arm64asm.MOV:
-					if inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
-						doSkip = true
-					}
+				// Go's ABI0 doesn't require callee-saved registers
+				if isCalleeSavedRegPair(inst) {
+					doSkip = true
+				} else if (inst.Op == arm64asm.STR || inst.Op == arm64asm.LDR) && isCalleeSavedReg(inst.Args[0]) {
+					doSkip = true
+				} else if inst.Op == arm64asm.MOV && inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
+					doSkip = true
 				}
 
 				if doSkip {
@@ -494,9 +463,10 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 					lineCpy.Binary = nil
 					newLines = append(newLines, lineCpy)
 					continue
-				case arm64asm.AND, arm64asm.SUB:
+				case arm64asm.AND, arm64asm.SUB, arm64asm.ADD:
 					if len(inst.Args) > 2 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
-						// stack alloc/alignment writing back into RSP
+						// stack alloc/dealloc/alignment writing back into SP - NOP it
+						// (Go's assembler handles stack via the frame size declaration)
 						lineCpy := line
 						lineCpy.Disassembled = "NOP"
 						lineCpy.Binary = nil
@@ -528,29 +498,26 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 			function.LocalsSize = extraStack
 		}
 	} else {
-		fnName := function.Name
-		if fnName == "" {
-			fnName = "[unknown]"
-		}
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", fnName)
-		// go really doesn't like messing with SP, so we have two options:
-		// 1) skip instructions that change it
-		// 2) copy SP to BP and rewrite any instructions working with SP
-		//    to refer to BP instead
-
-		// we still need to remove the prologue/epilogue instructions
+		// Complex stack manipulation (arm64): NOP all callee-saved register save/restore
+		// and all SP-modifying instructions. Go manages stack via TEXT declaration.
 		newLines := make([]Line, 0, len(function.Lines))
 
 		for _, line := range function.Lines {
 			asm := line.Assembly
-			// detect everything that touches SP
 			if spInstruction.MatchString(asm) {
 				inst := decodeArm64Line(line)
 
-				// drop the frame pointer instructions
-				if ((inst.Op == arm64asm.STP || inst.Op == arm64asm.LDP) &&
-					inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30) ||
-					inst.Op == arm64asm.MOV && inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
+				// NOP callee-saved register pairs - Go's ABI0 doesn't require them
+				if isCalleeSavedRegPair(inst) {
+					lineCpy := line
+					lineCpy.Disassembled = "NOP"
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				}
+
+				// NOP frame pointer setup (mov x29, sp)
+				if inst.Op == arm64asm.MOV && inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
 					lineCpy := line
 					lineCpy.Disassembled = "NOP"
 					lineCpy.Binary = nil
@@ -559,29 +526,39 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				}
 
 				switch inst.Op {
-				case arm64asm.STP, arm64asm.STR:
+				case arm64asm.STP, arm64asm.LDP:
+					// Keep non-callee-saved STP/LDP (e.g., SIMD register spills)
 					lineCpy := line
 					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
 					lineCpy.Binary = nil
 					newLines = append(newLines, lineCpy)
 					continue
-				case arm64asm.LDP, arm64asm.LDR:
-					lineCpy := line
-					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				case arm64asm.AND, arm64asm.SUB:
-					if len(inst.Args) > 2 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
-						// stack alloc/alignment writing back into RSP
+				case arm64asm.STR, arm64asm.LDR:
+					// NOP single callee-saved register save/restore
+					if isCalleeSavedReg(inst.Args[0]) {
 						lineCpy := line
 						lineCpy.Disassembled = "NOP"
 						lineCpy.Binary = nil
 						newLines = append(newLines, lineCpy)
 						continue
 					}
-					if inst.Op == arm64asm.SUB && inst.Args[1] == arm64asm.RegSP(arm64asm.SP) {
-						// we're allocating stack space, but we already did that, just do a MOVD
+					lineCpy := line
+					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				case arm64asm.AND, arm64asm.SUB, arm64asm.ADD:
+					// NOP any arithmetic that writes to SP (stack alloc/dealloc/alignment)
+					// Go's assembler manages stack frame via the declaration, not explicit SP manipulation
+					if len(inst.Args) > 0 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
+						lineCpy := line
+						lineCpy.Disassembled = "NOP"
+						lineCpy.Binary = nil
+						newLines = append(newLines, lineCpy)
+						continue
+					}
+					// Handle SUB that reads from SP to compute stack-relative address
+					if inst.Op == arm64asm.SUB && len(inst.Args) > 1 && inst.Args[1] == arm64asm.RegSP(arm64asm.SP) {
 						replInst := arm64asm.Inst{Op: arm64asm.MOV, Args: arm64asm.Args{inst.Args[0], inst.Args[1]}}
 						lineCpy := line
 						lineCpy.Disassembled = arm64asm.GoSyntax(replInst, 0, nil, nil)
@@ -604,6 +581,62 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 	}
 
 	return function
+}
+
+// isCalleeSavedRegPair returns true if the STP/LDP instruction saves/restores
+// a callee-saved register pair that Go's ABI0 doesn't require preserving.
+// Only matches SP-based prologue/epilogue patterns.
+func isCalleeSavedRegPair(inst arm64asm.Inst) bool {
+	if inst.Op != arm64asm.STP && inst.Op != arm64asm.LDP {
+		return false
+	}
+
+	// Only match SP-based prologue/epilogue patterns
+	if len(inst.Args) > 2 {
+		if mem, ok := inst.Args[2].(arm64asm.MemImmediate); ok {
+			if mem.Base != arm64asm.RegSP(arm64asm.SP) {
+				return false
+			}
+		}
+	}
+
+	r0, ok0 := inst.Args[0].(arm64asm.Reg)
+	r1, ok1 := inst.Args[1].(arm64asm.Reg)
+	if !ok0 || !ok1 {
+		return false
+	}
+
+	// Accept either ordering for robustness (compilers may use ascending or descending)
+	isPair := func(a, b, x, y arm64asm.Reg) bool {
+		return (a == x && b == y) || (a == y && b == x)
+	}
+
+	switch {
+	case isPair(r0, r1, arm64asm.X19, arm64asm.X20):
+		return true
+	case isPair(r0, r1, arm64asm.X21, arm64asm.X22):
+		return true
+	case isPair(r0, r1, arm64asm.X23, arm64asm.X24):
+		return true
+	case isPair(r0, r1, arm64asm.X25, arm64asm.X26):
+		return true
+	case isPair(r0, r1, arm64asm.X27, arm64asm.X28):
+		return true
+	case isPair(r0, r1, arm64asm.X29, arm64asm.X30):
+		return true
+	}
+	return false
+}
+
+// isCalleeSavedReg returns true if the register is a callee-saved register
+// that Go's ABI0 doesn't require preserving.
+func isCalleeSavedReg(arg arm64asm.Arg) bool {
+	switch arg {
+	case arm64asm.X19, arm64asm.X20, arm64asm.X21, arm64asm.X22, arm64asm.X23, arm64asm.X24,
+		arm64asm.X25, arm64asm.X26, arm64asm.X27, arm64asm.X28, arm64asm.X29, arm64asm.X30:
+		return true
+	}
+	return false
 }
 
 func decodeAmd64Line(line Line) x86asm.Inst {

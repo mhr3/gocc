@@ -136,22 +136,76 @@ func TestStackGrowthAmd64(t *testing.T) {
 }
 
 func TestStackManipulationArm64(t *testing.T) {
+	// This test simulates a complex function with:
+	// - Stack alignment (and sp, x9, #...)
+	// - Multiple callee-saved register pairs
+	// - Local stack allocation via sub
+	//
+	// The transform should:
+	// 1. NOP all callee-saved register save/restore (Go ABI0 doesn't require them)
+	// 2. NOP all SP-modifying instructions (Go manages stack via TEXT declaration)
+	// 3. Convert "sub xN, sp, #M" to "mov xN, sp" for address computation
 	testFn := Function{
 		Lines: []Line{
-			{Assembly: "stp	x29, x30, [sp, #-80]!", Binary: wordToLineBinary(0xa9bb7bfd)},
-			{Assembly: "sub	x9, sp, #16", Binary: wordToLineBinary(0xd10043e9)},
-			{Assembly: "stp	x26, x25, [sp, #16]", Binary: wordToLineBinary(0xa90167fa)},
-			{Assembly: "stp	x24, x23, [sp, #32]", Binary: wordToLineBinary(0xa9025ff8)},
-			{Assembly: "mov	x29, sp", Binary: wordToLineBinary(0x910003fd)},
-			{Assembly: "stp	x22, x21, [sp, #48]", Binary: wordToLineBinary(0xa90357f6)},
-			{Assembly: "stp	x20, x19, [sp, #64]", Binary: wordToLineBinary(0xa9044ff4)},
-			{Assembly: "and	sp, x9, #0xfffffffffffffff8", Binary: wordToLineBinary(0x927df13f)},
+			// Prologue
+			{Assembly: "stp	x29, x30, [sp, #-80]!", Binary: wordToLineBinary(0xa9bb7bfd)}, // 0: frame pointer save
+			{Assembly: "sub	x9, sp, #16", Binary: wordToLineBinary(0xd10043e9)},            // 1: compute aligned SP
+			{Assembly: "stp	x26, x25, [sp, #16]", Binary: wordToLineBinary(0xa90167fa)},    // 2: callee-saved
+			{Assembly: "stp	x24, x23, [sp, #32]", Binary: wordToLineBinary(0xa9025ff8)},    // 3: callee-saved
+			{Assembly: "mov	x29, sp", Binary: wordToLineBinary(0x910003fd)},                // 4: frame pointer setup
+			{Assembly: "stp	x22, x21, [sp, #48]", Binary: wordToLineBinary(0xa90357f6)},    // 5: callee-saved
+			{Assembly: "stp	x20, x19, [sp, #64]", Binary: wordToLineBinary(0xa9044ff4)},    // 6: callee-saved
+			{Assembly: "and	sp, x9, #0xfffffffffffffff8", Binary: wordToLineBinary(0x927df13f)}, // 7: stack alignment
+			// Epilogue
+			{Assembly: "mov	sp, x29", Binary: wordToLineBinary(0x910003bf)},                // 8: restore SP (complex case)
+			{Assembly: "ldp	x20, x19, [sp, #64]", Binary: wordToLineBinary(0xa9444ff4)},    // 9: callee-saved restore
+			{Assembly: "ldp	x22, x21, [sp, #48]", Binary: wordToLineBinary(0xa94357f6)},    // 10: callee-saved restore
+			{Assembly: "ldp	x24, x23, [sp, #32]", Binary: wordToLineBinary(0xa9425ff8)},    // 11: callee-saved restore
+			{Assembly: "ldp	x26, x25, [sp, #16]", Binary: wordToLineBinary(0xa94167fa)},    // 12: callee-saved restore
+			{Assembly: "ldp	x29, x30, [sp], #80", Binary: wordToLineBinary(0xa8c57bfd)},    // 13: frame pointer restore
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},   // 14: return
+		},
+	}
 
-			{Assembly: "mov	sp, x29", Binary: wordToLineBinary(0x910003bf)},
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Equal(t, 96, modified.LocalsSize)
+	require.Len(t, modified.Lines, 15)
+
+	// All callee-saved register operations should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
+	assert.True(t, strings.HasPrefix(modified.Lines[1].Disassembled, "MOV"), "sub x9,sp should become MOV")
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "stp x26,x25 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[3].Disassembled, "stp x24,x23 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "mov x29,sp should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "stp x22,x21 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[6].Disassembled, "stp x20,x19 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[7].Disassembled, "and sp,x9 should be NOPed")
+
+	// Epilogue - all callee-saved restores should be NOPed
+	// Note: mov sp, x29 passes through in complex case (restoring SP from frame pointer)
+	assert.Equal(t, "NOP", modified.Lines[9].Disassembled, "ldp x20,x19 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[10].Disassembled, "ldp x22,x21 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[11].Disassembled, "ldp x24,x23 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[12].Disassembled, "ldp x26,x25 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[13].Disassembled, "ldp x29,x30 should be NOPed")
+	assert.Equal(t, "RET", modified.Lines[14].Disassembled)
+}
+
+func TestStackEpilogueAddArm64(t *testing.T) {
+	// This test specifically validates that ADD sp, sp, #N in the epilogue is NOPed.
+	// Previously, only SUB was handled, causing asymmetric prologue/epilogue that
+	// corrupted the stack and caused "unexpected return pc" crashes.
+	testFn := Function{
+		Lines: []Line{
+			// Prologue - sub sp to allocate
+			{Assembly: "stp	x29, x30, [sp, #-80]!", Binary: wordToLineBinary(0xa9bb7bfd)},
+			{Assembly: "stp	x20, x19, [sp, #64]", Binary: wordToLineBinary(0xa9044ff4)},
+			{Assembly: "sub	sp, sp, #128", Binary: wordToLineBinary(0xd10203ff)},
+			// Function body would be here
+			// Epilogue - add sp to deallocate
+			{Assembly: "add	sp, sp, #128", Binary: wordToLineBinary(0x910203ff)},
 			{Assembly: "ldp	x20, x19, [sp, #64]", Binary: wordToLineBinary(0xa9444ff4)},
-			{Assembly: "ldp	x22, x21, [sp, #48]", Binary: wordToLineBinary(0xa94357f6)},
-			{Assembly: "ldp	x24, x23, [sp, #32]", Binary: wordToLineBinary(0xa9425ff8)},
-			{Assembly: "ldp	x26, x25, [sp, #16]", Binary: wordToLineBinary(0xa94167fa)},
 			{Assembly: "ldp	x29, x30, [sp], #80", Binary: wordToLineBinary(0xa8c57bfd)},
 			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
 		},
@@ -159,19 +213,16 @@ func TestStackManipulationArm64(t *testing.T) {
 
 	modified := checkStackArm64(config.ARM64(), testFn)
 
-	require.Equal(t, 96, modified.LocalsSize)
+	require.Len(t, modified.Lines, 7)
 
-	require.Len(t, modified.Lines, 15)
-	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
-	assert.True(t, strings.HasPrefix(modified.Lines[1].Disassembled, "MOV"))
-	assert.True(t, strings.HasPrefix(modified.Lines[2].Disassembled, "STP"))
-	assert.Equal(t, "NOP", modified.Lines[4].Disassembled)
-	assert.True(t, strings.HasPrefix(modified.Lines[5].Disassembled, "STP"))
-	assert.True(t, strings.HasPrefix(modified.Lines[6].Disassembled, "STP"))
-	assert.Equal(t, "NOP", modified.Lines[7].Disassembled)
-	assert.True(t, strings.HasPrefix(modified.Lines[12].Disassembled, "LDP"))
-	assert.Equal(t, "NOP", modified.Lines[13].Disassembled)
-	assert.Equal(t, "RET", modified.Lines[14].Disassembled)
+	// Both SUB sp and ADD sp should be NOPed for symmetric stack handling
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x20,x19 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "sub sp,sp,#128 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[3].Disassembled, "add sp,sp,#128 should be NOPed (epilogue)")
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldp x20,x19 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x29,x30 should be NOPed")
+	assert.Equal(t, "RET", modified.Lines[6].Disassembled)
 }
 
 func TestStackRegisterSavingArm64(t *testing.T) {
@@ -198,6 +249,67 @@ func TestStackRegisterSavingArm64(t *testing.T) {
 	assert.Equal(t, "NOP", modified.Lines[3].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[4].Disassembled)
 	assert.Equal(t, "RET", modified.Lines[5].Disassembled)
+}
+
+func TestStackRegisterPairOrderingArm64(t *testing.T) {
+	// Test that both ascending (x19,x20) and descending (x20,x19) orderings are handled.
+	// Different compilers may emit different orderings.
+	testCases := []struct {
+		name     string
+		assembly string
+		binary   uint32
+	}{
+		// Ascending order (common in some compilers): encoding [0xf3,0x53,0x01,0xa9]
+		{"stp x19,x20 ascending", "stp	x19, x20, [sp, #16]", 0xa90153f3},
+		// Descending order (seen in other compilers)
+		{"stp x20,x19 descending", "stp	x20, x19, [sp, #16]", 0xa9014ff4},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			testFn := Function{
+				Lines: []Line{
+					{Assembly: "stp	x29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
+					{Assembly: tc.assembly, Binary: wordToLineBinary(tc.binary)},
+					{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+				},
+			}
+
+			modified := checkStackArm64(config.ARM64(), testFn)
+
+			require.Len(t, modified.Lines, 3)
+			assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
+			assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "%s should be NOPed", tc.name)
+			assert.Equal(t, "RET", modified.Lines[2].Disassembled)
+		})
+	}
+}
+
+func TestStackSingleCalleeSavedArm64(t *testing.T) {
+	// Test single register STR/LDR for callee-saved registers
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "stp	x29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
+			{Assembly: "str	x19, [sp, #16]", Binary: wordToLineBinary(0xf9000bf3)},
+			{Assembly: "str	x20, [sp, #24]", Binary: wordToLineBinary(0xf9000ff4)},
+			// Function body
+			{Assembly: "ldr	x20, [sp, #24]", Binary: wordToLineBinary(0xf9400ff4)},
+			{Assembly: "ldr	x19, [sp, #16]", Binary: wordToLineBinary(0xf9400bf3)},
+			{Assembly: "ldp	x29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 7)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "str x19 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "str x20 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[3].Disassembled, "ldr x20 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldr x19 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x29,x30 should be NOPed")
+	assert.Equal(t, "RET", modified.Lines[6].Disassembled)
 }
 
 func wordToLineBinary(word uint32) []string {
