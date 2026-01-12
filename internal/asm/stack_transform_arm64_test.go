@@ -591,3 +591,42 @@ func TestArm64DynamicStackAllocationPanics(t *testing.T) {
 		},
 		"dynamic stack allocation should panic with clear error message")
 }
+
+func TestArm64IndirectDynamicStackAllocationPanics(t *testing.T) {
+	// Pattern: Indirect dynamic stack allocation via temp register
+	// Clang sometimes generates this pattern instead of direct "sub sp, sp, reg":
+	//   mov x8, sp       ; copy SP to temp
+	//   sub x8, x8, x12  ; subtract dynamic size from temp
+	//   mov sp, x8       ; write back to SP
+	//
+	// The key indicator is "mov sp, <reg>" where reg is NOT x29 (frame pointer).
+	// "mov sp, x29" is valid for frame pointer restore, but any other register
+	// indicates VLA/alloca.
+
+	testFn := Function{
+		Name: "indirect_vla_func",
+		Lines: []Line{
+			// Prologue
+			{Assembly: "stp\tx29, x30, [sp, #-80]!", Binary: wordToLineBinary(0xa9bb7bfd)},
+			{Assembly: "mov\tx29, sp", Binary: wordToLineBinary(0x910003fd)},
+			// Indirect VLA allocation pattern
+			{Assembly: "mov\tx8, sp", Binary: wordToLineBinary(0x910003e8)},  // copy SP to x8
+			{Assembly: "sub\tx8, x8, x12", Binary: wordToLineBinary(0xcb0c0108)}, // subtract dynamic size
+			{Assembly: "mov\tsp, x8", Binary: wordToLineBinary(0x9100011f)},  // write back to SP - THIS IS THE VLA!
+			// Some work
+			{Assembly: "bl\tsome_func", Binary: wordToLineBinary(0x94000000)},
+			// Epilogue
+			{Assembly: "mov\tsp, x29", Binary: wordToLineBinary(0x910003bf)}, // valid frame pointer restore
+			{Assembly: "ldp\tx29, x30, [sp], #80", Binary: wordToLineBinary(0xa8c57bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	assert.PanicsWithValue(t,
+		"indirect_vla_func: dynamic stack allocation detected (mov sp, X8) - "+
+			"alloca() and VLAs are not supported because Go requires stack size at compile time",
+		func() {
+			checkStackArm64(config.ARM64(), testFn)
+		},
+		"indirect VLA pattern (mov sp, <non-x29>) should panic with clear error message")
+}

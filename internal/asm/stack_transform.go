@@ -332,6 +332,22 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				}
 				// this could still be fine, as long as it's doing just callee-saved registers
 				rewriteRequired = true
+			case arm64asm.MOV:
+				// Check for dynamic stack allocation pattern: mov sp, <reg>
+				// This is used by VLAs/alloca when computing new SP in a temp register
+				// Pattern: mov x8, sp; sub x8, x8, x12; mov sp, x8
+				// The only valid "mov sp, <reg>" is "mov sp, x29" for frame pointer restore
+				targetReg := inst.Args[0]
+				srcReg := inst.Args[1]
+				if targetReg == arm64asm.RegSP(arm64asm.SP) {
+					// Compare by string since RegSP type encodes X29 differently than arm64asm.X29
+					if srcReg != nil && srcReg.String() != "X29" {
+						// mov sp, <non-x29> indicates VLA/alloca - dynamic stack size
+						panic(fmt.Sprintf("%s: dynamic stack allocation detected (mov sp, %v) - "+
+							"alloca() and VLAs are not supported because Go requires stack size at compile time",
+							function.Name, srcReg))
+					}
+				}
 			case arm64asm.AND:
 				// stack alignment
 				// this basically grows the stack, need to adjust for it
