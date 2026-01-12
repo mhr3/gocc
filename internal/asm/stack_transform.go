@@ -398,6 +398,26 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 
 		function.Lines = newLines
 	} else if !complexManip {
+		// First pass: check if x30 (LR) is used as a scratch register.
+		// If so, we must preserve its save/restore to maintain return address.
+		x30UsedAsScratch := false
+		for _, line := range function.Lines {
+			if len(line.Binary) == 0 {
+				continue // Skip labels, directives, etc.
+			}
+			inst := decodeArm64Line(line)
+			
+			// Skip LR save/restore instructions - these don't count as "scratch use"
+			if isLRStackSaveRestore(inst) {
+				continue
+			}
+			
+			// If this instruction writes to LR, it's using LR as scratch
+			if usesLRAsScratch(inst) {
+				x30UsedAsScratch = true
+				break
+			}
+		}
 		newLines := make([]Line, 0, len(function.Lines))
 		stackAllocator := map[string]int{}
 		stackSpace := -extraStack
@@ -410,6 +430,16 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				doSkip := false
 
 				// Go's ABI0 doesn't require callee-saved registers
+				// Exception: if x30 is used as scratch, preserve its SP-based save/restore
+				if x30UsedAsScratch && isLRStackSaveRestore(inst) {
+					// Keep LR save/restore - it's used as scratch register
+					lineCpy := line
+					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				}
+
 				if isCalleeSavedRegPair(inst) {
 					doSkip = true
 				} else if (inst.Op == arm64asm.STR || inst.Op == arm64asm.LDR) && isCalleeSavedReg(inst.Args[0]) {
@@ -522,12 +552,45 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 	} else {
 		// Complex stack manipulation (arm64): NOP all callee-saved register save/restore
 		// and all SP-modifying instructions. Go manages stack via TEXT declaration.
+		
+		// First pass: check if x30 (LR) is used as a scratch register.
+		// If so, we must preserve its save/restore to maintain return address.
+		// Note: We check ALL instructions, not just non-SP ones, because clang may
+		// emit instructions like "add x30, sp, #32" that write to LR while referencing SP.
+		x30UsedAsScratch := false
+		for _, line := range function.Lines {
+			if len(line.Binary) == 0 {
+				continue // Skip labels, directives, etc.
+			}
+			inst := decodeArm64Line(line)
+			
+			// Skip LR save/restore instructions - these don't count as "scratch use"
+			if isLRStackSaveRestore(inst) {
+				continue
+			}
+			
+			// If this instruction writes to LR, it's using LR as scratch
+			if usesLRAsScratch(inst) {
+				x30UsedAsScratch = true
+				break
+			}
+		}
+		
 		newLines := make([]Line, 0, len(function.Lines))
 
 		for _, line := range function.Lines {
 			asm := line.Assembly
 			if spInstruction.MatchString(asm) {
 				inst := decodeArm64Line(line)
+
+				// If x30 is used as scratch, preserve its SP-based save/restore
+				if x30UsedAsScratch && isLRStackSaveRestore(inst) {
+					lineCpy := line
+					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				}
 
 				// NOP callee-saved register pairs - Go's ABI0 doesn't require them
 				if isCalleeSavedRegPair(inst) {
@@ -666,6 +729,84 @@ func isCalleeSavedReg(arg arm64asm.Arg) bool {
 		return true
 	}
 	return false
+}
+
+// isLR returns true if the argument is the link register (x30 or w30).
+//
+// Per AAPCS64 (Procedure Call Standard for the Arm 64-bit Architecture):
+// - x30 is the Link Register (LR) holding the return address
+// - x30 is NOT callee-saved; the callee may use it as a scratch register
+// - If x30 is clobbered, it must be saved/restored to preserve the return address
+// - RET instruction implicitly uses x30 as the return address
+//
+// See: https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst
+// See: https://developer.arm.com/documentation/102374/latest/ (Table 2: General-purpose registers)
+func isLR(arg arm64asm.Arg) bool {
+	// Check for arm64asm.Reg type
+	if reg, ok := arg.(arm64asm.Reg); ok {
+		return reg == arm64asm.X30 || reg == arm64asm.W30
+	}
+	// Check for arm64asm.RegSP type (decoder uses this for X29/X30/W29/W30 in some contexts)
+	if regSP, ok := arg.(arm64asm.RegSP); ok {
+		return regSP == arm64asm.RegSP(arm64asm.X30) || regSP == arm64asm.RegSP(arm64asm.W30)
+	}
+	return false
+}
+
+// regPairContainsLR returns true if the STP/LDP instruction involves the link register.
+func regPairContainsLR(inst arm64asm.Inst) bool {
+	if inst.Op != arm64asm.STP && inst.Op != arm64asm.LDP {
+		return false
+	}
+	return isLR(inst.Args[0]) || isLR(inst.Args[1])
+}
+
+// memBaseIsSP returns true if the instruction's memory operand uses SP as base.
+func memBaseIsSP(inst arm64asm.Inst) bool {
+	for _, arg := range inst.Args {
+		if mem, ok := arg.(arm64asm.MemImmediate); ok {
+			return mem.Base == arm64asm.RegSP(arm64asm.SP)
+		}
+	}
+	return false
+}
+
+// isLRStackSaveRestore returns true if the instruction is saving/restoring LR to/from stack.
+func isLRStackSaveRestore(inst arm64asm.Inst) bool {
+	switch inst.Op {
+	case arm64asm.STP, arm64asm.LDP:
+		return regPairContainsLR(inst) && memBaseIsSP(inst)
+	case arm64asm.STR, arm64asm.LDR:
+		return isLR(inst.Args[0]) && memBaseIsSP(inst)
+	default:
+		return false
+	}
+}
+
+// usesLRAsScratch returns true if the instruction uses LR (x30/w30) as a general-purpose
+// scratch register. This excludes:
+// - RET: reads LR for return address (doesn't modify it)
+// - BL/BLR: writes LR as part of call semantics (not scratch use)
+// - STR/STP: reads LR to store to memory (doesn't write to it)
+// - LDR/LDP with LR as destination: handled by isLRStackSaveRestore
+//
+// If any instruction uses LR as scratch, we must preserve its prologue/epilogue save/restore.
+func usesLRAsScratch(inst arm64asm.Inst) bool {
+	if len(inst.Args) == 0 {
+		return false
+	}
+	switch inst.Op {
+	case arm64asm.RET:
+		return false // reads LR, doesn't write
+	case arm64asm.BL, arm64asm.BLR:
+		return false // call semantics, not scratch use
+	case arm64asm.STR, arm64asm.STP:
+		return false // stores register value to memory, doesn't write to register
+	case arm64asm.LDR, arm64asm.LDP:
+		return false // loads are stack save/restore, handled separately
+	}
+	// Most A64 instructions put the destination in Args[0]
+	return isLR(inst.Args[0])
 }
 
 func decodeAmd64Line(line Line) x86asm.Inst {
