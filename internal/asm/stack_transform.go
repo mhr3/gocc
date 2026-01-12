@@ -347,12 +347,21 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				srcReg := inst.Args[1]
 				if targetReg == arm64asm.RegSP(arm64asm.SP) || srcReg == arm64asm.RegSP(arm64asm.SP) {
 					complexManip = true
-					// probably allocating more stack space, either directly or through an extra register
-					imm := parts[3]
-					imm = strings.TrimPrefix(imm, "#")
-					if n, err := strconv.Atoi(imm); err == nil {
-						extraStack += n
-						rewriteRequired = true
+					// Check if this is dynamic stack allocation (register operand instead of immediate)
+					// This happens with alloca() or VLAs - impossible to handle since Go needs
+					// stack size known at compile time
+					if len(parts) > 3 {
+						imm := parts[3]
+						imm = strings.TrimPrefix(imm, "#")
+						if n, err := strconv.Atoi(imm); err == nil {
+							extraStack += n
+							rewriteRequired = true
+						} else {
+							// Not an immediate - this is dynamic stack allocation
+							panic(fmt.Sprintf("%s: dynamic stack allocation detected (sub sp, sp, %s) - "+
+								"alloca() and VLAs are not supported because Go requires stack size at compile time",
+								function.Name, parts[3]))
+						}
 					}
 				}
 			}

@@ -369,3 +369,43 @@ func TestArm64NonCalleeSavedRegisters(t *testing.T) {
 	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x29,x30 should be NOPed")
 	assert.Equal(t, "RET", modified.Lines[6].Disassembled)
 }
+
+
+
+func TestArm64DynamicStackAllocationPanics(t *testing.T) {
+	// Pattern: Dynamic stack allocation with register operand (alloca/VLA)
+	// This is impossible to handle because Go needs stack size at compile time.
+	// The transform should panic with a clear error message.
+	//
+	// Example C code that generates this:
+	//   void func(int n) { char buf[n]; ... }  // VLA
+	//   void func(int n) { char *p = alloca(n); ... }  // alloca
+	//
+	// Clang generates: sub sp, sp, x8 (where x8 contains the dynamic size)
+
+	testFn := Function{
+		Name: "dynamic_alloc_func",
+		Lines: []Line{
+			// Prologue
+			{Assembly: "sub\tsp, sp, #32", Binary: wordToLineBinary(0xd10083ff)},
+			{Assembly: "stp\tx29, x30, [sp, #16]", Binary: wordToLineBinary(0xa9017bfd)},
+			// Dynamic allocation - size in x8 register (encoding: 0xcb2863ff)
+			{Assembly: "sub\tsp, sp, x8", Binary: wordToLineBinary(0xcb2863ff)},
+			// Some work
+			{Assembly: "mov\tx0, sp", Binary: wordToLineBinary(0x910003e0)},
+			{Assembly: "bl\tsome_func", Binary: wordToLineBinary(0x94000000)},
+			// Epilogue
+			{Assembly: "ldp\tx29, x30, [sp, #16]", Binary: wordToLineBinary(0xa9417bfd)},
+			{Assembly: "add\tsp, sp, #32", Binary: wordToLineBinary(0x910083ff)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	assert.PanicsWithValue(t,
+		"dynamic_alloc_func: dynamic stack allocation detected (sub sp, sp, x8) - "+
+			"alloca() and VLAs are not supported because Go requires stack size at compile time",
+		func() {
+			checkStackArm64(config.ARM64(), testFn)
+		},
+		"dynamic stack allocation should panic with clear error message")
+}
