@@ -304,15 +304,17 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				if len(inst.Args) > 2 && inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30 {
 					// storing the frame pointer
 					imm, ok := inst.Args[2].(arm64asm.MemImmediate)
-					// this tells us how much stack space we're using
-					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
+					// Only treat as stack allocation if it has SP writeback (pre-index mode)
+					// Plain [sp, #N] (AddrOffset) is just a save, not an allocation
+					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && imm.Mode == arm64asm.AddrPreIndex && baseStack == 0 {
 						n := immFromMemImmediate(imm)
 						baseStack = -n
 						extraStack = baseStack
 					}
 				} else if len(inst.Args) > 2 {
 					imm, ok := inst.Args[2].(arm64asm.MemImmediate)
-					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
+					// Only treat as stack allocation if it has SP writeback (pre-index mode)
+					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && imm.Mode == arm64asm.AddrPreIndex && baseStack == 0 {
 						n := immFromMemImmediate(imm)
 						baseStack = -n
 						extraStack = baseStack
@@ -322,7 +324,8 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				}
 			case arm64asm.STR:
 				imm, ok := inst.Args[1].(arm64asm.MemImmediate)
-				if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
+				// Only treat as stack allocation if it has SP writeback (pre-index mode)
+				if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && imm.Mode == arm64asm.AddrPreIndex && baseStack == 0 {
 					n := immFromMemImmediate(imm)
 					baseStack = -n
 					extraStack = baseStack
@@ -333,10 +336,9 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				// stack alignment
 				// this basically grows the stack, need to adjust for it
 				targetReg := inst.Args[0]
-				if targetReg == arm64asm.SP {
-					// allocating more stack space
+				if targetReg == arm64asm.RegSP(arm64asm.SP) {
+					// allocating more stack space via alignment
 					rewriteRequired = true
-					// TODO: definitely clear sign that we're doing something with the stack
 					complexManip = true
 				}
 			case arm64asm.SUB:
@@ -359,8 +361,14 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 	}
 
 	if !rewriteRequired {
+		// No complex stack manipulation detected
+		if extraStack == 0 {
+			// Leaf function - no stack usage at all, nothing to transform
+			return function
+		}
 		if extraStack != 16 {
-			panic("failed to detect stack manipulation")
+			// Unexpected pattern - only expect simple 16-byte frame (x29,x30 save)
+			panic(fmt.Sprintf("unexpected stack pattern: extraStack=%d, expected 0 or 16", extraStack))
 		}
 		// remove the frame pointer instructions
 		newLines := make([]Line, 0, len(function.Lines))
@@ -397,8 +405,13 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 					doSkip = true
 				} else if (inst.Op == arm64asm.STR || inst.Op == arm64asm.LDR) && isCalleeSavedReg(inst.Args[0]) {
 					doSkip = true
-				} else if inst.Op == arm64asm.MOV && inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
-					doSkip = true
+				} else if inst.Op == arm64asm.MOV {
+					// NOP frame pointer save (mov x29, sp) and restore (mov sp, x29)
+					isFPSave := inst.Args[0] == arm64asm.RegSP(arm64asm.X29) && inst.Args[1] == arm64asm.RegSP(arm64asm.SP)
+					isFPRestore := inst.Args[0] == arm64asm.RegSP(arm64asm.SP) && inst.Args[1] == arm64asm.RegSP(arm64asm.X29)
+					if isFPSave || isFPRestore {
+						doSkip = true
+					}
 				}
 
 				if doSkip {
@@ -516,13 +529,20 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 					continue
 				}
 
-				// NOP frame pointer setup (mov x29, sp)
-				if inst.Op == arm64asm.MOV && inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
-					lineCpy := line
-					lineCpy.Disassembled = "NOP"
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
+				// NOP frame pointer operations:
+				// - mov x29, sp (prologue: save SP to frame pointer)
+				// - mov sp, x29 (epilogue: restore SP from frame pointer)
+				// Both must be NOPed together to avoid stack corruption
+				if inst.Op == arm64asm.MOV {
+					isFPSave := inst.Args[0] == arm64asm.RegSP(arm64asm.X29) && inst.Args[1] == arm64asm.RegSP(arm64asm.SP)
+					isFPRestore := inst.Args[0] == arm64asm.RegSP(arm64asm.SP) && inst.Args[1] == arm64asm.RegSP(arm64asm.X29)
+					if isFPSave || isFPRestore {
+						lineCpy := line
+						lineCpy.Disassembled = "NOP"
+						lineCpy.Binary = nil
+						newLines = append(newLines, lineCpy)
+						continue
+					}
 				}
 
 				switch inst.Op {

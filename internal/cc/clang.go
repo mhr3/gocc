@@ -63,10 +63,21 @@ func (c *Compiler) Version() string {
 
 // compile compiles the C source file to assembly and then to object.
 func (c *Compiler) Compile(source, assembly, object string, args ...string) error {
-	args = append(args,
+	baseArgs := []string{
 		"-mno-red-zone",
-		"-mstackrealign",
 		"-mllvm",
+	}
+
+	// Only add -mstackrealign for x86 targets.
+	// ARM64 doesn't need it because Go guarantees 16-byte stack alignment
+	// (matching AAPCS64), and the flag causes clang to generate complex
+	// frame-pointer-based stack patterns that are harder to transform.
+	if c.arch.Name == "amd64" {
+		baseArgs = append(baseArgs, "-mstackrealign")
+	}
+
+	args = append(args, baseArgs...)
+	args = append(args,
 		"-inline-threshold=1000",
 		"-fno-asynchronous-unwind-tables",
 		"-fno-exceptions",

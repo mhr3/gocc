@@ -102,9 +102,7 @@ func AMD64() *Arch {
 	}
 
 	if runtime.GOOS == "darwin" {
-		arch.ClangFlags = append(arch.ClangFlags, "-arch", "x86_64", "--sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/")
 		arch.Disassembler = []string{}
-		return arch
 	}
 
 	return arch
