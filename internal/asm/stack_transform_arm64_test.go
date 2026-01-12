@@ -460,6 +460,49 @@ func TestArm64LRUsedAsScratchSTP(t *testing.T) {
 	assert.Equal(t, "RET", modified.Lines[6].Disassembled)
 }
 
+func TestArm64LRUsedAsScratchADD(t *testing.T) {
+	// Test LR scratch detection with ADD (3-register form).
+	// This is the pattern from veloz's indexFoldNEONC function.
+	testFn := Function{
+		Name: "lr_scratch_add",
+		Lines: []Line{
+			// Prologue - triggers complexManip path
+			{Assembly: "sub	sp, sp, #64", Binary: wordToLineBinary(0xd10103ff)},
+			{Assembly: "str	x30, [sp, #48]", Binary: wordToLineBinary(0xf90033fe)},     // LR save
+			{Assembly: "stp	x20, x19, [sp, #32]", Binary: wordToLineBinary(0xa9024ff4)}, // callee-saved
+			// Function body uses x30 as scratch via ADD (3-register form)
+			{Assembly: "add	x30, x7, x11", Binary: wordToLineBinary(0x8b0b00fe)}, // x30 as scratch!
+			{Assembly: "cmp	x30, #16", Binary: wordToLineBinary(0xf10043df)},
+			{Assembly: "mov	x0, x30", Binary: wordToLineBinary(0xaa1e03e0)},
+			// Epilogue
+			{Assembly: "ldp	x20, x19, [sp, #32]", Binary: wordToLineBinary(0xa9424ff4)},
+			{Assembly: "ldr	x30, [sp, #48]", Binary: wordToLineBinary(0xf94033fe)}, // LR restore
+			{Assembly: "add	sp, sp, #64", Binary: wordToLineBinary(0x910103ff)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 10)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "sub sp should be NOPed")
+	// CRITICAL: LR save/restore must be KEPT because x30 is used as scratch
+	assert.NotEqual(t, "NOP", modified.Lines[1].Disassembled, "str x30 (LR save) must NOT be NOPed")
+	assert.Contains(t, modified.Lines[1].Disassembled, "R30", "str x30 should reference R30")
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "stp x20,x19 should be NOPed")
+	// Function body
+	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "add x30 should be kept")
+	assert.NotEqual(t, "NOP", modified.Lines[4].Disassembled, "cmp x30 should be kept")
+	assert.NotEqual(t, "NOP", modified.Lines[5].Disassembled, "mov x0,x30 should be kept")
+	// Epilogue
+	assert.Equal(t, "NOP", modified.Lines[6].Disassembled, "ldp x20,x19 should be NOPed")
+	// CRITICAL: LR restore must be KEPT
+	assert.NotEqual(t, "NOP", modified.Lines[7].Disassembled, "ldr x30 (LR restore) must NOT be NOPed")
+	assert.Contains(t, modified.Lines[7].Disassembled, "R30", "ldr x30 should reference R30")
+	assert.Equal(t, "NOP", modified.Lines[8].Disassembled, "add sp should be NOPed")
+	assert.Equal(t, "RET", modified.Lines[9].Disassembled)
+}
+
 func TestArm64LRNotUsedAsScratch(t *testing.T) {
 	// When x30 is NOT used as scratch, its save/restore should be NOPed (normal case).
 	testFn := Function{
