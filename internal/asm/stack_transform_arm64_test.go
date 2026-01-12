@@ -917,6 +917,63 @@ func TestArm64MidFunctionSpill(t *testing.T) {
 	assert.Equal(t, "RET", modified.Lines[7].Disassembled)
 }
 
+func TestArm64ComplexManipDataStoreNotNOPed(t *testing.T) {
+	// Test for the complexManip path (with SUB sp instruction).
+	// This tests that data stores using callee-saved registers are NOT NOPed,
+	// even in the complexManip path which handles functions with explicit
+	// stack allocation via SUB sp.
+	//
+	// Key scenario: A function with:
+	// - Prologue: sub sp, sp, #N (triggers complexManip path)
+	// - Prologue: stp x19,x20 at offset 32 (callee save)
+	// - Mid-function: stp x21,x22 at offset 16 (DATA STORE - no matching LDP)
+	// - Epilogue: ldp x19,x20 at offset 32 (callee restore)
+	// - Epilogue: add sp, sp, #N
+	//
+	// The stp x21,x22 at offset 16 must NOT be NOPed because there's no
+	// matching ldp x21,x22 at offset 16.
+	testFn := Function{
+		Name: "complex_data_store",
+		Lines: []Line{
+			// Prologue - triggers complexManip path
+			{Assembly: "sub	sp, sp, #64", Binary: wordToLineBinary(0xd10103ff)},
+			{Assembly: "stp	x19, x20, [sp, #32]", Binary: wordToLineBinary(0xa90253f3)}, // callee save
+			// Function body - data store with callee-saved registers (NO matching LDP)
+			{Assembly: "stp	x21, x22, [sp, #16]", Binary: wordToLineBinary(0xa9015bf5)}, // DATA STORE
+			{Assembly: "mov	x0, x19", Binary: wordToLineBinary(0xaa1303e0)},             // use x19
+			// Epilogue
+			{Assembly: "ldp	x19, x20, [sp, #32]", Binary: wordToLineBinary(0xa94253f3)}, // callee restore
+			{Assembly: "add	sp, sp, #64", Binary: wordToLineBinary(0x910103ff)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 7)
+
+	// sub sp should be NOPed (Go manages stack)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "sub sp should be NOPed")
+
+	// stp x19,x20 at offset 32 should be NOPed (has matching ldp)
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x19,x20 prologue should be NOPed")
+
+	// stp x21,x22 at offset 16 should NOT be NOPed (no matching ldp - it's a data store!)
+	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "stp x21,x22 data store must NOT be NOPed")
+	assert.Contains(t, modified.Lines[2].Disassembled, "STP", "data store should be translated to STP")
+
+	// mov should pass through
+	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "mov should pass through")
+
+	// ldp x19,x20 at offset 32 should be NOPed (matches the prologue stp)
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldp x19,x20 epilogue should be NOPed")
+
+	// add sp should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "add sp should be NOPed")
+
+	assert.Equal(t, "RET", modified.Lines[6].Disassembled)
+}
+
 func TestArm64IndirectDynamicStackAllocationPanics(t *testing.T) {
 	// Pattern: Indirect dynamic stack allocation via temp register
 	// Clang sometimes generates this pattern instead of direct "sub sp, sp, reg":

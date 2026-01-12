@@ -598,27 +598,69 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 	} else {
 		// Complex stack manipulation (arm64): NOP all callee-saved register save/restore
 		// and all SP-modifying instructions. Go manages stack via TEXT declaration.
-		
-		// First pass: check if x30 (LR) is used as a scratch register.
-		// If so, we must preserve its save/restore to maintain return address.
-		// Note: We check ALL instructions, not just non-SP ones, because clang may
-		// emit instructions like "add x30, sp, #32" that write to LR while referencing SP.
+
+		// First pass: check if x30 (LR) is used as a scratch register, and collect
+		// callee-saved STP/LDP and STR/LDR info to distinguish actual prologue/epilogue
+		// saves from data stores.
+		//
+		// The key insight is: only NOP callee-saved store/load pairs when BOTH exist
+		// with the same (registers, offset). This is sound because:
+		// - STP x21,x22 at offset 32 + LDP x21,x22 at offset 32 → register save → NOP
+		// - STP x21,x22 at offset 32 + LDP x0,x1 at offset 32 → data store → KEEP
+		// - STP x21,x22 at offset 16 + LDP x21,x22 at offset 32 → data movement → KEEP
+		// - STP x21,x22 with no matching LDP → might be data, keep to be safe
 		x30UsedAsScratch := false
+
+		// calleeSaveInfo tracks whether a (regs, offset) slot has stores and/or loads
+		type calleeSaveInfo struct {
+			hasStore bool
+			hasLoad  bool
+		}
+		calleeSaveSlots := make(map[calleeSaveKey]*calleeSaveInfo)
+
 		for _, line := range function.Lines {
 			if len(line.Binary) == 0 {
 				continue // Skip labels, directives, etc.
 			}
 			inst := decodeArm64Line(line)
-			
+
 			// Skip LR save/restore instructions - these don't count as "scratch use"
 			if isLRStackSaveRestore(inst) {
+				// But still collect callee-save info for LR
+				if key, ok := getCalleeSaveKey(inst); ok {
+					info := calleeSaveSlots[key]
+					if info == nil {
+						info = &calleeSaveInfo{}
+						calleeSaveSlots[key] = info
+					}
+					switch inst.Op {
+					case arm64asm.STP, arm64asm.STR:
+						info.hasStore = true
+					case arm64asm.LDP, arm64asm.LDR:
+						info.hasLoad = true
+					}
+				}
 				continue
 			}
-			
+
 			// If this instruction writes to LR, it's using LR as scratch
 			if usesLRAsScratch(inst) {
 				x30UsedAsScratch = true
-				break
+			}
+
+			// Collect callee-saved store/load info
+			if key, ok := getCalleeSaveKey(inst); ok {
+				info := calleeSaveSlots[key]
+				if info == nil {
+					info = &calleeSaveInfo{}
+					calleeSaveSlots[key] = info
+				}
+				switch inst.Op {
+				case arm64asm.STP, arm64asm.STR:
+					info.hasStore = true
+				case arm64asm.LDP, arm64asm.LDR:
+					info.hasLoad = true
+				}
 			}
 		}
 		
@@ -629,8 +671,10 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 			if spInstruction.MatchString(asm) {
 				inst := decodeArm64Line(line)
 
-				// If x30 is used as scratch, preserve its SP-based save/restore
+				// Go's ABI0 doesn't require callee-saved registers
+				// Exception: if x30 is used as scratch, preserve its SP-based save/restore
 				if x30UsedAsScratch && isLRStackSaveRestore(inst) {
+					// Keep LR save/restore - it's used as scratch register
 					lineCpy := line
 					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
 					lineCpy.Binary = nil
@@ -638,8 +682,25 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 					continue
 				}
 
-				// NOP callee-saved register pairs - Go's ABI0 doesn't require them
-				if isCalleeSavedRegPair(inst) {
+				// Check if this is a callee-saved pair that should be NOPed.
+				// Only NOP when BOTH a store AND load exist for the same (regs, offset).
+				// This is the sound, conservative rule that avoids incorrectly NOPing data stores.
+				doSkip := false
+				if key, ok := getCalleeSaveKey(inst); ok {
+					info := calleeSaveSlots[key]
+					if info != nil && info.hasStore && info.hasLoad {
+						doSkip = true
+					}
+				} else if inst.Op == arm64asm.MOV {
+					// NOP frame pointer save (mov x29, sp) and restore (mov sp, x29)
+					isFPSave := inst.Args[0] == arm64asm.RegSP(arm64asm.X29) && inst.Args[1] == arm64asm.RegSP(arm64asm.SP)
+					isFPRestore := inst.Args[0] == arm64asm.RegSP(arm64asm.SP) && inst.Args[1] == arm64asm.RegSP(arm64asm.X29)
+					if isFPSave || isFPRestore {
+						doSkip = true
+					}
+				}
+
+				if doSkip {
 					lineCpy := line
 					lineCpy.Disassembled = "NOP"
 					lineCpy.Binary = nil
@@ -647,39 +708,16 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 					continue
 				}
 
-				// NOP frame pointer operations:
-				// - mov x29, sp (prologue: save SP to frame pointer)
-				// - mov sp, x29 (epilogue: restore SP from frame pointer)
-				// Both must be NOPed together to avoid stack corruption
-				if inst.Op == arm64asm.MOV {
-					isFPSave := inst.Args[0] == arm64asm.RegSP(arm64asm.X29) && inst.Args[1] == arm64asm.RegSP(arm64asm.SP)
-					isFPRestore := inst.Args[0] == arm64asm.RegSP(arm64asm.SP) && inst.Args[1] == arm64asm.RegSP(arm64asm.X29)
-					if isFPSave || isFPRestore {
-						lineCpy := line
-						lineCpy.Disassembled = "NOP"
-						lineCpy.Binary = nil
-						newLines = append(newLines, lineCpy)
-						continue
-					}
-				}
-
 				switch inst.Op {
 				case arm64asm.STP, arm64asm.LDP:
-					// Keep non-callee-saved STP/LDP (e.g., SIMD register spills)
+					// Keep STP/LDP that wasn't matched (data stores, SIMD spills, etc.)
 					lineCpy := line
 					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
 					lineCpy.Binary = nil
 					newLines = append(newLines, lineCpy)
 					continue
 				case arm64asm.STR, arm64asm.LDR:
-					// NOP single callee-saved register save/restore
-					if isCalleeSavedReg(inst.Args[0]) {
-						lineCpy := line
-						lineCpy.Disassembled = "NOP"
-						lineCpy.Binary = nil
-						newLines = append(newLines, lineCpy)
-						continue
-					}
+					// Keep STR/LDR that wasn't matched (data stores, etc.)
 					lineCpy := line
 					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
 					lineCpy.Binary = nil
