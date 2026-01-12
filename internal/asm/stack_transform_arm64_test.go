@@ -277,6 +277,11 @@ func TestArm64FramePointerRestore(t *testing.T) {
 
 func TestArm64SingleRegisterCalleeSaved(t *testing.T) {
 	// Test single STR/LDR for callee-saved registers (not paired STP/LDP)
+	//
+	// IMPORTANT: Single-register STR/LDR of x19-x28 should NOT be NOPed.
+	// Clang saves x19-x28 via STP (paired) in prologues, so single-register
+	// STR/LDR of these registers are typically intra-function spills that
+	// MUST be preserved. See ISSUE-incorrect-nop-stack-spills.md.
 	testFn := Function{
 		Name: "single_reg_save",
 		Lines: []Line{
@@ -297,11 +302,12 @@ func TestArm64SingleRegisterCalleeSaved(t *testing.T) {
 
 	require.Len(t, modified.Lines, 8)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
-	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "str x19 should be NOPed")
-	assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "str x20 should be NOPed")
+	// Single-register STR/LDR of x19-x28 should be PRESERVED (not NOPed)
+	assert.NotEqual(t, "NOP", modified.Lines[1].Disassembled, "str x19 should NOT be NOPed (potential spill)")
+	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "str x20 should NOT be NOPed (potential spill)")
 	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "body should be kept")
-	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldr x20 should be NOPed")
-	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldr x19 should be NOPed")
+	assert.NotEqual(t, "NOP", modified.Lines[4].Disassembled, "ldr x20 should NOT be NOPed (potential spill)")
+	assert.NotEqual(t, "NOP", modified.Lines[5].Disassembled, "ldr x19 should NOT be NOPed (potential spill)")
 	assert.Equal(t, "NOP", modified.Lines[6].Disassembled, "ldp x29,x30 should be NOPed")
 	assert.Equal(t, "RET", modified.Lines[7].Disassembled)
 }
@@ -775,17 +781,19 @@ func TestArm64DataStoreSameRegsDifferentOffset(t *testing.T) {
 
 func TestArm64SingleRegDataStore(t *testing.T) {
 	// Edge case: Single register STR/LDR for data (not callee-save pattern).
+	// Note: Single-register STR/LDR of x19-x28 are NEVER NOPed because they
+	// could be intra-function spills. See ISSUE-incorrect-nop-stack-spills.md.
 	testFn := Function{
 		Name: "single_reg_data",
 		Lines: []Line{
 			// Prologue
 			{Assembly: "stp	x29, x30, [sp, #-48]!", Binary: wordToLineBinary(0xa9bd7bfd)},
-			{Assembly: "str	x19, [sp, #32]", Binary: wordToLineBinary(0xf90013f3)}, // callee-save x19
+			{Assembly: "str	x19, [sp, #32]", Binary: wordToLineBinary(0xf90013f3)}, // single-reg x19
 			// Data store: x20 stored, but loaded into x0 (different reg)
 			{Assembly: "str	x20, [sp, #24]", Binary: wordToLineBinary(0xf9000ff4)},
 			{Assembly: "ldr	x0, [sp, #24]", Binary: wordToLineBinary(0xf9400fe0)}, // different reg!
 			// Epilogue
-			{Assembly: "ldr	x19, [sp, #32]", Binary: wordToLineBinary(0xf94013f3)}, // callee-restore x19
+			{Assembly: "ldr	x19, [sp, #32]", Binary: wordToLineBinary(0xf94013f3)}, // single-reg x19
 			{Assembly: "ldp	x29, x30, [sp], #48", Binary: wordToLineBinary(0xa8c37bfd)},
 			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
 		},
@@ -795,16 +803,17 @@ func TestArm64SingleRegDataStore(t *testing.T) {
 
 	require.Len(t, modified.Lines, 7)
 
-	// Prologue should be NOPed
+	// Prologue STP should be NOPed
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 prologue should be NOPed")
-	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "str x19 callee-save should be NOPed")
+	// Single-register STR/LDR of x19 should NOT be NOPed (could be spill)
+	assert.NotEqual(t, "NOP", modified.Lines[1].Disassembled, "str x19 should NOT be NOPed (potential spill)")
 
 	// Data store/load with different registers MUST NOT be NOPed
 	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "str x20 data store MUST NOT be NOPed")
 	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "ldr x0 data load MUST NOT be NOPed")
 
-	// Epilogue should be NOPed
-	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldr x19 callee-restore should be NOPed")
+	// Single-register LDR of x19 should NOT be NOPed (could be spill)
+	assert.NotEqual(t, "NOP", modified.Lines[4].Disassembled, "ldr x19 should NOT be NOPed (potential spill)")
 	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x29,x30 epilogue should be NOPed")
 }
 

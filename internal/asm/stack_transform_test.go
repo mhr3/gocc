@@ -293,7 +293,14 @@ func TestStackRegisterPairOrderingArm64(t *testing.T) {
 }
 
 func TestStackSingleCalleeSavedArm64(t *testing.T) {
-	// Test single register STR/LDR for callee-saved registers
+	// Test single register STR/LDR for callee-saved registers (x19-x28).
+	//
+	// IMPORTANT: Single-register STR/LDR of x19-x28 should NOT be NOPed.
+	// Clang saves x19-x28 via STP (paired) in prologues, so single-register
+	// STR/LDR of these registers are typically intra-function spills that
+	// MUST be preserved. See ISSUE-incorrect-nop-stack-spills.md.
+	//
+	// Only LR (x30) is special - it may be saved alone via STR.
 	testFn := Function{
 		Lines: []Line{
 			{Assembly: "stp	x29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
@@ -311,10 +318,12 @@ func TestStackSingleCalleeSavedArm64(t *testing.T) {
 
 	require.Len(t, modified.Lines, 7)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
-	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "str x19 should be NOPed")
-	assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "str x20 should be NOPed")
-	assert.Equal(t, "NOP", modified.Lines[3].Disassembled, "ldr x20 should be NOPed")
-	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldr x19 should be NOPed")
+	// Single-register STR/LDR of x19-x28 should be PRESERVED (not NOPed)
+	// because they could be intra-function spills
+	assert.NotEqual(t, "NOP", modified.Lines[1].Disassembled, "str x19 should NOT be NOPed (potential spill)")
+	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "str x20 should NOT be NOPed (potential spill)")
+	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "ldr x20 should NOT be NOPed (potential spill)")
+	assert.NotEqual(t, "NOP", modified.Lines[4].Disassembled, "ldr x19 should NOT be NOPed (potential spill)")
 	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x29,x30 should be NOPed")
 	assert.Equal(t, "RET", modified.Lines[6].Disassembled)
 }

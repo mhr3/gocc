@@ -852,7 +852,16 @@ func getCalleeSaveKey(inst arm64asm.Inst) (calleeSaveKey, bool) {
 		return calleeSaveKey{regs: regs, offset: offset}, true
 
 	case arm64asm.STR, arm64asm.LDR:
-		if !isCalleeSavedReg(inst.Args[0]) {
+		// Only match single-register STR/LDR for LR (x30).
+		//
+		// Clang saves x19-x28 via STP (paired) in prologues, so single-register
+		// STR/LDR of x19-x28 are typically intra-function spills (scratch register
+		// saves) that MUST be preserved. See ISSUE-incorrect-nop-stack-spills.md.
+		//
+		// LR (x30) is special - it's saved alone via STR when x29 is not used as
+		// frame pointer, or as part of STP x29,x30. We match STR/LDR of LR to
+		// detect x30 scratch usage.
+		if !isLR(inst.Args[0]) {
 			return calleeSaveKey{}, false
 		}
 		// Check if SP-based
