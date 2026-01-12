@@ -414,26 +414,52 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 
 		function.Lines = newLines
 	} else if !complexManip {
-		// First pass: check if x30 (LR) is used as a scratch register.
-		// If so, we must preserve its save/restore to maintain return address.
+		// First pass: check if x30 (LR) is used as a scratch register, and collect
+		// callee-saved STP/LDP and STR/LDR info to distinguish actual prologue/epilogue
+		// saves from data stores.
+		//
+		// The key insight is: only NOP callee-saved store/load pairs when BOTH exist
+		// with the same (registers, offset). This is sound because:
+		// - STP x21,x22 at offset 32 + LDP x21,x22 at offset 32 → register save → NOP
+		// - STP x21,x22 at offset 32 + LDP x0,x1 at offset 32 → data store → KEEP
+		// - STP x21,x22 at offset 16 + LDP x21,x22 at offset 32 → data movement → KEEP
+		// - STP x21,x22 with no matching LDP → might be data, keep to be safe
 		x30UsedAsScratch := false
+
+		// calleeSaveInfo tracks whether a (regs, offset) slot has stores and/or loads
+		type calleeSaveInfo struct {
+			hasStore bool
+			hasLoad  bool
+		}
+		calleeSaveSlots := make(map[calleeSaveKey]*calleeSaveInfo)
+
 		for _, line := range function.Lines {
 			if len(line.Binary) == 0 {
 				continue // Skip labels, directives, etc.
 			}
 			inst := decodeArm64Line(line)
-			
-			// Skip LR save/restore instructions - these don't count as "scratch use"
-			if isLRStackSaveRestore(inst) {
-				continue
-			}
-			
-			// If this instruction writes to LR, it's using LR as scratch
-			if usesLRAsScratch(inst) {
+
+			// Check for LR scratch usage (but LR save/restore doesn't count as scratch)
+			if !isLRStackSaveRestore(inst) && usesLRAsScratch(inst) {
 				x30UsedAsScratch = true
-				break
+			}
+
+			// Collect callee-saved store/load info
+			if key, ok := getCalleeSaveKey(inst); ok {
+				info := calleeSaveSlots[key]
+				if info == nil {
+					info = &calleeSaveInfo{}
+					calleeSaveSlots[key] = info
+				}
+				switch inst.Op {
+				case arm64asm.STP, arm64asm.STR:
+					info.hasStore = true
+				case arm64asm.LDP, arm64asm.LDR:
+					info.hasLoad = true
+				}
 			}
 		}
+
 		newLines := make([]Line, 0, len(function.Lines))
 		stackAllocator := map[string]int{}
 		stackSpace := -extraStack
@@ -456,10 +482,14 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 					continue
 				}
 
-				if isCalleeSavedRegPair(inst) {
-					doSkip = true
-				} else if (inst.Op == arm64asm.STR || inst.Op == arm64asm.LDR) && isCalleeSavedReg(inst.Args[0]) {
-					doSkip = true
+				// Check if this is a callee-saved pair that should be NOPed.
+				// Only NOP when BOTH a store AND load exist for the same (regs, offset).
+				// This is the sound, conservative rule that avoids incorrectly NOPing data stores.
+				if key, ok := getCalleeSaveKey(inst); ok {
+					info := calleeSaveSlots[key]
+					if info != nil && info.hasStore && info.hasLoad {
+						doSkip = true
+					}
 				} else if inst.Op == arm64asm.MOV {
 					// NOP frame pointer save (mov x29, sp) and restore (mov sp, x29)
 					isFPSave := inst.Args[0] == arm64asm.RegSP(arm64asm.X29) && inst.Args[1] == arm64asm.RegSP(arm64asm.SP)
@@ -745,6 +775,64 @@ func isCalleeSavedReg(arg arm64asm.Arg) bool {
 		return true
 	}
 	return false
+}
+
+// calleeSaveKey identifies a callee-saved register store/load by its registers and stack offset.
+// Used to match STP/STR with corresponding LDP/LDR to distinguish prologue/epilogue saves
+// from data stores that happen to use callee-saved registers.
+type calleeSaveKey struct {
+	regs   string // Normalized register pair (e.g., "X19X20" or "X19" for single reg)
+	offset int    // Stack offset (0 for pre/post-index modes that implicitly use offset 0)
+}
+
+// getCalleeSaveKey extracts the key for matching callee-saved register store/load pairs.
+// Returns (key, true) if the instruction is a callee-saved STP/LDP/STR/LDR to SP.
+// Returns (zero, false) otherwise.
+func getCalleeSaveKey(inst arm64asm.Inst) (calleeSaveKey, bool) {
+	switch inst.Op {
+	case arm64asm.STP, arm64asm.LDP:
+		if !isCalleeSavedRegPair(inst) {
+			return calleeSaveKey{}, false
+		}
+		// Get registers in normalized order (smaller register first)
+		r0 := inst.Args[0].(arm64asm.Reg)
+		r1 := inst.Args[1].(arm64asm.Reg)
+		if r0 > r1 {
+			r0, r1 = r1, r0
+		}
+		regs := r0.String() + r1.String()
+
+		// Get offset from memory operand
+		mem := inst.Args[2].(arm64asm.MemImmediate)
+		offset := immFromMemImmediate(mem)
+		// For pre/post-index modes, the effective stack slot is at offset 0
+		// (pre-index: stores at [sp+imm], then sp+=imm; post-index: loads from [sp], then sp+=imm)
+		if mem.Mode == arm64asm.AddrPreIndex || mem.Mode == arm64asm.AddrPostIndex {
+			offset = 0
+		}
+
+		return calleeSaveKey{regs: regs, offset: offset}, true
+
+	case arm64asm.STR, arm64asm.LDR:
+		if !isCalleeSavedReg(inst.Args[0]) {
+			return calleeSaveKey{}, false
+		}
+		// Check if SP-based
+		mem, ok := inst.Args[1].(arm64asm.MemImmediate)
+		if !ok || mem.Base != arm64asm.RegSP(arm64asm.SP) {
+			return calleeSaveKey{}, false
+		}
+		reg := inst.Args[0].(arm64asm.Reg)
+		regs := reg.String()
+		offset := immFromMemImmediate(mem)
+		if mem.Mode == arm64asm.AddrPreIndex || mem.Mode == arm64asm.AddrPostIndex {
+			offset = 0
+		}
+
+		return calleeSaveKey{regs: regs, offset: offset}, true
+	}
+
+	return calleeSaveKey{}, false
 }
 
 // isLR returns true if the argument is the link register (x30 or w30).

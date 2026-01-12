@@ -254,15 +254,18 @@ func TestStackRegisterSavingArm64(t *testing.T) {
 func TestStackRegisterPairOrderingArm64(t *testing.T) {
 	// Test that both ascending (x19,x20) and descending (x20,x19) orderings are handled.
 	// Different compilers may emit different orderings.
+	// Note: Complete save/restore pairs are needed - orphan saves are not NOPed
 	testCases := []struct {
-		name     string
-		assembly string
-		binary   uint32
+		name      string
+		stpAsm    string
+		stpBinary uint32
+		ldpAsm    string
+		ldpBinary uint32
 	}{
-		// Ascending order (common in some compilers): encoding [0xf3,0x53,0x01,0xa9]
-		{"stp x19,x20 ascending", "stp	x19, x20, [sp, #16]", 0xa90153f3},
+		// Ascending order (common in some compilers)
+		{"stp x19,x20 ascending", "stp	x19, x20, [sp, #16]", 0xa90153f3, "ldp	x19, x20, [sp, #16]", 0xa94153f3},
 		// Descending order (seen in other compilers)
-		{"stp x20,x19 descending", "stp	x20, x19, [sp, #16]", 0xa9014ff4},
+		{"stp x20,x19 descending", "stp	x20, x19, [sp, #16]", 0xa9014ff4, "ldp	x20, x19, [sp, #16]", 0xa9414ff4},
 	}
 
 	for _, tc := range testCases {
@@ -270,17 +273,21 @@ func TestStackRegisterPairOrderingArm64(t *testing.T) {
 			testFn := Function{
 				Lines: []Line{
 					{Assembly: "stp	x29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
-					{Assembly: tc.assembly, Binary: wordToLineBinary(tc.binary)},
+					{Assembly: tc.stpAsm, Binary: wordToLineBinary(tc.stpBinary)},
+					{Assembly: tc.ldpAsm, Binary: wordToLineBinary(tc.ldpBinary)},
+					{Assembly: "ldp	x29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
 					{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
 				},
 			}
 
 			modified := checkStackArm64(config.ARM64(), testFn)
 
-			require.Len(t, modified.Lines, 3)
+			require.Len(t, modified.Lines, 5)
 			assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
 			assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "%s should be NOPed", tc.name)
-			assert.Equal(t, "RET", modified.Lines[2].Disassembled)
+			assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "ldp should be NOPed")
+			assert.Equal(t, "NOP", modified.Lines[3].Disassembled, "ldp x29,x30 should be NOPed")
+			assert.Equal(t, "RET", modified.Lines[4].Disassembled)
 		})
 	}
 }

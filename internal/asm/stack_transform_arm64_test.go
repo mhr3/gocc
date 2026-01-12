@@ -309,15 +309,18 @@ func TestArm64SingleRegisterCalleeSaved(t *testing.T) {
 func TestArm64RegisterPairOrdering(t *testing.T) {
 	// Different compilers may emit callee-saved pairs in different orders
 	// Both (x19,x20) and (x20,x19) orderings should be recognized
+	// Note: Complete save/restore pairs are needed - orphan saves are not NOPed
 	testCases := []struct {
-		name     string
-		assembly string
-		binary   uint32
+		name       string
+		stpAsm     string
+		stpBinary  uint32
+		ldpAsm     string
+		ldpBinary  uint32
 	}{
-		{"x19_x20", "stp	x19, x20, [sp, #16]", 0xa90153f3},
-		{"x20_x19", "stp	x20, x19, [sp, #16]", 0xa9014ff4},
-		{"x21_x22", "stp	x21, x22, [sp, #32]", 0xa9025bf5},
-		{"x22_x21", "stp	x22, x21, [sp, #32]", 0xa90257f6},
+		{"x19_x20", "stp	x19, x20, [sp, #16]", 0xa90153f3, "ldp	x19, x20, [sp, #16]", 0xa94153f3},
+		{"x20_x19", "stp	x20, x19, [sp, #16]", 0xa9014ff4, "ldp	x20, x19, [sp, #16]", 0xa9414ff4},
+		{"x21_x22", "stp	x21, x22, [sp, #32]", 0xa9025bf5, "ldp	x21, x22, [sp, #32]", 0xa9425bf5},
+		{"x22_x21", "stp	x22, x21, [sp, #32]", 0xa90257f6, "ldp	x22, x21, [sp, #32]", 0xa94257f6},
 	}
 
 	for _, tc := range testCases {
@@ -326,17 +329,21 @@ func TestArm64RegisterPairOrdering(t *testing.T) {
 				Name: "pair_order_" + tc.name,
 				Lines: []Line{
 					{Assembly: "stp	x29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
-					{Assembly: tc.assembly, Binary: wordToLineBinary(tc.binary)},
+					{Assembly: tc.stpAsm, Binary: wordToLineBinary(tc.stpBinary)},
+					{Assembly: tc.ldpAsm, Binary: wordToLineBinary(tc.ldpBinary)},
+					{Assembly: "ldp	x29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
 					{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
 				},
 			}
 
 			modified := checkStackArm64(config.ARM64(), testFn)
 
-			require.Len(t, modified.Lines, 3)
-			assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
-			assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "%s should be NOPed", tc.name)
-			assert.Equal(t, "RET", modified.Lines[2].Disassembled)
+			require.Len(t, modified.Lines, 5)
+			assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
+			assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp %s should be NOPed", tc.name)
+			assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "ldp %s should be NOPed", tc.name)
+			assert.Equal(t, "NOP", modified.Lines[3].Disassembled, "ldp x29,x30 should be NOPed")
+			assert.Equal(t, "RET", modified.Lines[4].Disassembled)
 		})
 	}
 }
@@ -590,6 +597,324 @@ func TestArm64DynamicStackAllocationPanics(t *testing.T) {
 			checkStackArm64(config.ARM64(), testFn)
 		},
 		"dynamic stack allocation should panic with clear error message")
+}
+
+func TestArm64DataStoreNotNOPed(t *testing.T) {
+	// Bug fix test: Data stores using callee-saved registers must NOT be NOPed.
+	//
+	// C code like: uint8x16_t *chunks[8] = {&m0, &m1, ...}
+	// generates: stp x21, x22, [sp, #32]  ; stores pointer VALUES to stack
+	//
+	// This is DATA, not register saving. The key difference:
+	// - Prologue saves: same registers stored and later restored at same offset
+	// - Data stores: values stored but loaded into DIFFERENT registers (or never loaded)
+	//
+	// The fix uses two passes:
+	// 1. Collect all callee-saved STP (regs, offset) and LDP (regs, offset)
+	// 2. Only NOP an STP if there's a matching LDP with same registers at same offset
+	testFn := Function{
+		Name: "data_store_func",
+		Lines: []Line{
+			// Prologue - actual callee-saved register saves (SHOULD be NOPed)
+			{Assembly: "stp	x29, x30, [sp, #-96]!", Binary: wordToLineBinary(0xa9ba7bfd)},
+			{Assembly: "stp	x20, x19, [sp, #80]", Binary: wordToLineBinary(0xa9054ff4)},
+			{Assembly: "mov	x29, sp", Binary: wordToLineBinary(0x910003fd)},
+			// Function body - DATA store using x21, x22 (must NOT be NOPed)
+			// These store pointer values to stack, not saving registers for later restore
+			{Assembly: "stp	x21, x22, [sp, #32]", Binary: wordToLineBinary(0xa9025bf5)}, // DATA store - no matching LDP
+			{Assembly: "stp	x23, x24, [sp, #48]", Binary: wordToLineBinary(0xa90363f7)}, // DATA store - no matching LDP
+			// Load into DIFFERENT registers - this is reading data, not restoring
+			{Assembly: "ldp	x0, x1, [sp, #32]", Binary: wordToLineBinary(0xa94207e0)},  // Load into x0,x1 (different!)
+			{Assembly: "ldp	x2, x3, [sp, #48]", Binary: wordToLineBinary(0xa9430fe2)},  // Load into x2,x3 (different!)
+			// Epilogue - actual callee-saved register restores (SHOULD be NOPed)
+			{Assembly: "ldp	x20, x19, [sp, #80]", Binary: wordToLineBinary(0xa9454ff4)},
+			{Assembly: "ldp	x29, x30, [sp], #96", Binary: wordToLineBinary(0xa8c67bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 10)
+
+	// Prologue saves SHOULD be NOPed (they have matching restores)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 prologue SHOULD be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x20,x19 prologue SHOULD be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "mov x29,sp SHOULD be NOPed")
+
+	// DATA stores MUST NOT be NOPed - they don't have matching LDP with same registers
+	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "stp x21,x22 DATA store MUST NOT be NOPed")
+	assert.NotEqual(t, "NOP", modified.Lines[4].Disassembled, "stp x23,x24 DATA store MUST NOT be NOPed")
+
+	// Loads into different registers should pass through
+	assert.NotEqual(t, "NOP", modified.Lines[5].Disassembled, "ldp x0,x1 should pass through")
+	assert.NotEqual(t, "NOP", modified.Lines[6].Disassembled, "ldp x2,x3 should pass through")
+
+	// Epilogue restores SHOULD be NOPed (they match prologue saves)
+	assert.Equal(t, "NOP", modified.Lines[7].Disassembled, "ldp x20,x19 epilogue SHOULD be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[8].Disassembled, "ldp x29,x30 epilogue SHOULD be NOPed")
+	assert.Equal(t, "RET", modified.Lines[9].Disassembled)
+}
+
+func TestArm64DataStoreSameOffsetDifferentRegs(t *testing.T) {
+	// Edge case: STP and LDP at same offset but with different registers.
+	// This is NOT a callee-save pattern - it's data movement.
+	testFn := Function{
+		Name: "same_offset_diff_regs",
+		Lines: []Line{
+			// Prologue
+			{Assembly: "stp	x29, x30, [sp, #-64]!", Binary: wordToLineBinary(0xa9bc7bfd)},
+			{Assembly: "stp	x20, x19, [sp, #48]", Binary: wordToLineBinary(0xa9034ff4)},
+			// Store x21,x22 at offset 32
+			{Assembly: "stp	x21, x22, [sp, #32]", Binary: wordToLineBinary(0xa9025bf5)},
+			// Load into DIFFERENT registers x23,x24 at SAME offset 32
+			{Assembly: "ldp	x23, x24, [sp, #32]", Binary: wordToLineBinary(0xa94263f7)},
+			// Epilogue
+			{Assembly: "ldp	x20, x19, [sp, #48]", Binary: wordToLineBinary(0xa9434ff4)},
+			{Assembly: "ldp	x29, x30, [sp], #64", Binary: wordToLineBinary(0xa8c47bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 7)
+
+	// Prologue/epilogue should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 prologue should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x20,x19 prologue should be NOPed")
+
+	// Data store/load with different registers MUST NOT be NOPed
+	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "stp x21,x22 data store MUST NOT be NOPed")
+	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "ldp x23,x24 data load MUST NOT be NOPed")
+
+	// Epilogue should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldp x20,x19 epilogue should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x29,x30 epilogue should be NOPed")
+}
+
+func TestArm64DataStoreSameRegsDifferentOffset(t *testing.T) {
+	// Edge case: STP and LDP with same registers but at different offsets.
+	// This is NOT a callee-save pattern - offsets must match.
+	testFn := Function{
+		Name: "same_regs_diff_offset",
+		Lines: []Line{
+			// Prologue
+			{Assembly: "stp	x29, x30, [sp, #-64]!", Binary: wordToLineBinary(0xa9bc7bfd)},
+			{Assembly: "stp	x20, x19, [sp, #48]", Binary: wordToLineBinary(0xa9034ff4)},
+			// Store x21,x22 at offset 16
+			{Assembly: "stp	x21, x22, [sp, #16]", Binary: wordToLineBinary(0xa9015bf5)},
+			// Load x21,x22 at DIFFERENT offset 32
+			{Assembly: "ldp	x21, x22, [sp, #32]", Binary: wordToLineBinary(0xa9425bf5)},
+			// Epilogue
+			{Assembly: "ldp	x20, x19, [sp, #48]", Binary: wordToLineBinary(0xa9434ff4)},
+			{Assembly: "ldp	x29, x30, [sp], #64", Binary: wordToLineBinary(0xa8c47bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 7)
+
+	// Prologue/epilogue should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 prologue should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x20,x19 prologue should be NOPed")
+
+	// Data store/load at different offsets MUST NOT be NOPed
+	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "stp x21,x22 at offset 16 MUST NOT be NOPed")
+	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "ldp x21,x22 at offset 32 MUST NOT be NOPed")
+
+	// Epilogue should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldp x20,x19 epilogue should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x29,x30 epilogue should be NOPed")
+}
+
+func TestArm64SingleRegDataStore(t *testing.T) {
+	// Edge case: Single register STR/LDR for data (not callee-save pattern).
+	testFn := Function{
+		Name: "single_reg_data",
+		Lines: []Line{
+			// Prologue
+			{Assembly: "stp	x29, x30, [sp, #-48]!", Binary: wordToLineBinary(0xa9bd7bfd)},
+			{Assembly: "str	x19, [sp, #32]", Binary: wordToLineBinary(0xf90013f3)}, // callee-save x19
+			// Data store: x20 stored, but loaded into x0 (different reg)
+			{Assembly: "str	x20, [sp, #24]", Binary: wordToLineBinary(0xf9000ff4)},
+			{Assembly: "ldr	x0, [sp, #24]", Binary: wordToLineBinary(0xf9400fe0)}, // different reg!
+			// Epilogue
+			{Assembly: "ldr	x19, [sp, #32]", Binary: wordToLineBinary(0xf94013f3)}, // callee-restore x19
+			{Assembly: "ldp	x29, x30, [sp], #48", Binary: wordToLineBinary(0xa8c37bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 7)
+
+	// Prologue should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 prologue should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "str x19 callee-save should be NOPed")
+
+	// Data store/load with different registers MUST NOT be NOPed
+	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "str x20 data store MUST NOT be NOPed")
+	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "ldr x0 data load MUST NOT be NOPed")
+
+	// Epilogue should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldr x19 callee-restore should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x29,x30 epilogue should be NOPed")
+}
+
+func TestArm64PrePostIndexMatching(t *testing.T) {
+	// Edge case: Pre-index STP in prologue and post-index LDP in epilogue.
+	// These use different addressing modes but should still match.
+	// stp x29, x30, [sp, #-96]! stores at sp-96, then sp -= 96
+	// ldp x29, x30, [sp], #96 loads from sp, then sp += 96
+	// The effective offset for both is 0 (relative to final SP in prologue,
+	// or initial SP in epilogue).
+	testFn := Function{
+		Name: "pre_post_index",
+		Lines: []Line{
+			// Prologue with pre-index
+			{Assembly: "stp	x29, x30, [sp, #-96]!", Binary: wordToLineBinary(0xa9ba7bfd)},
+			{Assembly: "stp	x20, x19, [sp, #80]", Binary: wordToLineBinary(0xa9054ff4)},
+			// Function body
+			{Assembly: "mov	w0, #1", Binary: wordToLineBinary(0x52800020)},
+			// Epilogue with post-index
+			{Assembly: "ldp	x20, x19, [sp, #80]", Binary: wordToLineBinary(0xa9454ff4)},
+			{Assembly: "ldp	x29, x30, [sp], #96", Binary: wordToLineBinary(0xa8c67bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 6)
+
+	// All callee-save operations should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 pre-index should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x20,x19 should be NOPed")
+	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "function body should be kept")
+	assert.Equal(t, "NOP", modified.Lines[3].Disassembled, "ldp x20,x19 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldp x29,x30 post-index should be NOPed")
+}
+
+func TestArm64MixedMatchAndNoMatch(t *testing.T) {
+	// Mixed scenario: some pairs match (should NOP), others don't (must preserve).
+	testFn := Function{
+		Name: "mixed_match",
+		Lines: []Line{
+			// Prologue
+			{Assembly: "stp	x29, x30, [sp, #-80]!", Binary: wordToLineBinary(0xa9bb7bfd)},
+			{Assembly: "stp	x22, x21, [sp, #16]", Binary: wordToLineBinary(0xa90157f6)}, // has matching LDP
+			{Assembly: "stp	x20, x19, [sp, #32]", Binary: wordToLineBinary(0xa9024ff4)}, // has matching LDP
+			// Data store - no matching LDP with same regs
+			{Assembly: "stp	x24, x23, [sp, #48]", Binary: wordToLineBinary(0xa9035ff8)}, // DATA - loaded into x0,x1
+			// Load data into different registers
+			{Assembly: "ldp	x0, x1, [sp, #48]", Binary: wordToLineBinary(0xa94307e0)},
+			// Epilogue - matching restores
+			{Assembly: "ldp	x20, x19, [sp, #32]", Binary: wordToLineBinary(0xa9424ff4)},
+			{Assembly: "ldp	x22, x21, [sp, #16]", Binary: wordToLineBinary(0xa94157f6)},
+			{Assembly: "ldp	x29, x30, [sp], #80", Binary: wordToLineBinary(0xa8c57bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 9)
+
+	// Matching pairs should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x22,x21 should be NOPed (has match)")
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "stp x20,x19 should be NOPed (has match)")
+
+	// Non-matching data operations MUST NOT be NOPed
+	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "stp x24,x23 data MUST NOT be NOPed")
+	assert.NotEqual(t, "NOP", modified.Lines[4].Disassembled, "ldp x0,x1 data MUST NOT be NOPed")
+
+	// Epilogue restores should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x20,x19 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[6].Disassembled, "ldp x22,x21 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[7].Disassembled, "ldp x29,x30 should be NOPed")
+}
+
+func TestArm64MultipleEpilogues(t *testing.T) {
+	// Test that callee-saved saves are NOPed when multiple epilogues exist.
+	// Each epilogue has its own restore, all should match the prologue save.
+	testFn := Function{
+		Name: "multi_epilogue",
+		Lines: []Line{
+			// Prologue
+			{Assembly: "stp	x29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
+			{Assembly: "stp	x20, x19, [sp, #16]", Binary: wordToLineBinary(0xa9014ff4)},
+			// Early return path (first epilogue)
+			{Assembly: "cbz	x0, .early_ret", Binary: wordToLineBinary(0xb4000040)},
+			{Assembly: "ldp	x20, x19, [sp, #16]", Binary: wordToLineBinary(0xa9414ff4)}, // restore #1
+			{Assembly: "ldp	x29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+			// Normal return path (second epilogue)
+			{Assembly: "ldp	x20, x19, [sp, #16]", Binary: wordToLineBinary(0xa9414ff4)}, // restore #2
+			{Assembly: "ldp	x29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 9)
+
+	// Prologue saves should be NOPed (multiple matching restores exist)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 prologue should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x20,x19 prologue should be NOPed")
+
+	// Conditional branch passes through
+	assert.NotEqual(t, "NOP", modified.Lines[2].Disassembled, "cbz should pass through")
+
+	// First epilogue restores should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[3].Disassembled, "ldp x20,x19 epilogue #1 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldp x29,x30 epilogue #1 should be NOPed")
+	assert.Equal(t, "RET", modified.Lines[5].Disassembled)
+
+	// Second epilogue restores should be NOPed
+	assert.Equal(t, "NOP", modified.Lines[6].Disassembled, "ldp x20,x19 epilogue #2 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[7].Disassembled, "ldp x29,x30 epilogue #2 should be NOPed")
+	assert.Equal(t, "RET", modified.Lines[8].Disassembled)
+}
+
+func TestArm64MidFunctionSpill(t *testing.T) {
+	// Mid-function spill: register spilled and restored to same register.
+	// This is still callee-save pattern - Go doesn't need it.
+	testFn := Function{
+		Name: "mid_spill",
+		Lines: []Line{
+			// Prologue
+			{Assembly: "stp	x29, x30, [sp, #-48]!", Binary: wordToLineBinary(0xa9bd7bfd)},
+			{Assembly: "stp	x20, x19, [sp, #16]", Binary: wordToLineBinary(0xa9014ff4)},
+			// Mid-function spill of x21,x22 (same registers saved and restored)
+			{Assembly: "stp	x21, x22, [sp, #32]", Binary: wordToLineBinary(0xa9025bf5)}, // spill
+			{Assembly: "bl	some_func", Binary: wordToLineBinary(0x94000000)},
+			{Assembly: "ldp	x21, x22, [sp, #32]", Binary: wordToLineBinary(0xa9425bf5)}, // restore same regs
+			// Epilogue
+			{Assembly: "ldp	x20, x19, [sp, #16]", Binary: wordToLineBinary(0xa9414ff4)},
+			{Assembly: "ldp	x29, x30, [sp], #48", Binary: wordToLineBinary(0xa8c37bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified := checkStackArm64(config.ARM64(), testFn)
+
+	require.Len(t, modified.Lines, 8)
+
+	// All callee-saved saves/restores should be NOPed (including mid-function spill)
+	assert.Equal(t, "NOP", modified.Lines[0].Disassembled, "stp x29,x30 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled, "stp x20,x19 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled, "stp x21,x22 mid-spill should be NOPed")
+	assert.NotEqual(t, "NOP", modified.Lines[3].Disassembled, "bl should pass through")
+	assert.Equal(t, "NOP", modified.Lines[4].Disassembled, "ldp x21,x22 mid-restore should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[5].Disassembled, "ldp x20,x19 should be NOPed")
+	assert.Equal(t, "NOP", modified.Lines[6].Disassembled, "ldp x29,x30 should be NOPed")
+	assert.Equal(t, "RET", modified.Lines[7].Disassembled)
 }
 
 func TestArm64IndirectDynamicStackAllocationPanics(t *testing.T) {
