@@ -16,6 +16,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"runtime"
 )
@@ -200,7 +201,14 @@ func Apple() *Arch {
 // ------------------------------------- Toolchain -------------------------------------
 
 // FindClang resolves clang compiler to use.
+// If CC environment variable is set, it is used directly.
 func FindClang() (string, error) {
+	if cc := os.Getenv("CC"); cc != "" {
+		if _, err := os.Stat(cc); err != nil {
+			return "", fmt.Errorf("gocc: CC environment variable set to %q but file not found: %w", cc, err)
+		}
+		return cc, nil
+	}
 	return find([]string{
 		"clang-19", "clang-18",
 		"clang-17", "clang-16",
