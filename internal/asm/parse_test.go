@@ -74,6 +74,22 @@ func TestParseClangObjectDumpArm64(t *testing.T) {
 	}
 }
 
+func TestParseXwordConstant(t *testing.T) {
+	fn, err := ParseAssembly(config.ARM64(), "../../fixtures/test_xword.s")
+	assert.NoError(t, err)
+	assert.Len(t, fn, 1)
+	assert.Equal(t, "test_func", fn[0].Name)
+
+	// Should have 2 constants: LCPI0_0 (xword) and LCPI0_1 (byte)
+	assert.Len(t, fn[0].Consts, 2, "expected 2 constants (LCPI0_0 and LCPI0_1)")
+
+	// First constant LCPI0_0: 2x xword = 16 bytes
+	assert.Equal(t, "LCPI0_0", fn[0].Consts[0].Label)
+
+	// Second constant LCPI0_1: 16x byte = 16 bytes
+	assert.Equal(t, "LCPI0_1", fn[0].Consts[1].Label)
+}
+
 func TestParseGoObjectDump(t *testing.T) {
 	t.Skip("Skipping test")
 	fn, err := ParseAssembly(config.AMD64(), "../../fixtures/test_avx.s")

@@ -212,6 +212,7 @@ func extractAnnotatedSignatures(path string) (string, error) {
 	redacted.WriteString("#define int16_t short\n")
 	redacted.WriteString("#define int8_t char\n")
 	redacted.WriteString("#define bool _Bool\n")
+	redacted.WriteString("#define __attribute__(x)\n")
 
 	var clauseCount int
 	var isAnnotated bool

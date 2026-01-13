@@ -16,6 +16,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"runtime"
 )
@@ -88,7 +89,7 @@ func AMD64() *Arch {
 		Label:          regexp.MustCompile(`[A-Z0-9]+_\d+`),
 		DataLoad:       regexp.MustCompile(`^(?P<instr>\w+)\s+[^;]+?(?:,\s+(?P<register2>[RXY]\d+|[ABCD]X|[SD]I),\s+)?(?P<register>\b(?:[RXY]\d+|[ABCD]X|[SD]I));.*?\b[re]ip\s*[+-]\s*[.]?(?P<var>\w+)\b`),
 		JumpInstr:      regexp.MustCompile(`^(?P<instr>J\w+)[^;]+;.*?[.](?P<label>\w+)$`),
-		ConstAttrs:     []string{"ascii", "asciz", "byte", "double", "float", "hword", "int", "long", "octa", "quad", "short", "single", "skip", "space", "string", "word", "zero"},
+		ConstAttrs:     []string{"ascii", "asciz", "byte", "double", "float", "hword", "int", "long", "octa", "quad", "short", "single", "skip", "space", "string", "word", "xword", "zero"},
 		Registers:      []string{"DI", "SI", "DX", "CX", "R8", "R9"},
 		FloatRegisters: []string{"X0", "X1", "X2", "X3", "X4", "X5", "X6", "X7"},
 		RetRegister:    "AX",
@@ -102,9 +103,7 @@ func AMD64() *Arch {
 	}
 
 	if runtime.GOOS == "darwin" {
-		arch.ClangFlags = append(arch.ClangFlags, "-arch", "x86_64", "--sysroot=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/")
 		arch.Disassembler = []string{}
-		return arch
 	}
 
 	return arch
@@ -138,7 +137,7 @@ func ARM64() *Arch {
 		Symbol:         regexp.MustCompile(`^\w+\s+<\w+>:$`),
 		Data:           regexp.MustCompile(`^\w+:\s+\w+\s+.+$`),
 		Comment:        regexp.MustCompile(`^\s*//.*$`),
-		ConstAttrs:     []string{"ascii", "asciz", "byte", "double", "float", "hword", "int", "long", "octa", "quad", "short", "single", "skip", "space", "string", "word", "zero"},
+		ConstAttrs:     []string{"ascii", "asciz", "byte", "double", "float", "hword", "int", "long", "octa", "quad", "short", "single", "skip", "space", "string", "word", "xword", "zero"},
 		Label:          regexp.MustCompile(`[A-Z0-9]+_\d+`),
 		DataLoad:       regexp.MustCompile(`^ADRP\s+[^;]+?(?P<register>\bR\d+);.*?[.]?\b(?P<var>[A-Za-z_][A-Za-z0-9_]+)$`),
 		JumpInstr:      regexp.MustCompile(`^(?P<instr>(?:JMP|B[.]?(?:AL|NE|EQ|C[CS]|L[TESO]|G[TE]|PL|H[IS]|MI|V[CS])|CB[N]?Z[W]?\s+\S+|TB[N]?Z[W]?\s+\S+\s+\S+))\s+((?:[-]?\d*[(]PC[)])|(?:\w+[(]SB[)]));.*?(?P<label>[Ll_][a-zA-Z0-9_]+)$`),
@@ -202,7 +201,14 @@ func Apple() *Arch {
 // ------------------------------------- Toolchain -------------------------------------
 
 // FindClang resolves clang compiler to use.
+// If CC environment variable is set, it is used directly.
 func FindClang() (string, error) {
+	if cc := os.Getenv("CC"); cc != "" {
+		if _, err := os.Stat(cc); err != nil {
+			return "", fmt.Errorf("gocc: CC environment variable set to %q but file not found: %w", cc, err)
+		}
+		return cc, nil
+	}
 	return find([]string{
 		"clang-19", "clang-18",
 		"clang-17", "clang-16",

@@ -139,17 +139,13 @@ func checkStackAmd64(arch *config.Arch, function Function) Function {
 
 		function.Lines = newLines
 	} else {
+		// Complex stack manipulation (amd64): rewrite push/pop to use stack offsets
+		// Note: This path has known limitations (see FIXME below), warn the user.
 		fnName := function.Name
 		if fnName == "" {
 			fnName = "[unknown]"
 		}
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", fnName)
-		// go really doesn't like messing with SP, so we have two options:
-		// 1) skip instructions that change it
-		// 2) copy SP to BP and rewrite any instructions working with SP
-		//    to refer to BP instead
-
-		// we still need to remove the prologue/epilogue instructions
+		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, rewriting push/pop\n", fnName)
 		newLines := make([]Line, 0, len(function.Lines))
 		pushOffsetStart := extraStack
 		//pushOffsetStart += -pushOffsetStart & (15)
@@ -308,15 +304,17 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				if len(inst.Args) > 2 && inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30 {
 					// storing the frame pointer
 					imm, ok := inst.Args[2].(arm64asm.MemImmediate)
-					// this tells us how much stack space we're using
-					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
+					// Only treat as stack allocation if it has SP writeback (pre-index mode)
+					// Plain [sp, #N] (AddrOffset) is just a save, not an allocation
+					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && imm.Mode == arm64asm.AddrPreIndex && baseStack == 0 {
 						n := immFromMemImmediate(imm)
 						baseStack = -n
 						extraStack = baseStack
 					}
 				} else if len(inst.Args) > 2 {
 					imm, ok := inst.Args[2].(arm64asm.MemImmediate)
-					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
+					// Only treat as stack allocation if it has SP writeback (pre-index mode)
+					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && imm.Mode == arm64asm.AddrPreIndex && baseStack == 0 {
 						n := immFromMemImmediate(imm)
 						baseStack = -n
 						extraStack = baseStack
@@ -326,21 +324,37 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				}
 			case arm64asm.STR:
 				imm, ok := inst.Args[1].(arm64asm.MemImmediate)
-				if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
+				// Only treat as stack allocation if it has SP writeback (pre-index mode)
+				if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && imm.Mode == arm64asm.AddrPreIndex && baseStack == 0 {
 					n := immFromMemImmediate(imm)
 					baseStack = -n
 					extraStack = baseStack
 				}
 				// this could still be fine, as long as it's doing just callee-saved registers
 				rewriteRequired = true
+			case arm64asm.MOV:
+				// Check for dynamic stack allocation pattern: mov sp, <reg>
+				// This is used by VLAs/alloca when computing new SP in a temp register
+				// Pattern: mov x8, sp; sub x8, x8, x12; mov sp, x8
+				// The only valid "mov sp, <reg>" is "mov sp, x29" for frame pointer restore
+				targetReg := inst.Args[0]
+				srcReg := inst.Args[1]
+				if targetReg == arm64asm.RegSP(arm64asm.SP) {
+					// Compare by string since RegSP type encodes X29 differently than arm64asm.X29
+					if srcReg != nil && srcReg.String() != "X29" {
+						// mov sp, <non-x29> indicates VLA/alloca - dynamic stack size
+						panic(fmt.Sprintf("%s: dynamic stack allocation detected (mov sp, %v) - "+
+							"alloca() and VLAs are not supported because Go requires stack size at compile time",
+							function.Name, srcReg))
+					}
+				}
 			case arm64asm.AND:
 				// stack alignment
 				// this basically grows the stack, need to adjust for it
 				targetReg := inst.Args[0]
-				if targetReg == arm64asm.SP {
-					// allocating more stack space
+				if targetReg == arm64asm.RegSP(arm64asm.SP) {
+					// allocating more stack space via alignment
 					rewriteRequired = true
-					// TODO: definitely clear sign that we're doing something with the stack
 					complexManip = true
 				}
 			case arm64asm.SUB:
@@ -349,12 +363,21 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				srcReg := inst.Args[1]
 				if targetReg == arm64asm.RegSP(arm64asm.SP) || srcReg == arm64asm.RegSP(arm64asm.SP) {
 					complexManip = true
-					// probably allocating more stack space, either directly or through an extra register
-					imm := parts[3]
-					imm = strings.TrimPrefix(imm, "#")
-					if n, err := strconv.Atoi(imm); err == nil {
-						extraStack += n
-						rewriteRequired = true
+					// Check if this is dynamic stack allocation (register operand instead of immediate)
+					// This happens with alloca() or VLAs - impossible to handle since Go needs
+					// stack size known at compile time
+					if len(parts) > 3 {
+						imm := parts[3]
+						imm = strings.TrimPrefix(imm, "#")
+						if n, err := strconv.Atoi(imm); err == nil {
+							extraStack += n
+							rewriteRequired = true
+						} else {
+							// Not an immediate - this is dynamic stack allocation
+							panic(fmt.Sprintf("%s: dynamic stack allocation detected (sub sp, sp, %s) - "+
+								"alloca() and VLAs are not supported because Go requires stack size at compile time",
+								function.Name, parts[3]))
+						}
 					}
 				}
 			}
@@ -363,8 +386,14 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 	}
 
 	if !rewriteRequired {
+		// No complex stack manipulation detected
+		if extraStack == 0 {
+			// Leaf function - no stack usage at all, nothing to transform
+			return function
+		}
 		if extraStack != 16 {
-			panic("failed to detect stack manipulation")
+			// Unexpected pattern - only expect simple 16-byte frame (x29,x30 save)
+			panic(fmt.Sprintf("unexpected stack pattern: extraStack=%d, expected 0 or 16", extraStack))
 		}
 		// remove the frame pointer instructions
 		newLines := make([]Line, 0, len(function.Lines))
@@ -385,11 +414,51 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 
 		function.Lines = newLines
 	} else if !complexManip {
-		fnName := function.Name
-		if fnName == "" {
-			fnName = "[unknown]"
+		// First pass: check if x30 (LR) is used as a scratch register, and collect
+		// callee-saved STP/LDP and STR/LDR info to distinguish actual prologue/epilogue
+		// saves from data stores.
+		//
+		// The key insight is: only NOP callee-saved store/load pairs when BOTH exist
+		// with the same (registers, offset). This is sound because:
+		// - STP x21,x22 at offset 32 + LDP x21,x22 at offset 32 → register save → NOP
+		// - STP x21,x22 at offset 32 + LDP x0,x1 at offset 32 → data store → KEEP
+		// - STP x21,x22 at offset 16 + LDP x21,x22 at offset 32 → data movement → KEEP
+		// - STP x21,x22 with no matching LDP → might be data, keep to be safe
+		x30UsedAsScratch := false
+
+		// calleeSaveInfo tracks whether a (regs, offset) slot has stores and/or loads
+		type calleeSaveInfo struct {
+			hasStore bool
+			hasLoad  bool
 		}
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains stack manipulation, running experimental transform\n", fnName)
+		calleeSaveSlots := make(map[calleeSaveKey]*calleeSaveInfo)
+
+		for _, line := range function.Lines {
+			if len(line.Binary) == 0 {
+				continue // Skip labels, directives, etc.
+			}
+			inst := decodeArm64Line(line)
+
+			// Check for LR scratch usage (but LR save/restore doesn't count as scratch)
+			if !isLRStackSaveRestore(inst) && usesLRAsScratch(inst) {
+				x30UsedAsScratch = true
+			}
+
+			// Collect callee-saved store/load info
+			if key, ok := getCalleeSaveKey(inst); ok {
+				info := calleeSaveSlots[key]
+				if info == nil {
+					info = &calleeSaveInfo{}
+					calleeSaveSlots[key] = info
+				}
+				switch inst.Op {
+				case arm64asm.STP, arm64asm.STR:
+					info.hasStore = true
+				case arm64asm.LDP, arm64asm.LDR:
+					info.hasLoad = true
+				}
+			}
+		}
 
 		newLines := make([]Line, 0, len(function.Lines))
 		stackAllocator := map[string]int{}
@@ -402,32 +471,30 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				inst := decodeArm64Line(line)
 				doSkip := false
 
-				switch inst.Op {
-				case arm64asm.STP, arm64asm.LDP:
-					switch {
-					// go's ABI0 doesn't require callee-saved registers
-					case inst.Args[0] == arm64asm.X20 && inst.Args[1] == arm64asm.X19:
-						fallthrough
-					case inst.Args[0] == arm64asm.X22 && inst.Args[1] == arm64asm.X21:
-						fallthrough
-					case inst.Args[0] == arm64asm.X24 && inst.Args[1] == arm64asm.X23:
-						fallthrough
-					case inst.Args[0] == arm64asm.X26 && inst.Args[1] == arm64asm.X25:
-						fallthrough
-					case inst.Args[0] == arm64asm.X28 && inst.Args[1] == arm64asm.X27:
-						fallthrough
-					case inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30:
+				// Go's ABI0 doesn't require callee-saved registers
+				// Exception: if x30 is used as scratch, preserve its SP-based save/restore
+				if x30UsedAsScratch && isLRStackSaveRestore(inst) {
+					// Keep LR save/restore - it's used as scratch register
+					lineCpy := line
+					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				}
+
+				// Check if this is a callee-saved pair that should be NOPed.
+				// Only NOP when BOTH a store AND load exist for the same (regs, offset).
+				// This is the sound, conservative rule that avoids incorrectly NOPing data stores.
+				if key, ok := getCalleeSaveKey(inst); ok {
+					info := calleeSaveSlots[key]
+					if info != nil && info.hasStore && info.hasLoad {
 						doSkip = true
 					}
-				case arm64asm.STR, arm64asm.LDR:
-					switch inst.Args[0] {
-					// go's ABI0 doesn't require callee-saved registers
-					case arm64asm.X19, arm64asm.X20, arm64asm.X21, arm64asm.X22, arm64asm.X23, arm64asm.X24,
-						arm64asm.X25, arm64asm.X26, arm64asm.X27, arm64asm.X28, arm64asm.X29, arm64asm.X30:
-						doSkip = true
-					}
-				case arm64asm.MOV:
-					if inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
+				} else if inst.Op == arm64asm.MOV {
+					// NOP frame pointer save (mov x29, sp) and restore (mov sp, x29)
+					isFPSave := inst.Args[0] == arm64asm.RegSP(arm64asm.X29) && inst.Args[1] == arm64asm.RegSP(arm64asm.SP)
+					isFPRestore := inst.Args[0] == arm64asm.RegSP(arm64asm.SP) && inst.Args[1] == arm64asm.RegSP(arm64asm.X29)
+					if isFPSave || isFPRestore {
 						doSkip = true
 					}
 				}
@@ -494,9 +561,10 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 					lineCpy.Binary = nil
 					newLines = append(newLines, lineCpy)
 					continue
-				case arm64asm.AND, arm64asm.SUB:
+				case arm64asm.AND, arm64asm.SUB, arm64asm.ADD:
 					if len(inst.Args) > 2 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
-						// stack alloc/alignment writing back into RSP
+						// stack alloc/dealloc/alignment writing back into SP - NOP it
+						// (Go's assembler handles stack via the frame size declaration)
 						lineCpy := line
 						lineCpy.Disassembled = "NOP"
 						lineCpy.Binary = nil
@@ -528,29 +596,111 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 			function.LocalsSize = extraStack
 		}
 	} else {
-		fnName := function.Name
-		if fnName == "" {
-			fnName = "[unknown]"
-		}
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", fnName)
-		// go really doesn't like messing with SP, so we have two options:
-		// 1) skip instructions that change it
-		// 2) copy SP to BP and rewrite any instructions working with SP
-		//    to refer to BP instead
+		// Complex stack manipulation (arm64): NOP all callee-saved register save/restore
+		// and all SP-modifying instructions. Go manages stack via TEXT declaration.
 
-		// we still need to remove the prologue/epilogue instructions
+		// First pass: check if x30 (LR) is used as a scratch register, and collect
+		// callee-saved STP/LDP and STR/LDR info to distinguish actual prologue/epilogue
+		// saves from data stores.
+		//
+		// The key insight is: only NOP callee-saved store/load pairs when BOTH exist
+		// with the same (registers, offset). This is sound because:
+		// - STP x21,x22 at offset 32 + LDP x21,x22 at offset 32 → register save → NOP
+		// - STP x21,x22 at offset 32 + LDP x0,x1 at offset 32 → data store → KEEP
+		// - STP x21,x22 at offset 16 + LDP x21,x22 at offset 32 → data movement → KEEP
+		// - STP x21,x22 with no matching LDP → might be data, keep to be safe
+		x30UsedAsScratch := false
+
+		// calleeSaveInfo tracks whether a (regs, offset) slot has stores and/or loads
+		type calleeSaveInfo struct {
+			hasStore bool
+			hasLoad  bool
+		}
+		calleeSaveSlots := make(map[calleeSaveKey]*calleeSaveInfo)
+
+		for _, line := range function.Lines {
+			if len(line.Binary) == 0 {
+				continue // Skip labels, directives, etc.
+			}
+			inst := decodeArm64Line(line)
+
+			// Skip LR save/restore instructions - these don't count as "scratch use"
+			if isLRStackSaveRestore(inst) {
+				// But still collect callee-save info for LR
+				if key, ok := getCalleeSaveKey(inst); ok {
+					info := calleeSaveSlots[key]
+					if info == nil {
+						info = &calleeSaveInfo{}
+						calleeSaveSlots[key] = info
+					}
+					switch inst.Op {
+					case arm64asm.STP, arm64asm.STR:
+						info.hasStore = true
+					case arm64asm.LDP, arm64asm.LDR:
+						info.hasLoad = true
+					}
+				}
+				continue
+			}
+
+			// If this instruction writes to LR, it's using LR as scratch
+			if usesLRAsScratch(inst) {
+				x30UsedAsScratch = true
+			}
+
+			// Collect callee-saved store/load info
+			if key, ok := getCalleeSaveKey(inst); ok {
+				info := calleeSaveSlots[key]
+				if info == nil {
+					info = &calleeSaveInfo{}
+					calleeSaveSlots[key] = info
+				}
+				switch inst.Op {
+				case arm64asm.STP, arm64asm.STR:
+					info.hasStore = true
+				case arm64asm.LDP, arm64asm.LDR:
+					info.hasLoad = true
+				}
+			}
+		}
+		
 		newLines := make([]Line, 0, len(function.Lines))
 
 		for _, line := range function.Lines {
 			asm := line.Assembly
-			// detect everything that touches SP
 			if spInstruction.MatchString(asm) {
 				inst := decodeArm64Line(line)
 
-				// drop the frame pointer instructions
-				if ((inst.Op == arm64asm.STP || inst.Op == arm64asm.LDP) &&
-					inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30) ||
-					inst.Op == arm64asm.MOV && inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
+				// Go's ABI0 doesn't require callee-saved registers
+				// Exception: if x30 is used as scratch, preserve its SP-based save/restore
+				if x30UsedAsScratch && isLRStackSaveRestore(inst) {
+					// Keep LR save/restore - it's used as scratch register
+					lineCpy := line
+					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
+					lineCpy.Binary = nil
+					newLines = append(newLines, lineCpy)
+					continue
+				}
+
+				// Check if this is a callee-saved pair that should be NOPed.
+				// Only NOP when BOTH a store AND load exist for the same (regs, offset).
+				// This is the sound, conservative rule that avoids incorrectly NOPing data stores.
+				doSkip := false
+				if key, ok := getCalleeSaveKey(inst); ok {
+					info := calleeSaveSlots[key]
+					if info != nil && info.hasStore && info.hasLoad {
+						doSkip = true
+					}
+				} else if inst.Op == arm64asm.MOV {
+					// NOP frame pointer save (mov x29, sp) and restore (mov sp, x29)
+					isFPSave := inst.Args[0] == arm64asm.RegSP(arm64asm.X29) && inst.Args[1] == arm64asm.RegSP(arm64asm.SP)
+					isFPRestore := inst.Args[0] == arm64asm.RegSP(arm64asm.SP) && inst.Args[1] == arm64asm.RegSP(arm64asm.X29)
+					if isFPSave || isFPRestore {
+						doSkip = true
+					}
+				}
+
+				if doSkip {
 					lineCpy := line
 					lineCpy.Disassembled = "NOP"
 					lineCpy.Binary = nil
@@ -559,29 +709,32 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 				}
 
 				switch inst.Op {
-				case arm64asm.STP, arm64asm.STR:
+				case arm64asm.STP, arm64asm.LDP:
+					// Keep STP/LDP that wasn't matched (data stores, SIMD spills, etc.)
 					lineCpy := line
 					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
 					lineCpy.Binary = nil
 					newLines = append(newLines, lineCpy)
 					continue
-				case arm64asm.LDP, arm64asm.LDR:
+				case arm64asm.STR, arm64asm.LDR:
+					// Keep STR/LDR that wasn't matched (data stores, etc.)
 					lineCpy := line
 					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
 					lineCpy.Binary = nil
 					newLines = append(newLines, lineCpy)
 					continue
-				case arm64asm.AND, arm64asm.SUB:
-					if len(inst.Args) > 2 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
-						// stack alloc/alignment writing back into RSP
+				case arm64asm.AND, arm64asm.SUB, arm64asm.ADD:
+					// NOP any arithmetic that writes to SP (stack alloc/dealloc/alignment)
+					// Go's assembler manages stack frame via the declaration, not explicit SP manipulation
+					if len(inst.Args) > 0 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
 						lineCpy := line
 						lineCpy.Disassembled = "NOP"
 						lineCpy.Binary = nil
 						newLines = append(newLines, lineCpy)
 						continue
 					}
-					if inst.Op == arm64asm.SUB && inst.Args[1] == arm64asm.RegSP(arm64asm.SP) {
-						// we're allocating stack space, but we already did that, just do a MOVD
+					// Handle SUB that reads from SP to compute stack-relative address
+					if inst.Op == arm64asm.SUB && len(inst.Args) > 1 && inst.Args[1] == arm64asm.RegSP(arm64asm.SP) {
 						replInst := arm64asm.Inst{Op: arm64asm.MOV, Args: arm64asm.Args{inst.Args[0], inst.Args[1]}}
 						lineCpy := line
 						lineCpy.Disassembled = arm64asm.GoSyntax(replInst, 0, nil, nil)
@@ -604,6 +757,207 @@ func checkStackArm64(arch *config.Arch, function Function) Function {
 	}
 
 	return function
+}
+
+// isCalleeSavedRegPair returns true if the STP/LDP instruction saves/restores
+// a callee-saved register pair that Go's ABI0 doesn't require preserving.
+// Only matches SP-based prologue/epilogue patterns.
+func isCalleeSavedRegPair(inst arm64asm.Inst) bool {
+	if inst.Op != arm64asm.STP && inst.Op != arm64asm.LDP {
+		return false
+	}
+
+	// Only match SP-based prologue/epilogue patterns
+	if len(inst.Args) > 2 {
+		if mem, ok := inst.Args[2].(arm64asm.MemImmediate); ok {
+			if mem.Base != arm64asm.RegSP(arm64asm.SP) {
+				return false
+			}
+		}
+	}
+
+	r0, ok0 := inst.Args[0].(arm64asm.Reg)
+	r1, ok1 := inst.Args[1].(arm64asm.Reg)
+	if !ok0 || !ok1 {
+		return false
+	}
+
+	// Accept either ordering for robustness (compilers may use ascending or descending)
+	isPair := func(a, b, x, y arm64asm.Reg) bool {
+		return (a == x && b == y) || (a == y && b == x)
+	}
+
+	switch {
+	case isPair(r0, r1, arm64asm.X19, arm64asm.X20):
+		return true
+	case isPair(r0, r1, arm64asm.X21, arm64asm.X22):
+		return true
+	case isPair(r0, r1, arm64asm.X23, arm64asm.X24):
+		return true
+	case isPair(r0, r1, arm64asm.X25, arm64asm.X26):
+		return true
+	case isPair(r0, r1, arm64asm.X27, arm64asm.X28):
+		return true
+	case isPair(r0, r1, arm64asm.X29, arm64asm.X30):
+		return true
+	}
+	return false
+}
+
+// isCalleeSavedReg returns true if the register is a callee-saved register
+// that Go's ABI0 doesn't require preserving.
+func isCalleeSavedReg(arg arm64asm.Arg) bool {
+	switch arg {
+	case arm64asm.X19, arm64asm.X20, arm64asm.X21, arm64asm.X22, arm64asm.X23, arm64asm.X24,
+		arm64asm.X25, arm64asm.X26, arm64asm.X27, arm64asm.X28, arm64asm.X29, arm64asm.X30:
+		return true
+	}
+	return false
+}
+
+// calleeSaveKey identifies a callee-saved register store/load by its registers and stack offset.
+// Used to match STP/STR with corresponding LDP/LDR to distinguish prologue/epilogue saves
+// from data stores that happen to use callee-saved registers.
+type calleeSaveKey struct {
+	regs   string // Normalized register pair (e.g., "X19X20" or "X19" for single reg)
+	offset int    // Stack offset (0 for pre/post-index modes that implicitly use offset 0)
+}
+
+// getCalleeSaveKey extracts the key for matching callee-saved register store/load pairs.
+// Returns (key, true) if the instruction is a callee-saved STP/LDP/STR/LDR to SP.
+// Returns (zero, false) otherwise.
+func getCalleeSaveKey(inst arm64asm.Inst) (calleeSaveKey, bool) {
+	switch inst.Op {
+	case arm64asm.STP, arm64asm.LDP:
+		if !isCalleeSavedRegPair(inst) {
+			return calleeSaveKey{}, false
+		}
+		// Get registers in normalized order (smaller register first)
+		r0 := inst.Args[0].(arm64asm.Reg)
+		r1 := inst.Args[1].(arm64asm.Reg)
+		if r0 > r1 {
+			r0, r1 = r1, r0
+		}
+		regs := r0.String() + r1.String()
+
+		// Get offset from memory operand
+		mem := inst.Args[2].(arm64asm.MemImmediate)
+		offset := immFromMemImmediate(mem)
+		// For pre/post-index modes, the effective stack slot is at offset 0
+		// (pre-index: stores at [sp+imm], then sp+=imm; post-index: loads from [sp], then sp+=imm)
+		if mem.Mode == arm64asm.AddrPreIndex || mem.Mode == arm64asm.AddrPostIndex {
+			offset = 0
+		}
+
+		return calleeSaveKey{regs: regs, offset: offset}, true
+
+	case arm64asm.STR, arm64asm.LDR:
+		// Only match single-register STR/LDR for LR (x30).
+		//
+		// Clang saves x19-x28 via STP (paired) in prologues, so single-register
+		// STR/LDR of x19-x28 are typically intra-function spills (scratch register
+		// saves) that MUST be preserved. See ISSUE-incorrect-nop-stack-spills.md.
+		//
+		// LR (x30) is special - it's saved alone via STR when x29 is not used as
+		// frame pointer, or as part of STP x29,x30. We match STR/LDR of LR to
+		// detect x30 scratch usage.
+		if !isLR(inst.Args[0]) {
+			return calleeSaveKey{}, false
+		}
+		// Check if SP-based
+		mem, ok := inst.Args[1].(arm64asm.MemImmediate)
+		if !ok || mem.Base != arm64asm.RegSP(arm64asm.SP) {
+			return calleeSaveKey{}, false
+		}
+		reg := inst.Args[0].(arm64asm.Reg)
+		regs := reg.String()
+		offset := immFromMemImmediate(mem)
+		if mem.Mode == arm64asm.AddrPreIndex || mem.Mode == arm64asm.AddrPostIndex {
+			offset = 0
+		}
+
+		return calleeSaveKey{regs: regs, offset: offset}, true
+	}
+
+	return calleeSaveKey{}, false
+}
+
+// isLR returns true if the argument is the link register (x30 or w30).
+//
+// Per AAPCS64 (Procedure Call Standard for the Arm 64-bit Architecture):
+// - x30 is the Link Register (LR) holding the return address
+// - x30 is NOT callee-saved; the callee may use it as a scratch register
+// - If x30 is clobbered, it must be saved/restored to preserve the return address
+// - RET instruction implicitly uses x30 as the return address
+//
+// See: https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst
+// See: https://developer.arm.com/documentation/102374/latest/ (Table 2: General-purpose registers)
+func isLR(arg arm64asm.Arg) bool {
+	// Check for arm64asm.Reg type
+	if reg, ok := arg.(arm64asm.Reg); ok {
+		return reg == arm64asm.X30 || reg == arm64asm.W30
+	}
+	// Check for arm64asm.RegSP type (decoder uses this for X29/X30/W29/W30 in some contexts)
+	if regSP, ok := arg.(arm64asm.RegSP); ok {
+		return regSP == arm64asm.RegSP(arm64asm.X30) || regSP == arm64asm.RegSP(arm64asm.W30)
+	}
+	return false
+}
+
+// regPairContainsLR returns true if the STP/LDP instruction involves the link register.
+func regPairContainsLR(inst arm64asm.Inst) bool {
+	if inst.Op != arm64asm.STP && inst.Op != arm64asm.LDP {
+		return false
+	}
+	return isLR(inst.Args[0]) || isLR(inst.Args[1])
+}
+
+// memBaseIsSP returns true if the instruction's memory operand uses SP as base.
+func memBaseIsSP(inst arm64asm.Inst) bool {
+	for _, arg := range inst.Args {
+		if mem, ok := arg.(arm64asm.MemImmediate); ok {
+			return mem.Base == arm64asm.RegSP(arm64asm.SP)
+		}
+	}
+	return false
+}
+
+// isLRStackSaveRestore returns true if the instruction is saving/restoring LR to/from stack.
+func isLRStackSaveRestore(inst arm64asm.Inst) bool {
+	switch inst.Op {
+	case arm64asm.STP, arm64asm.LDP:
+		return regPairContainsLR(inst) && memBaseIsSP(inst)
+	case arm64asm.STR, arm64asm.LDR:
+		return isLR(inst.Args[0]) && memBaseIsSP(inst)
+	default:
+		return false
+	}
+}
+
+// usesLRAsScratch returns true if the instruction uses LR (x30/w30) as a general-purpose
+// scratch register. This excludes:
+// - RET: reads LR for return address (doesn't modify it)
+// - BL/BLR: writes LR as part of call semantics (not scratch use)
+// - STR/STP: reads LR to store to memory (doesn't write to it)
+// - LDR/LDP with LR as destination: handled by isLRStackSaveRestore
+//
+// If any instruction uses LR as scratch, we must preserve its prologue/epilogue save/restore.
+func usesLRAsScratch(inst arm64asm.Inst) bool {
+	if len(inst.Args) == 0 {
+		return false
+	}
+	switch inst.Op {
+	case arm64asm.RET:
+		return false // reads LR, doesn't write
+	case arm64asm.BL, arm64asm.BLR:
+		return false // call semantics, not scratch use
+	case arm64asm.STR, arm64asm.STP:
+		return false // stores register value to memory, doesn't write to register
+	case arm64asm.LDR, arm64asm.LDP:
+		return false // loads are stack save/restore, handled separately
+	}
+	// Most A64 instructions put the destination in Args[0]
+	return isLR(inst.Args[0])
 }
 
 func decodeAmd64Line(line Line) x86asm.Inst {
