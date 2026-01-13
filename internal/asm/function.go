@@ -38,6 +38,7 @@ var constSizes = map[string]int{
 	"long":  4,
 	"int":   4,
 	"quad":  8,
+	"xword": 8,
 }
 
 type GoFunction struct {
@@ -443,7 +444,7 @@ func (c *Const) Compile(arch *config.Arch) string {
 	return output.String()
 }
 
-var directiveParseRegex = regexp.MustCompile(`\.((zero|byte|short|hword|word|long|int|quad)\s+(-?\d+)(.*)|(ascii|asciz)\s+("(?:[\\].|[^\\"])+"))$`)
+var directiveParseRegex = regexp.MustCompile(`\.((zero|byte|short|hword|word|long|int|quad|xword)\s+(-?\d+)(.*)|(ascii|asciz)\s+("(?:[\\].|[^\\"])+"))$`)
 
 // parseConstLine parses a line in the constant section
 func parseConstLine(arch *config.Arch, constType string, line string) ConstLine {
