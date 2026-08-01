@@ -116,6 +116,9 @@ func removeBinaryInstructionsArm64(_ *config.Arch, function Function) Function {
 						line.Binary = nil
 					}
 				case strings.HasPrefix(dInst, "V") && dInst[1:] == inst:
+					if strings.Contains(line.Assembly, "#0") {
+						break
+					}
 					// some variants of VLD1R don't work, do not add below
 					switch dInst {
 					// allowlist

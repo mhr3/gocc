@@ -84,6 +84,11 @@ type StackLayout struct {
 
 	// Indices of lines with stack allocation (sub rsp, N)
 	AllocIndices map[int]bool
+
+	// PreserveCalleeSaved keeps the compiler's C-ABI save/restore pairs for
+	// helper functions that call each other using the C register convention.
+	PreserveCalleeSaved bool
+	ResolvedOffsets     map[int]int
 }
 
 // ArchStackInfo provides architecture-specific stack details
@@ -340,7 +345,8 @@ func (a *arm64StackInfo) HasStackMemoryRef(s string) bool { return a.spMemRegex.
 func (a *arm64StackInfo) IsCalleeSaved(reg string) bool {
 	switch strings.ToLower(reg) {
 	case "x19", "x20", "x21", "x22", "x23", "x24",
-		"x25", "x26", "x27", "x28", "x29", "x30":
+		"x25", "x26", "x27", "x28", "x29", "x30",
+		"d8", "d9", "d10", "d11", "d12", "d13", "d14", "d15":
 		return true
 	}
 	return false
@@ -479,10 +485,16 @@ func (a *arm64StackInfo) ParseStackOp(idx int, line Line) *StackOp {
 		}
 
 	case arm64asm.ADD:
-		// add sp, sp, #N (dealloc)
+		// add sp, sp, #N (dealloc), or add x29, sp, #N (frame setup)
 		if len(inst.Args) >= 3 {
 			dst := inst.Args[0]
 			src := inst.Args[1]
+			if dst == arm64asm.RegSP(arm64asm.X29) && src == arm64asm.RegSP(arm64asm.SP) && len(fields) > 3 {
+				immStr := strings.TrimPrefix(fields[3], "#")
+				if n, err := strconv.ParseInt(immStr, 0, 64); err == nil {
+					return &StackOp{Kind: StackOpFrameSetup, Offset: int(n), LineIndex: idx}
+				}
+			}
 			if dst == arm64asm.RegSP(arm64asm.SP) && src == arm64asm.RegSP(arm64asm.SP) {
 				if len(fields) > 3 {
 					immStr := strings.TrimPrefix(fields[3], "#")
@@ -579,11 +591,19 @@ func getArchStackInfo(arch *config.Arch) ArchStackInfo {
 }
 
 // analyzeStackLayout performs the first pass analysis to build StackLayout
-func analyzeStackLayout(archInfo ArchStackInfo, lines []Line) *StackLayout {
+func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSaved bool) *StackLayout {
 	layout := &StackLayout{
-		FrameSetupOffsets: make(map[int]int),
-		NopIndices:        make(map[int]bool),
-		AllocIndices:      make(map[int]bool),
+		FrameSetupOffsets:   make(map[int]int),
+		NopIndices:          make(map[int]bool),
+		AllocIndices:        make(map[int]bool),
+		PreserveCalleeSaved: preserveCalleeSaved,
+		ResolvedOffsets:     make(map[int]int),
+	}
+	removableSave := func(op *StackOp) bool {
+		if !stackOpCalleeSaved(archInfo, op) {
+			return false
+		}
+		return !layout.PreserveCalleeSaved
 	}
 
 	// Parse all stack operations
@@ -615,18 +635,20 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line) *StackLayout {
 	// Analyze the operations. Track where ARM64 establishes X29 so it can be
 	// recreated relative to the fixed Go frame if the body actually uses it.
 	frameSetupDepths := make(map[int]int)
+	frameSetupOriginalOffsets := make(map[int]int)
 	for _, op := range ops {
 		switch op.Kind {
 		case StackOpFrameSetup:
 			layout.FramePointerUsed = true
 			frameSetupDepths[op.LineIndex] = layout.LocalsSize
+			frameSetupOriginalOffsets[op.LineIndex] = op.Offset
 			layout.NopIndices[op.LineIndex] = true
 
 		case StackOpFrameTeardown:
 			layout.NopIndices[op.LineIndex] = true
 
 		case StackOpPush:
-			isCalleeSaved := stackOpCalleeSaved(archInfo, op)
+			isCalleeSaved := removableSave(op)
 
 			layout.SavedRegs = append(layout.SavedRegs, SavedReg{
 				Reg:           op.Reg,
@@ -654,7 +676,7 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line) *StackLayout {
 			}
 
 		case StackOpPop:
-			isCalleeSaved := stackOpCalleeSaved(archInfo, op)
+			isCalleeSaved := removableSave(op)
 
 			// If this is a callee-saved register pop, NOP it
 			if isCalleeSaved {
@@ -662,7 +684,7 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line) *StackLayout {
 			}
 
 		case StackOpSpill:
-			if spillKeys[stackSlotKey(op)] && reloadKeys[stackSlotKey(op)] {
+			if spillKeys[stackSlotKey(op)] && reloadKeys[stackSlotKey(op)] && removableSave(op) {
 				layout.SavedRegs = append(layout.SavedRegs, SavedReg{
 					Reg:           op.Reg,
 					IsCalleeSaved: true,
@@ -677,7 +699,7 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line) *StackLayout {
 			}
 
 		case StackOpReload:
-			if spillKeys[stackSlotKey(op)] && reloadKeys[stackSlotKey(op)] {
+			if spillKeys[stackSlotKey(op)] && reloadKeys[stackSlotKey(op)] && removableSave(op) {
 				layout.NopIndices[op.LineIndex] = true
 			}
 
@@ -713,7 +735,7 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line) *StackLayout {
 		if framePointerUsedByBody {
 			for lineIndex, setupDepth := range frameSetupDepths {
 				layout.NopIndices[lineIndex] = false
-				layout.FrameSetupOffsets[lineIndex] = layout.LocalsSize - setupDepth
+				layout.FrameSetupOffsets[lineIndex] = layout.LocalsSize - setupDepth + frameSetupOriginalOffsets[lineIndex]
 			}
 		}
 	}
@@ -761,6 +783,43 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line) *StackLayout {
 		layout.GoFrameSize += layout.LocalsSize
 	}
 
+	// Resolve every compiler stack reference against the final fixed Go frame.
+	depth := 0
+	pushOffsets := make(map[string]int)
+	spillOffsets := make(map[string]int)
+	registerKey := func(op *StackOp) string { return op.Reg + "/" + op.Reg2 }
+	for _, op := range ops {
+		switch op.Kind {
+		case StackOpPush:
+			depth += int(op.Immediate)
+			layout.ResolvedOffsets[op.LineIndex] = layout.LocalsSize - depth
+			pushOffsets[registerKey(op)] = layout.ResolvedOffsets[op.LineIndex]
+		case StackOpSpill:
+			layout.ResolvedOffsets[op.LineIndex] = layout.LocalsSize - depth + op.Offset
+			if spillKeys[stackSlotKey(op)] && reloadKeys[stackSlotKey(op)] {
+				spillOffsets[stackSlotKey(op)] = layout.ResolvedOffsets[op.LineIndex]
+			}
+		case StackOpReload:
+			if offset, ok := spillOffsets[stackSlotKey(op)]; ok {
+				layout.ResolvedOffsets[op.LineIndex] = offset
+			} else {
+				layout.ResolvedOffsets[op.LineIndex] = layout.LocalsSize - depth + op.Offset
+			}
+		case StackOpAlloc:
+			depth += int(op.Immediate)
+		case StackOpDealloc:
+			// Epilogues are often duplicated on multiple control-flow paths. Keep
+			// the body depth fixed; restore operations resolve through their
+			// matching prologue save slot below.
+		case StackOpPop:
+			if offset, ok := pushOffsets[registerKey(op)]; ok {
+				layout.ResolvedOffsets[op.LineIndex] = offset
+			} else {
+				layout.ResolvedOffsets[op.LineIndex] = layout.LocalsSize - depth
+			}
+		}
+	}
+
 	return layout
 }
 
@@ -785,6 +844,38 @@ func (s *StackLayout) FormatStackRef(cOffset int, name string) string {
 }
 
 var arm64RSPMemoryRef = regexp.MustCompile(`[+-]?[0-9]*\(RSP\)`)
+var arm64RSPBaseAdd = regexp.MustCompile(`^ADD \$([0-9]+), RSP, (R[0-9]+)$`)
+var arm64RSPBaseMove = regexp.MustCompile(`^MOVD RSP, (R[0-9]+)$`)
+
+// shiftArm64CStackRef keeps translated C locals above the linkage word that
+// cmd/asm reserves at 0(RSP) for LR whenever a Go assembly function has a
+// frame. C sees its post-prologue SP as the bottom of its local area, whereas
+// Go's hardware RSP still points at that linkage word.
+func shiftArm64CStackRef(line Line, bias int) Line {
+	if bias == 0 || !strings.Contains(line.Disassembled, "RSP") {
+		return line
+	}
+
+	rewritten := arm64RSPMemoryRef.ReplaceAllStringFunc(line.Disassembled, func(ref string) string {
+		offsetText := strings.TrimSuffix(ref, "(RSP)")
+		offset := 0
+		if offsetText != "" {
+			offset, _ = strconv.Atoi(offsetText)
+		}
+		return fmt.Sprintf("%d(RSP)", offset+bias)
+	})
+	if match := arm64RSPBaseAdd.FindStringSubmatch(rewritten); match != nil {
+		offset, _ := strconv.Atoi(match[1])
+		rewritten = fmt.Sprintf("ADD $%d, RSP, %s", offset+bias, match[2])
+	} else if match := arm64RSPBaseMove.FindStringSubmatch(rewritten); match != nil {
+		rewritten = fmt.Sprintf("ADD $%d, RSP, %s", bias, match[1])
+	}
+	if rewritten != line.Disassembled {
+		line.Disassembled = rewritten
+		line.Binary = nil
+	}
+	return line
+}
 
 func rewriteArm64Writeback(op *StackOp, line Line, layout *StackLayout) Line {
 	inst := decodeArm64Line(line)
@@ -803,6 +894,45 @@ func rewriteArm64Writeback(op *StackOp, line Line, layout *StackLayout) Line {
 	line.Disassembled = disassembled
 	line.Binary = nil
 	return line
+}
+
+func arm64SavedRegMove(reg string) (goReg, store, load string, size int) {
+	reg = strings.ToLower(reg)
+	switch reg[0] {
+	case 'd':
+		return "F" + reg[1:], "FMOVD", "FMOVD", 8
+	case 'q':
+		return "F" + reg[1:], "FMOVQ", "FMOVQ", 16
+	case 's':
+		return "F" + reg[1:], "FMOVS", "FMOVS", 4
+	case 'w':
+		return "R" + reg[1:], "MOVW", "MOVW", 4
+	default:
+		return "R" + reg[1:], "MOVD", "MOVD", 8
+	}
+}
+
+func rewriteArm64SavedPair(op *StackOp, line Line, layout *StackLayout) []Line {
+	offset := layout.ResolvedOffsets[op.LineIndex]
+	regs := []string{op.Reg}
+	if op.Reg2 != "" {
+		regs = append(regs, op.Reg2)
+	}
+	result := make([]Line, 0, len(regs))
+	for i, reg := range regs {
+		goReg, store, load, size := arm64SavedRegMove(reg)
+		instruction := fmt.Sprintf("%s %s, %d(RSP)", store, goReg, offset)
+		if op.Kind == StackOpPop || op.Kind == StackOpReload {
+			instruction = fmt.Sprintf("%s %d(RSP), %s", load, offset, goReg)
+		}
+		rewritten := Line{Assembly: line.Assembly, Disassembled: instruction}
+		if i == 0 {
+			rewritten.Labels = line.Labels
+		}
+		result = append(result, rewritten)
+		offset += size
+	}
+	return result
 }
 
 // rewriteStackOps performs the second pass to rewrite stack operations
@@ -839,6 +969,10 @@ func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLay
 				}
 
 			case StackOpPush:
+				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
+					newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
+					continue
+				}
 				// Non-callee-saved push: rewrite to MOV
 				if !stackOpCalleeSaved(archInfo, op) {
 					if archInfo.Name() == "arm64" && op.Immediate > 0 {
@@ -863,6 +997,10 @@ func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLay
 				}
 
 			case StackOpPop:
+				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
+					newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
+					continue
+				}
 				// Non-callee-saved pop: rewrite to MOV
 				if !stackOpCalleeSaved(archInfo, op) {
 					if archInfo.Name() == "arm64" && op.Offset > 0 {
@@ -886,6 +1024,11 @@ func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLay
 					continue
 				}
 
+			case StackOpSpill, StackOpReload:
+				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
+					newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
+					continue
+				}
 			}
 		}
 
@@ -915,6 +1058,14 @@ func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLay
 
 	function.Lines = newLines
 	function.LocalsSize = layout.GoFrameSize
+	if archInfo.Name() == "arm64" && layout.GoFrameSize > 0 {
+		for i := range function.Lines {
+			// cmd/asm adds a 16-byte linkage/alignment area to framed ARM64
+			// functions. Keeping the emulated C SP above both words also retains
+			// the 16-byte alignment assumed by Clang's vector spills.
+			function.Lines[i] = shiftArm64CStackRef(function.Lines[i], 2*archInfo.PtrSize())
+		}
+	}
 
 	return function
 }
@@ -924,7 +1075,7 @@ func checkStackUnified(arch *config.Arch, function Function) Function {
 	archInfo := getArchStackInfo(arch)
 
 	// Pass 1: Analyze stack layout
-	layout := analyzeStackLayout(archInfo, function.Lines)
+	layout := analyzeStackLayout(archInfo, function.Lines, function.Internal || function.PreserveCABI)
 
 	// Check if we need complex rewrite
 	needsComplexRewrite := false

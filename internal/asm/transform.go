@@ -23,7 +23,12 @@ func transformFunction(arch *config.Arch, function Function) Function {
 	function = storeReturnValue(arch, function)
 
 	// weird type of transform, but we'll keep it here for now
-	function = removeBinaryInstructions(arch, function)
+	if !(arch != nil && arch.Name == "arm64" && function.Internal) {
+		// Keep raw encodings for the hidden C frames of internal ARM64 helpers.
+		// In particular, exposing SUB/ADD RSP to cmd/asm makes the linker treat
+		// these NOFRAME helpers as ordinary Go nosplit frames.
+		function = removeBinaryInstructions(arch, function)
+	}
 
 	return function
 }
@@ -87,6 +92,14 @@ func checkStackManipulation(arch *config.Arch, function Function) Function {
 	case "amd64":
 		return checkStackUnified(arch, function)
 	case "arm64":
+		if function.Internal {
+			// Internal C-ABI helpers keep Clang's exact frame. A Go prologue would
+			// both clobber C callee-saved registers and attempt stack growth without
+			// knowing that the arguments live in registers. The public translated
+			// entry point remains a normal, stack-splitting Go frame.
+			function.LocalsSize = 0
+			return function
+		}
 		return checkStackUnified(arch, function)
 	}
 
