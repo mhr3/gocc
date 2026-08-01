@@ -1175,10 +1175,16 @@ func shiftAmd64CStackRef(line Line, bias int) Line {
 
 func reserveInternalStackFrames(arch *config.Arch, functions []Function) []Function {
 	maxVisibleLocals := 0
+	internalCount := 0
 	for i := range functions {
-		if !functions[i].Internal && functions[i].LocalsSize > maxVisibleLocals {
+		if functions[i].Internal {
+			internalCount++
+		} else if functions[i].LocalsSize > maxVisibleLocals {
 			maxVisibleLocals = functions[i].LocalsSize
 		}
+	}
+	if internalCount == 0 {
+		return functions
 	}
 
 	linkageSize := 0
@@ -1190,7 +1196,7 @@ func reserveInternalStackFrames(arch *config.Arch, functions []Function) []Funct
 		// recursion is rejected, so the number of internal functions is a safe
 		// upper bound for call depth. Guarding every slot by that amount keeps
 		// a helper reached at different depths from overlapping adjacent slots.
-		depthGuard = 8 * (len(functions) + 1)
+		depthGuard = 8 * internalCount
 	}
 	helperBase := maxVisibleLocals + linkageSize + depthGuard
 	reserved := 0
