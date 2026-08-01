@@ -580,7 +580,8 @@ func TestReserveInternalStackFramesLeavesLeafFunctionsUnchanged(t *testing.T) {
 				{Name: "another_leaf"},
 			}
 
-			modified := reserveInternalStackFrames(arch, functions)
+			modified, err := reserveInternalStackFrames(arch, functions)
+			require.NoError(t, err)
 
 			assert.Equal(t, 0, modified[0].LocalsSize)
 			assert.Equal(t, 32, modified[1].LocalsSize)
@@ -591,7 +592,14 @@ func TestReserveInternalStackFramesLeavesLeafFunctionsUnchanged(t *testing.T) {
 
 func TestReserveInternalStackFramesArm64(t *testing.T) {
 	functions := []Function{
-		{Name: "entry", LocalsSize: 64},
+		{
+			Name:       "entry",
+			LocalsSize: 64,
+			Lines: []Line{
+				{Disassembled: "CALL helper_one<>(SB)"},
+				{Disassembled: "CALL helper_two<>(SB)"},
+			},
+		},
 		{
 			Name:            "helper_one",
 			Internal:        true,
@@ -612,7 +620,8 @@ func TestReserveInternalStackFramesArm64(t *testing.T) {
 		},
 	}
 
-	modified := reserveInternalStackFrames(config.ARM64(), functions)
+	modified, err := reserveInternalStackFrames(config.ARM64(), functions)
+	require.NoError(t, err)
 
 	// 64 bytes of visible locals plus both disjoint helper slots.
 	assert.Equal(t, 144, modified[0].LocalsSize)
@@ -625,7 +634,7 @@ func TestReserveInternalStackFramesArm64(t *testing.T) {
 
 func TestReserveInternalStackFramesAmd64RebasesStackAddress(t *testing.T) {
 	functions := []Function{
-		{Name: "entry", LocalsSize: 64},
+		{Name: "entry", LocalsSize: 64, Lines: []Line{{Disassembled: "CALL helper<>(SB)"}}},
 		{
 			Name:            "helper",
 			Internal:        true,
@@ -637,7 +646,8 @@ func TestReserveInternalStackFramesAmd64RebasesStackAddress(t *testing.T) {
 		},
 	}
 
-	modified := reserveInternalStackFrames(config.AMD64(), functions)
+	modified, err := reserveInternalStackFrames(config.AMD64(), functions)
+	require.NoError(t, err)
 
 	// A depth guard separates each flattened helper slot from CALL return
 	// addresses. Both stack memory and pointers to a C local must receive the
@@ -649,9 +659,89 @@ func TestReserveInternalStackFramesAmd64RebasesStackAddress(t *testing.T) {
 	assert.Empty(t, modified[1].Lines[1].Binary)
 }
 
+func TestAssignInternalFunctionOwnersAcceptsDisjointGraphs(t *testing.T) {
+	functions := []Function{
+		{Name: "FN1", Lines: []Line{{Disassembled: "CALL A<>(SB)"}}},
+		{Name: "A", Internal: true, Lines: []Line{{Disassembled: "CALL D<>(SB)"}}},
+		{Name: "D", Internal: true, Lines: []Line{{Disassembled: "CALL C<>(SB)"}}},
+		{Name: "C", Internal: true},
+		{Name: "FN2", Lines: []Line{{Disassembled: "CALL B<>(SB)"}}},
+		{Name: "B", Internal: true, Lines: []Line{{Disassembled: "CALL E<>(SB)"}}},
+		{Name: "E", Internal: true},
+	}
+
+	owners, err := assignInternalFunctionOwners(functions)
+	require.NoError(t, err)
+	assert.Equal(t, []int{-1, 0, 0, 0, -1, 4, 4}, owners)
+}
+
+func TestReserveInternalStackFramesUsesPerRootArenas(t *testing.T) {
+	functions := []Function{
+		{Name: "FN1", LocalsSize: 16, Lines: []Line{{Disassembled: "CALL A<>(SB)"}}},
+		{
+			Name:            "A",
+			Internal:        true,
+			HiddenStackSize: 32,
+			Lines:           []Line{{Disassembled: "MOVQ AX, 0(SP)"}},
+		},
+		{Name: "FN2", Lines: []Line{{Disassembled: "CALL B<>(SB)"}}},
+		{
+			Name:            "B",
+			Internal:        true,
+			HiddenStackSize: 64,
+			Lines:           []Line{{Disassembled: "MOVQ BX, 0(SP)"}},
+		},
+	}
+
+	modified, err := reserveInternalStackFrames(config.AMD64(), functions)
+	require.NoError(t, err)
+	assert.Equal(t, 72, modified[0].LocalsSize)
+	assert.Equal(t, "MOVQ AX, 24(SP)", modified[1].Lines[0].Disassembled)
+	assert.Equal(t, 88, modified[2].LocalsSize)
+	assert.Equal(t, "MOVQ BX, 8(SP)", modified[3].Lines[0].Disassembled)
+}
+
+func TestAssignInternalFunctionOwnersRejectsSharedHelper(t *testing.T) {
+	functions := []Function{
+		{Name: "FN1", Lines: []Line{{Disassembled: "CALL A<>(SB)"}, {Disassembled: "CALL B<>(SB)"}}},
+		{Name: "A", Internal: true, Lines: []Line{{Disassembled: "CALL D<>(SB)"}}},
+		{Name: "D", Internal: true, Lines: []Line{{Disassembled: "CALL C<>(SB)"}}},
+		{Name: "C", Internal: true},
+		{Name: "FN2", Lines: []Line{{Disassembled: "CALL B<>(SB)"}}},
+		{Name: "B", Internal: true, Lines: []Line{{Disassembled: "CALL E<>(SB)"}}},
+		{Name: "E", Internal: true},
+	}
+
+	_, err := assignInternalFunctionOwners(functions)
+	require.EqualError(t, err,
+		`internal helper "B" is reachable from multiple exported functions: FN1 -> B; FN2 -> B`)
+}
+
+func TestApplyTransformsRejectsSharedInternalHelper(t *testing.T) {
+	functions := []Function{
+		{Name: "FN1", Lines: []Line{{Disassembled: "CALL shared<>(SB)"}}},
+		{Name: "FN2", Lines: []Line{{Disassembled: "CALL shared<>(SB)"}}},
+		{Name: "shared", Internal: true},
+	}
+
+	_, err := ApplyTransforms(config.AMD64(), functions)
+	require.EqualError(t, err,
+		`internal helper "shared" is reachable from multiple exported functions: FN1 -> shared; FN2 -> shared`)
+}
+
+func TestAssignInternalFunctionOwnersRejectsExportedCallee(t *testing.T) {
+	functions := []Function{
+		{Name: "FN1", Lines: []Line{{Disassembled: "CALL FN2<>(SB)"}}},
+		{Name: "FN2"},
+	}
+
+	_, err := assignInternalFunctionOwners(functions)
+	require.EqualError(t, err, `C-ABI call from "FN1" to exported function "FN2" is unsupported`)
+}
+
 func TestApplyTransformsFlattensInternalArm64Frame(t *testing.T) {
 	functions := []Function{
-		{Name: "entry"},
+		{Name: "entry", Lines: []Line{{Disassembled: "CALL helper<>(SB)"}}},
 		{
 			Name:     "helper",
 			Internal: true,

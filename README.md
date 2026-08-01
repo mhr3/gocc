@@ -69,7 +69,8 @@ This tool does not support most of the C features, it's not a replacement for C/
 - Only supports C code that can be compiled by `clang`.
 - Does not support C++ code or templates for now.
 - Calls to external C libraries are not supported. Internal helper calls require
-  `--with-internal-functions`; recursive helpers are rejected.
+  `--with-internal-functions`; recursive helpers and helpers shared by multiple
+  exported functions are rejected.
 - No dynamic memory allocation.
 - Currently limited to 6 arguments per function.
 

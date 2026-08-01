@@ -17,7 +17,11 @@ func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error
 		functions[i] = transformFunction(arch, function)
 	}
 	if arch != nil {
-		functions = reserveInternalStackFrames(arch, functions)
+		var err error
+		functions, err = reserveInternalStackFrames(arch, functions)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return functions, nil
