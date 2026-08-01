@@ -337,7 +337,7 @@ func TestArm64PreindexedDataStoreUsesFixedGoFrame(t *testing.T) {
 	require.Equal(t, 16, modified.LocalsSize)
 	assert.Empty(t, modified.Lines[0].Binary)
 	assert.Contains(t, modified.Lines[0].Disassembled, "(ZR, ZR)")
-	assert.Contains(t, modified.Lines[0].Disassembled, "0(RSP)")
+	assert.Contains(t, modified.Lines[0].Disassembled, "16(RSP)")
 	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
 }
 
@@ -361,7 +361,7 @@ func TestArm64FramePointerIsRebasedToGoFrame(t *testing.T) {
 	require.Equal(t, 80, modified.LocalsSize)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
-	assert.Equal(t, "ADD $48, RSP, R29", modified.Lines[2].Disassembled)
+	assert.Equal(t, "ADD $64, RSP, R29", modified.Lines[2].Disassembled)
 	assert.Equal(t, testFn.Lines[4].Binary, modified.Lines[4].Binary)
 	assert.Equal(t, "NOP", modified.Lines[6].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[7].Disassembled)
@@ -440,7 +440,7 @@ func TestUnifiedStackAnalysisAmd64(t *testing.T) {
 	}
 
 	archInfo := newAmd64StackInfo()
-	layout := analyzeStackLayout(archInfo, testFn.Lines)
+	layout := analyzeStackLayout(archInfo, testFn.Lines, false)
 
 	assert.True(t, layout.FramePointerUsed)
 	assert.Equal(t, 32, layout.LocalsSize)
@@ -464,7 +464,7 @@ func TestUnifiedStackAnalysisArm64(t *testing.T) {
 	}
 
 	archInfo := newArm64StackInfo()
-	layout := analyzeStackLayout(archInfo, testFn.Lines)
+	layout := analyzeStackLayout(archInfo, testFn.Lines, false)
 
 	assert.True(t, layout.FramePointerUsed)
 	assert.True(t, layout.NopIndices[0]) // stp x29, x30

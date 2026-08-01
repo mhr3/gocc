@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/mhr3/gocc/internal/config"
@@ -30,6 +31,39 @@ type Compiler struct {
 	arch    *config.Arch
 	clang   string
 	version string
+}
+
+var arm64X29Register = regexp.MustCompile(`\b([xw])29\b`)
+var arm64X20Register = regexp.MustCompile(`\b([xw])20\b`)
+
+func (c *Compiler) remapArm64FrameRegister(assembly string, args []string) error {
+	if c.arch.Name != "arm64" || !slicesContains(args, "-fomit-frame-pointer") ||
+		!slicesContains(args, "-mno-stackrealign") {
+		return nil
+	}
+	contents, err := os.ReadFile(assembly)
+	if err != nil {
+		return err
+	}
+	// Go owns R29 for its frame chain. Clang's ARM64 backend can still use X29
+	// as a general callee-saved register after omitting the C frame pointer, so
+	// move that allocation to X25. Callers that enable this rewrite reserve X25
+	// from Clang, leaving it available as a normal (non-Go-reserved) register.
+	contents = arm64X29Register.ReplaceAll(contents, []byte("${1}25"))
+	// cmd/asm uses R20 while establishing larger ARM64 frames, before the C
+	// body has a chance to preserve the incoming C-ABI value. X26 is also
+	// reserved by callers of this mode, so move Clang's X20 allocation there.
+	contents = arm64X20Register.ReplaceAll(contents, []byte("${1}26"))
+	return os.WriteFile(assembly, contents, 0o644)
+}
+
+func slicesContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // NewCompiler creates a new compiler.
@@ -62,8 +96,8 @@ func (c *Compiler) Version() string {
 }
 
 // compile compiles the C source file to assembly and then to object.
-func (c *Compiler) Compile(source, assembly, object string, args ...string) error {
-	args = append(args,
+func (c *Compiler) Compile(source, assembly, object string, compilerArgs ...string) error {
+	defaults := []string{
 		"-mno-red-zone",
 		"-mstackrealign",
 		"-mllvm",
@@ -74,8 +108,11 @@ func (c *Compiler) Compile(source, assembly, object string, args ...string) erro
 		"-fno-jump-tables",
 		"-ffast-math",
 		"-Wno-unused-command-line-argument",
-	)
-	args = append(args, c.arch.ClangFlags...)
+	}
+	// User options come last so they can intentionally override gocc's
+	// conservative defaults (for example -mno-stackrealign on ARM64).
+	args := append(defaults, c.arch.ClangFlags...)
+	args = append(args, compilerArgs...)
 
 	compileOutput, err := runCommandAndLog(c.clang, append([]string{"-S", "-c", source, "-o", assembly}, args...)...)
 	// Compile to assembly first
@@ -84,6 +121,9 @@ func (c *Compiler) Compile(source, assembly, object string, args ...string) erro
 	}
 	if compileOutput != "" {
 		fmt.Fprintln(os.Stderr, compileOutput)
+	}
+	if err := c.remapArm64FrameRegister(assembly, args); err != nil {
+		return err
 	}
 
 	// Use clang to compile to object

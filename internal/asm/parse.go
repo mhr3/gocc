@@ -240,6 +240,10 @@ func finalizeConstant(constant *Const) Const {
 
 // ParseClangObjectDump parses the output of objdump file and returns a list of functions
 func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, dec Plan9Decoder) error {
+	functionNames := make(map[string]struct{}, len(functions))
+	for _, function := range functions {
+		functionNames[function.Name] = struct{}{}
+	}
 	var (
 		functionName string
 		functionIdx  int
@@ -293,7 +297,20 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 			case "arm64":
 				switch {
 				case strings.HasPrefix(assembly, "bl") && strings.TrimSpace(assembly[2:3]) == "":
-					return fmt.Errorf("unsupported CALL instruction: \"%s\"", assembly)
+					sourceFields := strings.Fields(current.Lines[lineNumber].Assembly)
+					if len(sourceFields) != 2 || sourceFields[0] != "bl" {
+						return fmt.Errorf("unable to resolve CALL instruction: %q", current.Lines[lineNumber].Assembly)
+					}
+					target := strings.TrimPrefix(sourceFields[1], "_")
+					if _, ok := functionNames[target]; !ok {
+						return fmt.Errorf("unsupported external CALL target %q", target)
+					}
+					current.Lines[lineNumber].Binary = nil
+					current.Lines[lineNumber].Disassembled = fmt.Sprintf("CALL %s<>(SB)", target)
+					lineNumber++
+					continue
+				case strings.HasPrefix(assembly, "blr"):
+					return fmt.Errorf("unsupported indirect CALL instruction: %q", assembly)
 				case strings.HasPrefix(assembly, "nop"):
 					continue
 				}

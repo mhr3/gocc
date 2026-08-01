@@ -71,7 +71,7 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 	fmt.Fprintf(&builder, "// Target architecture : %s\n", arch.Name)
 	fmt.Fprintf(&builder, "// Compiler options    : %s\n", collectFlags())
 
-	builder.WriteString("\n#include \"textflag.h\"\n\n")
+	builder.WriteString("\n#include \"textflag.h\"\n#include \"funcdata.h\"\n\n")
 	for _, function := range functions {
 		for i, c := range function.Consts {
 			if i != 0 {
@@ -98,9 +98,11 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 			}
 		}
 
-		name := function.Name
-		if function.GoFunc.Expr != nil {
-			name = function.GoFunc.Name
+		name := "·" + function.Name
+		if function.Internal {
+			name = function.Name + "<>"
+		} else if function.GoFunc.Expr != nil {
+			name = "·" + function.GoFunc.Name
 		}
 		paramsSize, offsets := function.ParamsSize(arch)
 		retSize := 0
@@ -108,10 +110,22 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 			retSize = function.Ret.Size()
 		}
 		textAttrs := "NOSPLIT"
-		if function.LocalsSize > 0 {
+		if function.Internal && arch.Name == "arm64" {
+			textAttrs = "NOSPLIT|NOFRAME"
+		}
+		// Large internal kernels must establish their own stack-growth point
+		// before taking addresses of their C-local scratch. Smaller callees stay
+		// NOSPLIT so those addresses remain valid for the duration of the call.
+		if function.LocalsSize > 512 || (function.LocalsSize > 0 && !function.Internal) {
 			textAttrs = "0"
 		}
-		builder.WriteString(fmt.Sprintf("\nTEXT ·%s(SB),%s,$%d-%d\n", name, textAttrs, function.LocalsSize, paramsSize+retSize))
+		builder.WriteString(fmt.Sprintf("\nTEXT %s(SB),%s,$%d-%d\n", name, textAttrs, function.LocalsSize, paramsSize+retSize))
+		if function.LocalsSize > 0 {
+			// The translated C stack slots are either scalars or transient
+			// pointers whose lifetime is bounded by the assembly call. Tell the
+			// runtime not to scan them while the function is stopped at a CALL.
+			builder.WriteString("\tNO_LOCAL_POINTERS\n")
+		}
 		genRegIdx, floatRegIdx := 0, 0
 		for i, param := range function.Params {
 			pSz := int8(param.Size())

@@ -27,6 +27,7 @@ import (
 func init() {
 	command.PersistentFlags().StringP("output", "o", "", "output directory of generated files")
 	command.PersistentFlags().StringSliceP("machine-option", "m", nil, "machine option for clang")
+	command.PersistentFlags().StringSlice("compiler-option", nil, "raw compiler option for clang")
 	command.PersistentFlags().IntP("optimize-level", "O", 0, "optimization level for clang")
 	command.PersistentFlags().StringP("arch", "a", "amd64", "target architecture to use")
 	command.PersistentFlags().StringP("package", "p", "", "go package name to use for the stubs")
@@ -60,6 +61,8 @@ var command = &cobra.Command{
 		for _, m := range machineOptions {
 			options = append(options, "-m"+m)
 		}
+		compilerOptions, _ := cmd.PersistentFlags().GetStringSlice("compiler-option")
+		options = append(options, compilerOptions...)
 
 		// Load the architecture
 		target, _ := cmd.PersistentFlags().GetString("arch")

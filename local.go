@@ -96,6 +96,11 @@ func (t *Local) Translate() error {
 	}
 
 	foundMapping := false
+	preserveCABI := slices.Contains(t.Options, "-fomit-frame-pointer")
+	annotatedNames := make(map[string]struct{}, len(functions))
+	for _, function := range functions {
+		annotatedNames[function.Name] = struct{}{}
+	}
 	// Map the machine code to the assembly one
 	for _, v := range assembly {
 		assemblyName := v.Name
@@ -110,12 +115,19 @@ func (t *Local) Translate() error {
 			})
 		}
 		if idx == -1 {
+			// Keep compiler-emitted helper functions. They use the C register ABI
+			// internally and are intentionally omitted from the generated Go stub.
+			if _, annotated := annotatedNames[assemblyName]; !annotated {
+				v.Internal = true
+				functions = append(functions, v)
+			}
 			continue
 		}
 		foundMapping = true
 
 		functions[idx].Consts = v.Consts
 		functions[idx].Lines = v.Lines
+		functions[idx].PreserveCABI = preserveCABI
 	}
 
 	_ = t.Close()
