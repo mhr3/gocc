@@ -25,6 +25,15 @@ func removeBinaryInstructionsAmd64(_ *config.Arch, function Function) Function {
 				switch {
 				case strings.Contains(line.Disassembled, "(SB)"):
 					// definitely not
+				case dInst == "SHLDQ" || (dInst == "IMULQ" && strings.Count(dRest, ",") == 2):
+					// Go's assembler has no SHLDQ mnemonic. Keep the compiler
+					// encoding when the instruction does not need relocation. It
+					// also rejects x86's immediate three-operand IMULQ spelling.
+				case dInst == "ANDN" || dInst == "BLSI" || dInst == "BLSMSK" || dInst == "BLSR" ||
+					dInst == "BZHI" || dInst == "MULX" || dInst == "PDEP" || dInst == "PEXT" ||
+					dInst == "SARX" || dInst == "SHLX" || dInst == "SHRX" || dInst == "TZCNT":
+					// BMI/BMI2 instructions lack Plan 9 assembler mnemonics in
+					// supported Go versions; retain their compiler encoding.
 				case strings.HasPrefix(inst, "CVT"):
 					// nope
 				case strings.HasPrefix(inst, "SET"):

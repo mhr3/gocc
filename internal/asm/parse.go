@@ -318,7 +318,19 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 				// alignment instructions, skip
 				switch {
 				case strings.HasPrefix(assembly, "call"):
-					return fmt.Errorf("unsupported CALL instruction: \"%s\"", assembly)
+					sourceFields := strings.Fields(current.Lines[lineNumber].Assembly)
+					if len(sourceFields) != 2 || sourceFields[0] != "call" {
+						return fmt.Errorf("unsupported indirect CALL instruction: %q", current.Lines[lineNumber].Assembly)
+					}
+					target := strings.TrimSuffix(sourceFields[1], "@PLT")
+					target = strings.TrimPrefix(target, "_")
+					if _, ok := functionNames[target]; !ok {
+						return fmt.Errorf("unsupported external CALL target %q", target)
+					}
+					current.Lines[lineNumber].Binary = nil
+					current.Lines[lineNumber].Disassembled = fmt.Sprintf("CALL %s<>(SB)", target)
+					lineNumber++
+					continue
 				case strings.HasPrefix(assembly, "nop"):
 					continue
 				case assembly == "xchg   %ax,%ax":

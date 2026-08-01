@@ -594,7 +594,7 @@ func TestReserveInternalStackFramesArm64(t *testing.T) {
 		},
 	}
 
-	modified := reserveInternalStackFrames(functions)
+	modified := reserveInternalStackFrames(config.ARM64(), functions)
 
 	// 64 bytes of visible locals plus both disjoint helper slots.
 	assert.Equal(t, 144, modified[0].LocalsSize)
@@ -603,6 +603,32 @@ func TestReserveInternalStackFramesArm64(t *testing.T) {
 	assert.Equal(t, "ADD $120, RSP, R1", modified[2].Lines[0].Disassembled)
 	assert.Empty(t, modified[1].Lines[0].Binary)
 	assert.Empty(t, modified[2].Lines[0].Binary)
+}
+
+func TestReserveInternalStackFramesAmd64RebasesStackAddress(t *testing.T) {
+	functions := []Function{
+		{Name: "entry", LocalsSize: 64},
+		{
+			Name:            "helper",
+			Internal:        true,
+			HiddenStackSize: 32,
+			Lines: []Line{
+				{Assembly: "mov\tr8, rsp", Disassembled: "MOVQ SP, R8", Binary: binaryFromHex("49 89 e0")},
+				{Assembly: "mov\tqword ptr [rsp + 8], rax", Disassembled: "MOVQ AX, 8(SP)", Binary: binaryFromHex("48 89 44 24 08")},
+			},
+		},
+	}
+
+	modified := reserveInternalStackFrames(config.AMD64(), functions)
+
+	// A depth guard separates each flattened helper slot from CALL return
+	// addresses. Both stack memory and pointers to a C local must receive the
+	// same slot bias.
+	assert.Equal(t, 152, modified[0].LocalsSize)
+	assert.Equal(t, "LEAQ 88(SP), R8", modified[1].Lines[0].Disassembled)
+	assert.Equal(t, "MOVQ AX, 96(SP)", modified[1].Lines[1].Disassembled)
+	assert.Empty(t, modified[1].Lines[0].Binary)
+	assert.Empty(t, modified[1].Lines[1].Binary)
 }
 
 func TestApplyTransformsFlattensInternalArm64Frame(t *testing.T) {
@@ -636,16 +662,20 @@ func TestApplyTransformsFlattensInternalArm64Frame(t *testing.T) {
 }
 
 func TestApplyTransformsRejectsDirectInternalRecursion(t *testing.T) {
-	functions := []Function{{
-		Name:     "recursive_helper",
-		Internal: true,
-		Lines: []Line{{
-			Disassembled: "CALL recursive_helper<>(SB)",
-		}},
-	}}
+	for _, arch := range []*config.Arch{config.ARM64(), config.AMD64()} {
+		t.Run(arch.Name, func(t *testing.T) {
+			functions := []Function{{
+				Name:     "recursive_helper",
+				Internal: true,
+				Lines: []Line{{
+					Disassembled: "CALL recursive_helper<>(SB)",
+				}},
+			}}
 
-	_, err := ApplyTransforms(config.ARM64(), functions)
-	require.EqualError(t, err, "recursive internal helper call graph: recursive_helper -> recursive_helper")
+			_, err := ApplyTransforms(arch, functions)
+			require.EqualError(t, err, "recursive internal helper call graph: recursive_helper -> recursive_helper")
+		})
+	}
 }
 
 func TestApplyTransformsRejectsMutualInternalRecursion(t *testing.T) {
@@ -666,8 +696,12 @@ func TestApplyTransformsRejectsMutualInternalRecursion(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyTransforms(config.ARM64(), functions)
-	require.EqualError(t, err, "recursive internal helper call graph: helper_a -> helper_b -> helper_a")
+	for _, arch := range []*config.Arch{config.ARM64(), config.AMD64()} {
+		t.Run(arch.Name, func(t *testing.T) {
+			_, err := ApplyTransforms(arch, functions)
+			require.EqualError(t, err, "recursive internal helper call graph: helper_a -> helper_b -> helper_a")
+		})
+	}
 }
 
 func TestUnifiedStackTransformSimpleAmd64(t *testing.T) {

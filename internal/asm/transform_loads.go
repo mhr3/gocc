@@ -2,6 +2,7 @@ package asm
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mhr3/gocc/internal/config"
@@ -39,10 +40,22 @@ func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string,
 	}
 
 	var rewritten string
+	immediate := ""
+	// x86asm's GoSyntax omits the immediate operand from a few AVX table-load
+	// instructions. Recover it from Clang's Intel syntax and put it first, as
+	// required by cmd/asm.
+	if instr := strings.ToUpper(reParams["instr"]); instr == "VPBLENDD" || instr == "VPBLENDW" {
+		if comma := strings.LastIndexByte(line.Assembly, ','); comma >= 0 {
+			value := strings.TrimSpace(line.Assembly[comma+1:])
+			if parsed, err := strconv.ParseUint(value, 0, 8); err == nil {
+				immediate = fmt.Sprintf("$%#x, ", parsed)
+			}
+		}
+	}
 	if register2 == "" {
-		rewritten = fmt.Sprintf("%s %s<>(SB), %s", op, symbol, register)
+		rewritten = fmt.Sprintf("%s %s%s<>(SB), %s", op, immediate, symbol, register)
 	} else {
-		rewritten = fmt.Sprintf("%s %s<>(SB), %s, %s", op, symbol, register2, register)
+		rewritten = fmt.Sprintf("%s %s%s<>(SB), %s, %s", op, immediate, symbol, register2, register)
 	}
 	lines[0].Disassembled = rewritten
 	lines[0].Binary = nil
