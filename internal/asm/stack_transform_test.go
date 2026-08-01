@@ -571,6 +571,24 @@ func TestStackLayoutFormatStackRef(t *testing.T) {
 	assert.Equal(t, "spill-8(SP)", layout.FormatStackRef(40, "spill"))
 }
 
+func TestReserveInternalStackFramesLeavesLeafFunctionsUnchanged(t *testing.T) {
+	for _, arch := range []*config.Arch{config.AMD64(), config.ARM64()} {
+		t.Run(arch.Name, func(t *testing.T) {
+			functions := []Function{
+				{Name: "leaf_zero"},
+				{Name: "leaf_with_locals", LocalsSize: 32},
+				{Name: "another_leaf"},
+			}
+
+			modified := reserveInternalStackFrames(arch, functions)
+
+			assert.Equal(t, 0, modified[0].LocalsSize)
+			assert.Equal(t, 32, modified[1].LocalsSize)
+			assert.Equal(t, 0, modified[2].LocalsSize)
+		})
+	}
+}
+
 func TestReserveInternalStackFramesArm64(t *testing.T) {
 	functions := []Function{
 		{Name: "entry", LocalsSize: 64},
@@ -624,9 +642,9 @@ func TestReserveInternalStackFramesAmd64RebasesStackAddress(t *testing.T) {
 	// A depth guard separates each flattened helper slot from CALL return
 	// addresses. Both stack memory and pointers to a C local must receive the
 	// same slot bias.
-	assert.Equal(t, 152, modified[0].LocalsSize)
-	assert.Equal(t, "LEAQ 88(SP), R8", modified[1].Lines[0].Disassembled)
-	assert.Equal(t, "MOVQ AX, 96(SP)", modified[1].Lines[1].Disassembled)
+	assert.Equal(t, 120, modified[0].LocalsSize)
+	assert.Equal(t, "LEAQ 72(SP), R8", modified[1].Lines[0].Disassembled)
+	assert.Equal(t, "MOVQ AX, 80(SP)", modified[1].Lines[1].Disassembled)
 	assert.Empty(t, modified[1].Lines[0].Binary)
 	assert.Empty(t, modified[1].Lines[1].Binary)
 }
