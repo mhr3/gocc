@@ -648,7 +648,8 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 			layout.NopIndices[op.LineIndex] = true
 
 		case StackOpPush:
-			isCalleeSaved := removableSave(op)
+			isCalleeSaved := stackOpCalleeSaved(archInfo, op)
+			isRemovable := removableSave(op)
 
 			layout.SavedRegs = append(layout.SavedRegs, SavedReg{
 				Reg:           op.Reg,
@@ -662,17 +663,16 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 			}
 
 			// If this is a callee-saved register push, NOP it
-			if isCalleeSaved {
+			if isRemovable {
 				layout.NopIndices[op.LineIndex] = true
-			} else if op.Immediate == 0 {
-				// Non-callee-saved push contributes to GoFrameSize
-				layout.GoFrameSize += op.Size
 			}
 
 			// If this is a pre-indexed push (stp x29, x30, [sp, #-N]!)
 			// the immediate tells us about stack allocation
 			if op.Immediate > 0 {
 				layout.LocalsSize += int(op.Immediate)
+			} else if archInfo.Name() == "amd64" && !isRemovable {
+				layout.LocalsSize += op.Size
 			}
 
 		case StackOpPop:
@@ -791,7 +791,13 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 	for _, op := range ops {
 		switch op.Kind {
 		case StackOpPush:
-			depth += int(op.Immediate)
+			if !layout.NopIndices[op.LineIndex] {
+				if op.Immediate > 0 {
+					depth += int(op.Immediate)
+				} else if archInfo.Name() == "amd64" {
+					depth += op.Size
+				}
+			}
 			layout.ResolvedOffsets[op.LineIndex] = layout.LocalsSize - depth
 			pushOffsets[registerKey(op)] = layout.ResolvedOffsets[op.LineIndex]
 		case StackOpSpill:
@@ -935,6 +941,32 @@ func rewriteArm64SavedPair(op *StackOp, line Line, layout *StackLayout) []Line {
 	return result
 }
 
+func amd64SavedRegName(reg string) string {
+	reg = strings.ToLower(reg)
+	switch reg {
+	case "rbp":
+		return "BP"
+	case "rbx":
+		return "BX"
+	default:
+		return strings.ToUpper(reg)
+	}
+}
+
+func rewriteSavedRegisters(archInfo ArchStackInfo, op *StackOp, line Line, layout *StackLayout) []Line {
+	if archInfo.Name() == "arm64" {
+		return rewriteArm64SavedPair(op, line, layout)
+	}
+
+	offset := layout.ResolvedOffsets[op.LineIndex]
+	reg := amd64SavedRegName(op.Reg)
+	instruction := fmt.Sprintf("MOVQ %s, %d(SP)", reg, offset)
+	if op.Kind == StackOpPop || op.Kind == StackOpReload {
+		instruction = fmt.Sprintf("MOVQ %d(SP), %s", offset, reg)
+	}
+	return []Line{{Labels: line.Labels, Assembly: line.Assembly, Disassembled: instruction}}
+}
+
 // rewriteStackOps performs the second pass to rewrite stack operations
 func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLayout, function Function) Function {
 	return rewriteStackOpsWithLinkage(arch, archInfo, layout, function, true)
@@ -974,7 +1006,7 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 
 			case StackOpPush:
 				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
-					newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
+					newLines = append(newLines, rewriteSavedRegisters(archInfo, op, line, layout)...)
 					continue
 				}
 				// Non-callee-saved push: rewrite to MOV
@@ -1002,7 +1034,7 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 
 			case StackOpPop:
 				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
-					newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
+					newLines = append(newLines, rewriteSavedRegisters(archInfo, op, line, layout)...)
 					continue
 				}
 				// Non-callee-saved pop: rewrite to MOV
@@ -1030,7 +1062,7 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 
 			case StackOpSpill, StackOpReload:
 				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
-					newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
+					newLines = append(newLines, rewriteSavedRegisters(archInfo, op, line, layout)...)
 					continue
 				}
 			}
@@ -1078,7 +1110,70 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 // the Go-visible frame. Each helper gets a disjoint fixed slot, so helper calls
 // never move RSP and the runtime-visible function's stack check covers all
 // translated C stack storage.
-func reserveInternalStackFrames(functions []Function) []Function {
+var amd64RSPMemoryRef = regexp.MustCompile(`(?i)(-?(?:0x[0-9a-f]+|[0-9]+))?\((?:R?SP)\)`)
+var amd64RSPAdd = regexp.MustCompile(`^ADDQ (?:R?SP), ([A-Z][A-Z0-9]*)$`)
+var amd64RSPMove = regexp.MustCompile(`^MOVQ (?:R?SP), ([A-Z][A-Z0-9]*)$`)
+
+func shiftAmd64CStackRef(line Line, bias int) Line {
+	if bias == 0 || (!strings.Contains(line.Disassembled, "SP") && !strings.Contains(line.Disassembled, "sp")) {
+		return line
+	}
+
+	rewritten := amd64RSPMemoryRef.ReplaceAllStringFunc(line.Disassembled, func(ref string) string {
+		match := amd64RSPMemoryRef.FindStringSubmatch(ref)
+		offset := int64(0)
+		if match[1] != "" {
+			offset, _ = strconv.ParseInt(match[1], 0, 64)
+		}
+		return fmt.Sprintf("%d(SP)", int(offset)+bias)
+	})
+	if match := amd64RSPAdd.FindStringSubmatch(rewritten); match != nil {
+		rewritten = fmt.Sprintf("LEAQ %d(SP), %s", bias, match[1])
+	}
+	if match := amd64RSPMove.FindStringSubmatch(rewritten); match != nil {
+		rewritten = fmt.Sprintf("LEAQ %d(SP), %s", bias, match[1])
+	}
+	if strings.HasPrefix(rewritten, "MOVZX ") {
+		switch {
+		case strings.Contains(line.Assembly, "byte ptr"):
+			rewritten = "MOVBQZX" + strings.TrimPrefix(rewritten, "MOVZX")
+		case strings.Contains(line.Assembly, "word ptr"):
+			rewritten = "MOVWQZX" + strings.TrimPrefix(rewritten, "MOVZX")
+		}
+	} else if strings.HasPrefix(rewritten, "MOVSX ") {
+		switch {
+		case strings.Contains(line.Assembly, "byte ptr"):
+			rewritten = "MOVBQSX" + strings.TrimPrefix(rewritten, "MOVSX")
+		case strings.Contains(line.Assembly, "word ptr"):
+			rewritten = "MOVWQSX" + strings.TrimPrefix(rewritten, "MOVSX")
+		}
+	} else if strings.HasPrefix(rewritten, "CMOV") {
+		// GNU/LLVM spell conditional moves without an operand-size suffix;
+		// cmd/asm requires it before the condition code (CMOVQNE, etc.).
+		space := strings.IndexByte(rewritten, ' ')
+		if space > len("CMOV") {
+			suffix := ""
+			switch {
+			case strings.Contains(line.Assembly, "qword ptr"):
+				suffix = "Q"
+			case strings.Contains(line.Assembly, "dword ptr"):
+				suffix = "L"
+			case strings.Contains(line.Assembly, "word ptr"):
+				suffix = "W"
+			}
+			if suffix != "" {
+				rewritten = "CMOV" + suffix + rewritten[len("CMOV"):]
+			}
+		}
+	}
+	if rewritten != line.Disassembled {
+		line.Disassembled = rewritten
+		line.Binary = nil
+	}
+	return line
+}
+
+func reserveInternalStackFrames(arch *config.Arch, functions []Function) []Function {
 	maxVisibleLocals := 0
 	for i := range functions {
 		if !functions[i].Internal && functions[i].LocalsSize > maxVisibleLocals {
@@ -1086,8 +1181,18 @@ func reserveInternalStackFrames(functions []Function) []Function {
 		}
 	}
 
-	const arm64LinkageSize = 16
-	helperBase := maxVisibleLocals + arm64LinkageSize
+	linkageSize := 0
+	depthGuard := 0
+	if arch.Name == "arm64" {
+		linkageSize = 16
+	} else {
+		// Every x86 CALL temporarily pushes an 8-byte return address. Internal
+		// recursion is rejected, so the number of internal functions is a safe
+		// upper bound for call depth. Guarding every slot by that amount keeps
+		// a helper reached at different depths from overlapping adjacent slots.
+		depthGuard = 8 * (len(functions) + 1)
+	}
+	helperBase := maxVisibleLocals + linkageSize + depthGuard
 	reserved := 0
 	for i := range functions {
 		if !functions[i].Internal || functions[i].HiddenStackSize == 0 {
@@ -1096,9 +1201,13 @@ func reserveInternalStackFrames(functions []Function) []Function {
 		reserved += -reserved & 15
 		bias := helperBase + reserved
 		for lineIdx := range functions[i].Lines {
-			functions[i].Lines[lineIdx] = shiftArm64CStackRef(functions[i].Lines[lineIdx], bias)
+			if arch.Name == "arm64" {
+				functions[i].Lines[lineIdx] = shiftArm64CStackRef(functions[i].Lines[lineIdx], bias)
+			} else {
+				functions[i].Lines[lineIdx] = shiftAmd64CStackRef(functions[i].Lines[lineIdx], bias)
+			}
 		}
-		reserved += functions[i].HiddenStackSize
+		reserved += functions[i].HiddenStackSize + depthGuard
 	}
 	reserved += -reserved & 15
 
@@ -1108,7 +1217,7 @@ func reserveInternalStackFrames(functions []Function) []Function {
 		}
 		// Use a common helper base so the same internal symbols can be called by
 		// multiple exported entry points without per-caller variants.
-		functions[i].LocalsSize = maxVisibleLocals + reserved
+		functions[i].LocalsSize = maxVisibleLocals + depthGuard + reserved
 	}
 	return functions
 }
@@ -1146,251 +1255,6 @@ func checkStackUnified(arch *config.Arch, function Function) Function {
 	return rewriteStackOps(arch, archInfo, layout, function)
 }
 
-func checkStackAmd64(arch *config.Arch, function Function) Function {
-	var (
-		rewriteRequired bool
-		numPushes       int
-		extraStack      int
-		stackAllocIdx   = -1
-	)
-
-	/*
-		BYTE $0x55               // pushq	%rbp
-		WORD $0x8948; BYTE $0xe5 // movq	%rsp, %rbp
-		LONG $0xf8e48348         // andq	$-8, %rsp
-		WORD $0xaf0f; BYTE $0xfa // imull	%edx, %edi
-		WORD $0x6348; BYTE $0xc7 // movslq	%edi, %rax
-		WORD $0x0148; BYTE $0xf0 // addq	%rsi, %rax
-		WORD $0x8948; BYTE $0x01 // movq	%rax, (%rcx)
-		---
-		WORD $0x8948; BYTE $0xec // movq	%rbp, %rsp
-		BYTE $0x5d               // popq	%rbp
-		RET                      // retq
-	*/
-	spInstruction := regexp.MustCompile(`\brsp\b`)
-
-	for i, line := range function.Lines {
-		if spInstruction.MatchString(line.Assembly) {
-			if strings.HasPrefix(line.Assembly, "mov") && strings.Contains(line.Assembly, "rbp") {
-				// moving SP to BP and back
-				continue
-			}
-			if strings.HasPrefix(line.Assembly, "and") {
-				// stack alignment
-				// FIXME: this basically grows the stack, should adjust for it
-				inst := decodeAmd64Line(line)
-				if inst.Op != x86asm.AND {
-					panic(fmt.Sprintf("unexpected instruction: %q", line.Assembly))
-				}
-				imm, isImm := inst.Args[1].(x86asm.Imm)
-				align := int64(imm)
-				if !isImm || align != -8 {
-					rewriteRequired = true
-				}
-				continue
-			}
-			if strings.HasPrefix(line.Assembly, "sub") {
-				// allocating stack space
-				inst := decodeAmd64Line(line)
-				if inst.Op != x86asm.SUB {
-					panic(fmt.Sprintf("unexpected instruction: %q", line.Assembly))
-				}
-				imm, isImm := inst.Args[1].(x86asm.Imm)
-				if !isImm {
-					rewriteRequired = true
-					continue
-				}
-				if extraStack != 0 {
-					panic("failed to analyze stack operations")
-				}
-				extraStack = int(imm)
-				stackAllocIdx = i
-			}
-			if strings.HasPrefix(line.Assembly, "lea") {
-				continue
-			}
-			rewriteRequired = true
-			continue
-		}
-		if strings.HasPrefix(line.Assembly, "push") {
-			inst := decodeAmd64Line(line)
-			if inst.Op != x86asm.PUSH {
-				panic(fmt.Sprintf("unexpected instruction: %q", line.Assembly))
-			}
-			dstReg, _ := inst.Args[0].(x86asm.Reg)
-			switch dstReg {
-			case x86asm.RBP, x86asm.RBX, x86asm.R12, x86asm.R13, x86asm.R14, x86asm.R15:
-				// go's ABI0 doesn't have callee-saved registers
-			default:
-				rewriteRequired = true
-				numPushes++
-			}
-		}
-	}
-
-	if !rewriteRequired {
-		// remove them
-		newLines := make([]Line, 0, len(function.Lines))
-
-		for _, line := range function.Lines {
-			doSkip := false
-			asm := line.Assembly
-			asmFields := strings.Fields(asm)
-			if asmFields[0] == "push" || asmFields[0] == "pop" {
-				inst := decodeAmd64Line(line)
-				if inst.Op != x86asm.PUSH && inst.Op != x86asm.POP {
-					panic(fmt.Sprintf("unexpected instruction: %q", line.Assembly))
-				}
-				dstReg, _ := inst.Args[0].(x86asm.Reg)
-				switch dstReg {
-				case x86asm.RBP, x86asm.RBX, x86asm.R12, x86asm.R13, x86asm.R14, x86asm.R15:
-					// can be dropped
-					doSkip = true
-				}
-			} else if asmFields[0] == "lea" {
-				parts := asmFields
-				if len(parts) > 1 && strings.HasPrefix(parts[1], "rsp") {
-					// writing into rsp, drop
-					doSkip = true
-				}
-			} else if strings.HasPrefix(asm, "mov") && (strings.HasSuffix(asm, "rsp") || strings.HasSuffix(asm, "rbp")) ||
-				strings.HasPrefix(asm, "and") && strings.Contains(asm, "rsp") {
-				// we need to drop all of these
-				doSkip = true
-			}
-
-			if doSkip {
-				lineCpy := line
-				lineCpy.Disassembled = "NOP"
-				lineCpy.Binary = nil
-				newLines = append(newLines, lineCpy)
-				continue
-			}
-
-			newLines = append(newLines, line)
-		}
-
-		function.Lines = newLines
-	} else {
-		fnName := function.Name
-		if fnName == "" {
-			fnName = "[unknown]"
-		}
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", fnName)
-		// go really doesn't like messing with SP, so we have two options:
-		// 1) skip instructions that change it
-		// 2) copy SP to BP and rewrite any instructions working with SP
-		//    to refer to BP instead
-
-		// we still need to remove the prologue/epilogue instructions
-		newLines := make([]Line, 0, len(function.Lines))
-		pushOffsetStart := extraStack
-		//pushOffsetStart += -pushOffsetStart & (15)
-		pushOffset := pushOffsetStart
-		maxOffset := pushOffset
-
-		for i, line := range function.Lines {
-			asm := line.Assembly
-			asmFields := strings.Fields(asm)
-			if asmFields[0] == "push" || asmFields[0] == "pop" {
-				inst := decodeAmd64Line(line)
-				if inst.Op != x86asm.PUSH && inst.Op != x86asm.POP {
-					panic(fmt.Sprintf("unexpected instruction: %q", line.Assembly))
-				}
-				dstReg, _ := inst.Args[0].(x86asm.Reg)
-				switch dstReg {
-				case x86asm.RBP, x86asm.RBX, x86asm.R12, x86asm.R13, x86asm.R14, x86asm.R15:
-					// can be dropped
-					lineCpy := line
-					lineCpy.Disassembled = "NOP"
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				}
-			}
-			if stackAllocIdx == i ||
-				strings.HasPrefix(asm, "mov") && (strings.HasSuffix(asm, "rsp") || strings.HasSuffix(asm, "rbp")) {
-				// we need to drop all of these
-				lineCpy := line
-				lineCpy.Disassembled = "NOP"
-				lineCpy.Binary = nil
-				newLines = append(newLines, lineCpy)
-				continue
-			}
-
-			if strings.HasPrefix(asm, "lea") {
-				parts := strings.Fields(asm)
-				if len(parts) > 1 && strings.HasPrefix(parts[1], "rsp") {
-					// writing into rsp, drop
-					lineCpy := line
-					lineCpy.Disassembled = "NOP"
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				}
-			}
-
-			if asmFields[0] == "push" {
-				// rewrite to moves and hope they're not dynamic
-				parts := strings.Fields(line.Disassembled)
-				instr := fmt.Sprintf("%s %s, %d(SP)", arch.MovInstr[8], parts[1], pushOffset)
-				pushOffset += 8
-				if pushOffset > maxOffset {
-					maxOffset = pushOffset
-				}
-				lineCpy := line
-				lineCpy.Disassembled = instr
-				lineCpy.Binary = nil
-				newLines = append(newLines, lineCpy)
-				continue
-			}
-			if asmFields[0] == "pop" {
-				parts := strings.Fields(line.Disassembled)
-				pushOffset -= 8
-				instr := fmt.Sprintf("%s %d(SP), %s", arch.MovInstr[8], pushOffset, parts[1])
-				if pushOffset < pushOffsetStart {
-					panic("unable to rewrite push/pop instructions")
-				}
-				lineCpy := line
-				lineCpy.Disassembled = instr
-				lineCpy.Binary = nil
-				newLines = append(newLines, lineCpy)
-				continue
-			}
-			if strings.HasPrefix(asm, "and") && spInstruction.MatchString(line.Assembly) {
-				inst := decodeAmd64Line(line)
-				if inst.Op != x86asm.AND {
-					panic(fmt.Sprintf("unexpected instruction: %q", line.Assembly))
-				}
-				imm, isImm := inst.Args[1].(x86asm.Imm)
-				align := int64(imm)
-				if isImm && align == -8 {
-					// drop stack alignment instruction
-					lineCpy := line
-					lineCpy.Disassembled = "NOP"
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				}
-			}
-			if asm == "ret" {
-				// we can encounter more pops
-				pushOffset = maxOffset
-			}
-
-			// FIXME: we're keeping the SP alignment instruction, won't work if the stack isn't aligned
-			// although should be ok if we fit into the red zone
-
-			newLines = append(newLines, line)
-		}
-
-		function.Lines = newLines
-		function.LocalsSize = maxOffset
-	}
-
-	return function
-}
-
 type virtualSP struct {
 	arm64asm.RegSP
 	name   string
@@ -1400,343 +1264,6 @@ type virtualSP struct {
 func (v *virtualSP) String() string {
 	// ret-8(SP)
 	return fmt.Sprintf("%s%d(SP)", v.name, v.offset)
-}
-
-func checkStackArm64(arch *config.Arch, function Function) Function {
-	var (
-		rewriteRequired bool
-		complexManip    bool
-		baseStack       int
-		extraStack      int
-	)
-
-	/*
-		// stp	x29, x30, [sp, #-80]!
-		// sub	x9, sp, #16
-		// stp	x26, x25, [sp, #16]
-		// stp	x24, x23, [sp, #32]
-		// mov	x29, sp
-		// stp	x22, x21, [sp, #48]
-		// stp	x20, x19, [sp, #64]
-		// and	sp, x9, #0xfffffffffffffff8
-		---
-		// mov	sp, x29
-		// ldp	x20, x19, [sp, #64]
-		// ldp	x22, x21, [sp, #48]
-		// ldp	x24, x23, [sp, #32]
-		// ldp	x26, x25, [sp, #16]
-		// ldp	x29, x30, [sp], #80
-		// ret
-	*/
-
-	spInstruction := regexp.MustCompile(`\bsp\b`)
-
-	for _, line := range function.Lines {
-		if spInstruction.MatchString(line.Assembly) {
-			inst := decodeArm64Line(line)
-			parts := strings.Fields(line.Assembly)
-
-			switch inst.Op {
-			case arm64asm.STP:
-				if len(inst.Args) > 2 && inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30 {
-					// storing the frame pointer
-					imm, ok := inst.Args[2].(arm64asm.MemImmediate)
-					// this tells us how much stack space we're using
-					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
-						n := immFromMemImmediate(imm)
-						baseStack = -n
-						extraStack = baseStack
-					}
-				} else if len(inst.Args) > 2 {
-					imm, ok := inst.Args[2].(arm64asm.MemImmediate)
-					if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
-						n := immFromMemImmediate(imm)
-						baseStack = -n
-						extraStack = baseStack
-					}
-					// this could still be fine, as long as it's doing just callee-saved registers
-					rewriteRequired = true
-				}
-			case arm64asm.STR:
-				imm, ok := inst.Args[1].(arm64asm.MemImmediate)
-				if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) && baseStack == 0 {
-					n := immFromMemImmediate(imm)
-					baseStack = -n
-					extraStack = baseStack
-				}
-				// this could still be fine, as long as it's doing just callee-saved registers
-				rewriteRequired = true
-			case arm64asm.AND:
-				// stack alignment
-				// this basically grows the stack, need to adjust for it
-				targetReg := inst.Args[0]
-				if targetReg == arm64asm.SP {
-					// allocating more stack space
-					rewriteRequired = true
-					// TODO: definitely clear sign that we're doing something with the stack
-					complexManip = true
-				}
-			case arm64asm.SUB:
-				// allocating stack space
-				targetReg := inst.Args[0]
-				srcReg := inst.Args[1]
-				if targetReg == arm64asm.RegSP(arm64asm.SP) || srcReg == arm64asm.RegSP(arm64asm.SP) {
-					complexManip = true
-					// probably allocating more stack space, either directly or through an extra register
-					imm := parts[3]
-					imm = strings.TrimPrefix(imm, "#")
-					if n, err := strconv.Atoi(imm); err == nil {
-						extraStack += n
-						rewriteRequired = true
-					}
-				}
-			}
-			continue
-		}
-	}
-
-	if !rewriteRequired {
-		if extraStack != 16 {
-			panic("failed to detect stack manipulation")
-		}
-		// remove the frame pointer instructions
-		newLines := make([]Line, 0, len(function.Lines))
-
-		for _, line := range function.Lines {
-			if spInstruction.MatchString(line.Assembly) {
-				if strings.HasPrefix(line.Assembly, "stp") || strings.HasPrefix(line.Assembly, "mov") ||
-					strings.HasPrefix(line.Assembly, "ldp") {
-					lineCpy := line
-					lineCpy.Disassembled = "NOP"
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				}
-			}
-			newLines = append(newLines, line)
-		}
-
-		function.Lines = newLines
-	} else if !complexManip {
-		fnName := function.Name
-		if fnName == "" {
-			fnName = "[unknown]"
-		}
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains stack manipulation, running experimental transform\n", fnName)
-
-		newLines := make([]Line, 0, len(function.Lines))
-		stackAllocator := map[string]int{}
-		stackSpace := -extraStack
-
-		for _, line := range function.Lines {
-			asm := line.Assembly
-			// detect everything that touches SP
-			if spInstruction.MatchString(asm) {
-				inst := decodeArm64Line(line)
-				doSkip := false
-
-				switch inst.Op {
-				case arm64asm.STP, arm64asm.LDP:
-					switch {
-					// go's ABI0 doesn't require callee-saved registers
-					case inst.Args[0] == arm64asm.X20 && inst.Args[1] == arm64asm.X19:
-						fallthrough
-					case inst.Args[0] == arm64asm.X22 && inst.Args[1] == arm64asm.X21:
-						fallthrough
-					case inst.Args[0] == arm64asm.X24 && inst.Args[1] == arm64asm.X23:
-						fallthrough
-					case inst.Args[0] == arm64asm.X26 && inst.Args[1] == arm64asm.X25:
-						fallthrough
-					case inst.Args[0] == arm64asm.X28 && inst.Args[1] == arm64asm.X27:
-						fallthrough
-					case inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30:
-						doSkip = true
-					}
-				case arm64asm.STR, arm64asm.LDR:
-					switch inst.Args[0] {
-					// go's ABI0 doesn't require callee-saved registers
-					case arm64asm.X19, arm64asm.X20, arm64asm.X21, arm64asm.X22, arm64asm.X23, arm64asm.X24,
-						arm64asm.X25, arm64asm.X26, arm64asm.X27, arm64asm.X28, arm64asm.X29, arm64asm.X30:
-						doSkip = true
-					}
-				case arm64asm.MOV:
-					if inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
-						doSkip = true
-					}
-				}
-
-				if doSkip {
-					lineCpy := line
-					lineCpy.Disassembled = "NOP"
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				}
-
-				switch inst.Op {
-				case arm64asm.STP, arm64asm.STR:
-					numRegs, registers := collectSpillRegisters(inst.Args)
-					stackAllocator[registers] = stackSpace
-					if stackSpace >= 0 {
-						panic("stack space allocation failed")
-					}
-					stackSpace += 8 * numRegs
-
-					if inst.Op == arm64asm.STP || inst.Op == arm64asm.STR {
-						argIndex := 2
-						if inst.Op == arm64asm.STR {
-							argIndex = 1
-						}
-						imm, ok := inst.Args[argIndex].(arm64asm.MemImmediate)
-						// this tells us how much stack space we're using
-						if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) {
-							replacement := &virtualSP{RegSP: arm64asm.RegSP(arm64asm.SP), name: registers, offset: stackAllocator[registers]}
-							inst.Args[argIndex] = replacement
-						}
-					}
-
-					lineCpy := line
-					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
-					if idx := strings.Index(lineCpy.Disassembled, registers); idx > 0 {
-						lineCpy.Disassembled = lineCpy.Disassembled[:idx] + strings.ToLower(registers) + lineCpy.Disassembled[idx+len(registers):]
-					}
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				case arm64asm.LDP, arm64asm.LDR:
-					_, registers := collectSpillRegisters(inst.Args)
-
-					stackOffset, ok := stackAllocator[registers]
-					if ok && inst.Op == arm64asm.LDP || inst.Op == arm64asm.LDR {
-						argIndex := 2
-						if inst.Op == arm64asm.LDR {
-							argIndex = 1
-						}
-						imm, ok := inst.Args[argIndex].(arm64asm.MemImmediate)
-						if ok && imm.Base == arm64asm.RegSP(arm64asm.SP) {
-							replacement := &virtualSP{RegSP: arm64asm.RegSP(arm64asm.SP), name: registers, offset: stackOffset}
-							inst.Args[argIndex] = replacement
-						}
-					}
-
-					lineCpy := line
-					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
-					if idx := strings.Index(lineCpy.Disassembled, registers); idx > 0 {
-						lineCpy.Disassembled = lineCpy.Disassembled[:idx] + strings.ToLower(registers) + lineCpy.Disassembled[idx+len(registers):]
-					}
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				case arm64asm.AND, arm64asm.SUB:
-					if len(inst.Args) > 2 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
-						// stack alloc/alignment writing back into RSP
-						lineCpy := line
-						lineCpy.Disassembled = "NOP"
-						lineCpy.Binary = nil
-						newLines = append(newLines, lineCpy)
-						continue
-					}
-					if inst.Op == arm64asm.SUB && inst.Args[1] == arm64asm.RegSP(arm64asm.SP) {
-						// we're allocating stack space, but we already did that, just do a MOVD
-						replInst := arm64asm.Inst{Op: arm64asm.MOV, Args: arm64asm.Args{inst.Args[0], inst.Args[1]}}
-						lineCpy := line
-						lineCpy.Disassembled = arm64asm.GoSyntax(replInst, 0, nil, nil)
-						lineCpy.Binary = nil
-						newLines = append(newLines, lineCpy)
-						continue
-					}
-				}
-			}
-
-			// FIXME: we're keeping the SP alignment instruction, won't work if the stack isn't aligned
-			// although should be ok if we fit into the red zone
-
-			newLines = append(newLines, line)
-		}
-
-		function.Lines = newLines
-		if len(stackAllocator) == 0 {
-			function.LocalsSize = 0
-		} else {
-			function.LocalsSize = extraStack
-		}
-	} else {
-		fnName := function.Name
-		if fnName == "" {
-			fnName = "[unknown]"
-		}
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", fnName)
-		// go really doesn't like messing with SP, so we have two options:
-		// 1) skip instructions that change it
-		// 2) copy SP to BP and rewrite any instructions working with SP
-		//    to refer to BP instead
-
-		// we still need to remove the prologue/epilogue instructions
-		newLines := make([]Line, 0, len(function.Lines))
-
-		for _, line := range function.Lines {
-			asm := line.Assembly
-			// detect everything that touches SP
-			if spInstruction.MatchString(asm) {
-				inst := decodeArm64Line(line)
-
-				// drop the frame pointer instructions
-				if ((inst.Op == arm64asm.STP || inst.Op == arm64asm.LDP) &&
-					inst.Args[0] == arm64asm.X29 && inst.Args[1] == arm64asm.X30) ||
-					inst.Op == arm64asm.MOV && inst.Args[0] == arm64asm.RegSP(arm64asm.X29) {
-					lineCpy := line
-					lineCpy.Disassembled = "NOP"
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				}
-
-				switch inst.Op {
-				case arm64asm.STP, arm64asm.STR:
-					lineCpy := line
-					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				case arm64asm.LDP, arm64asm.LDR:
-					lineCpy := line
-					lineCpy.Disassembled = arm64asm.GoSyntax(inst, 0, nil, nil)
-					lineCpy.Binary = nil
-					newLines = append(newLines, lineCpy)
-					continue
-				case arm64asm.AND, arm64asm.SUB:
-					if len(inst.Args) > 2 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
-						// stack alloc/alignment writing back into RSP
-						lineCpy := line
-						lineCpy.Disassembled = "NOP"
-						lineCpy.Binary = nil
-						newLines = append(newLines, lineCpy)
-						continue
-					}
-					if inst.Op == arm64asm.SUB && inst.Args[1] == arm64asm.RegSP(arm64asm.SP) {
-						// we're allocating stack space, but we already did that, just do a MOVD
-						replInst := arm64asm.Inst{Op: arm64asm.MOV, Args: arm64asm.Args{inst.Args[0], inst.Args[1]}}
-						lineCpy := line
-						lineCpy.Disassembled = arm64asm.GoSyntax(replInst, 0, nil, nil)
-						lineCpy.Binary = nil
-						newLines = append(newLines, lineCpy)
-						continue
-					}
-				}
-			}
-
-			// FIXME: we're keeping the SP alignment instruction, won't work if the stack isn't aligned
-			// although should be ok if we fit into the red zone
-
-			newLines = append(newLines, line)
-		}
-
-		function.Lines = newLines
-		// FIXME: we're doing extra 16bytes (which C uses for x29/x30)
-		function.LocalsSize = extraStack
-	}
-
-	return function
 }
 
 func decodeAmd64Line(line Line) x86asm.Inst {
@@ -1763,19 +1290,6 @@ func decodeArm64Line(line Line) arm64asm.Inst {
 		panic(fmt.Errorf("failed to decode instruction: %v (%q)", err, binary))
 	}
 	return inst
-}
-
-func collectSpillRegisters(args arm64asm.Args) (numRegs int, registers string) {
-	for _, arg := range args {
-		if _, isReg := arg.(arm64asm.Reg); isReg {
-			numRegs++
-			registers += arg.String()
-		}
-	}
-	if len(registers) > 0 {
-		registers += "SPILL"
-	}
-	return
 }
 
 func immFromMemImmediate(imm arm64asm.MemImmediate) int {

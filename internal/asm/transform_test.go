@@ -140,6 +140,18 @@ func TestDataLoadRewrite(t *testing.T) {
 				{Disassembled: "VPSUBUSB LCPI0_3<>(SB), Y4, Y4", Binary: nil},
 			},
 		},
+		{
+			Name: "amd64-vpblendd-immediate",
+			Cfg:  config.AMD64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "vpblendd\tymm0, ymm0, ymmword ptr [rip + .LCPI0_27], 252", Disassembled: "VPBLENDD 0(IP), Y0, Y0"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "VPBLENDD $0xfc, LCPI0_27<>(SB), Y0, Y0", Binary: nil},
+			},
+		},
 	}
 
 	for _, tc := range testCases {

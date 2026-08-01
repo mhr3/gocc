@@ -8,7 +8,7 @@ import (
 )
 
 func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error) {
-	if arch != nil && arch.Name == "arm64" {
+	if arch != nil {
 		if err := rejectRecursiveInternalCalls(functions); err != nil {
 			return nil, err
 		}
@@ -16,8 +16,8 @@ func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error
 	for i, function := range functions {
 		functions[i] = transformFunction(arch, function)
 	}
-	if arch != nil && arch.Name == "arm64" {
-		functions = reserveInternalStackFrames(functions)
+	if arch != nil {
+		functions = reserveInternalStackFrames(arch, functions)
 	}
 
 	return functions, nil
@@ -165,9 +165,7 @@ func checkStackManipulation(arch *config.Arch, function Function) Function {
 	}
 
 	switch arch.Name {
-	case "amd64":
-		return checkStackUnified(arch, function)
-	case "arm64":
+	case "amd64", "arm64":
 		if function.Internal {
 			// Internal helpers use the C register ABI, so they cannot safely run a
 			// Go morestack prologue. Flatten their C frames into fixed slots that a
