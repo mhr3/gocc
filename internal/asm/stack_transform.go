@@ -1107,9 +1107,9 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 }
 
 // reserveInternalStackFrames flattens every internal C-ABI helper frame into
-// the Go-visible frame. Each helper gets a disjoint fixed slot, so helper calls
-// never move RSP and the runtime-visible function's stack check covers all
-// translated C stack storage.
+// its owning Go-visible function's frame. Internal helper graphs must be
+// disjoint between exported roots, which lets each helper be rebased once into
+// a root-specific arena without making unrelated entry points reserve it.
 var amd64RSPMemoryRef = regexp.MustCompile(`(?i)(-?(?:0x[0-9a-f]+|[0-9]+))?\((?:R?SP)\)`)
 var amd64RSPAdd = regexp.MustCompile(`^ADDQ (?:R?SP), ([A-Z][A-Z0-9]*)$`)
 var amd64RSPMove = regexp.MustCompile(`^MOVQ (?:R?SP), ([A-Z][A-Z0-9]*)$`)
@@ -1173,59 +1173,144 @@ func shiftAmd64CStackRef(line Line, bias int) Line {
 	return line
 }
 
-func reserveInternalStackFrames(arch *config.Arch, functions []Function) []Function {
-	maxVisibleLocals := 0
-	internalCount := 0
-	for i := range functions {
-		if functions[i].Internal {
-			internalCount++
-		} else if functions[i].LocalsSize > maxVisibleLocals {
-			maxVisibleLocals = functions[i].LocalsSize
-		}
+func internalCallTarget(line Line) (string, bool) {
+	fields := strings.Fields(line.Disassembled)
+	if len(fields) != 2 || fields[0] != "CALL" {
+		return "", false
 	}
-	if internalCount == 0 {
-		return functions
+	target := strings.TrimSuffix(fields[1], "<>(SB)")
+	if target == fields[1] {
+		return "", false
+	}
+	return target, true
+}
+
+func assignInternalFunctionOwners(functions []Function) ([]int, error) {
+	functionByName := make(map[string]int, len(functions))
+	for i := range functions {
+		functionByName[functions[i].Name] = i
 	}
 
-	linkageSize := 0
-	depthGuard := 0
-	if arch.Name == "arm64" {
-		linkageSize = 16
-	} else {
-		// Every x86 CALL temporarily pushes an 8-byte return address. Internal
-		// recursion is rejected, so the number of internal functions is a safe
-		// upper bound for call depth. Guarding every slot by that amount keeps
-		// a helper reached at different depths from overlapping adjacent slots.
-		depthGuard = 8 * internalCount
-	}
-	helperBase := maxVisibleLocals + linkageSize + depthGuard
-	reserved := 0
+	// A translated C CALL always uses the C register ABI. Calling an exported
+	// function that has a Go ABI entry sequence would therefore be invalid.
 	for i := range functions {
-		if !functions[i].Internal || functions[i].HiddenStackSize == 0 {
-			continue
-		}
-		reserved += -reserved & 15
-		bias := helperBase + reserved
-		for lineIdx := range functions[i].Lines {
-			if arch.Name == "arm64" {
-				functions[i].Lines[lineIdx] = shiftArm64CStackRef(functions[i].Lines[lineIdx], bias)
-			} else {
-				functions[i].Lines[lineIdx] = shiftAmd64CStackRef(functions[i].Lines[lineIdx], bias)
+		for _, line := range functions[i].Lines {
+			targetName, ok := internalCallTarget(line)
+			if !ok {
+				continue
+			}
+			targetIdx, exists := functionByName[targetName]
+			if exists && !functions[targetIdx].Internal {
+				return nil, fmt.Errorf("C-ABI call from %q to exported function %q is unsupported", functions[i].Name, targetName)
 			}
 		}
-		reserved += functions[i].HiddenStackSize + depthGuard
 	}
-	reserved += -reserved & 15
 
-	for i := range functions {
-		if functions[i].Internal {
+	owners := make([]int, len(functions))
+	for i := range owners {
+		owners[i] = -1
+	}
+	ownerPaths := make([][]string, len(functions))
+
+	for rootIdx := range functions {
+		if functions[rootIdx].Internal {
 			continue
 		}
-		// Use a common helper base so the same internal symbols can be called by
-		// multiple exported entry points without per-caller variants.
-		functions[i].LocalsSize = maxVisibleLocals + depthGuard + reserved
+		visited := make(map[int]bool)
+		var visit func(int, []string) error
+		visit = func(callerIdx int, path []string) error {
+			for _, line := range functions[callerIdx].Lines {
+				targetName, ok := internalCallTarget(line)
+				if !ok {
+					continue
+				}
+				targetIdx, exists := functionByName[targetName]
+				if !exists || !functions[targetIdx].Internal {
+					continue
+				}
+
+				targetPath := append(append([]string(nil), path...), targetName)
+				if owner := owners[targetIdx]; owner != -1 && owner != rootIdx {
+					return fmt.Errorf(
+						"internal helper %q is reachable from multiple exported functions: %s; %s",
+						targetName, strings.Join(ownerPaths[targetIdx], " -> "), strings.Join(targetPath, " -> "),
+					)
+				}
+				if owners[targetIdx] == -1 {
+					owners[targetIdx] = rootIdx
+					ownerPaths[targetIdx] = targetPath
+				}
+				if visited[targetIdx] {
+					continue
+				}
+				visited[targetIdx] = true
+				if err := visit(targetIdx, targetPath); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if err := visit(rootIdx, []string{functions[rootIdx].Name}); err != nil {
+			return nil, err
+		}
 	}
-	return functions
+	return owners, nil
+}
+
+func reserveInternalStackFrames(arch *config.Arch, functions []Function) ([]Function, error) {
+	owners, err := assignInternalFunctionOwners(functions)
+	if err != nil {
+		return nil, err
+	}
+
+	for rootIdx := range functions {
+		if functions[rootIdx].Internal {
+			continue
+		}
+
+		internalCount := 0
+		for helperIdx := range functions {
+			if owners[helperIdx] == rootIdx {
+				internalCount++
+			}
+		}
+		if internalCount == 0 {
+			continue
+		}
+
+		linkageSize := 0
+		depthGuard := 0
+		if arch.Name == "arm64" {
+			linkageSize = 16
+		} else {
+			// Every x86 CALL temporarily pushes an 8-byte return address. Internal
+			// recursion is rejected, so the number of helpers owned by this root is
+			// a safe call-depth bound. Gaps keep slots valid at every such depth.
+			depthGuard = 8 * internalCount
+		}
+
+		rootLocals := functions[rootIdx].LocalsSize
+		helperBase := rootLocals + linkageSize + depthGuard
+		reserved := 0
+		for helperIdx := range functions {
+			if owners[helperIdx] != rootIdx || functions[helperIdx].HiddenStackSize == 0 {
+				continue
+			}
+			reserved += -reserved & 15
+			bias := helperBase + reserved
+			for lineIdx := range functions[helperIdx].Lines {
+				if arch.Name == "arm64" {
+					functions[helperIdx].Lines[lineIdx] = shiftArm64CStackRef(functions[helperIdx].Lines[lineIdx], bias)
+				} else {
+					functions[helperIdx].Lines[lineIdx] = shiftAmd64CStackRef(functions[helperIdx].Lines[lineIdx], bias)
+				}
+			}
+			reserved += functions[helperIdx].HiddenStackSize + depthGuard
+		}
+		reserved += -reserved & 15
+		functions[rootIdx].LocalsSize = rootLocals + depthGuard + reserved
+	}
+	return functions, nil
 }
 
 // checkStackUnified is the new unified stack checking function
