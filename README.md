@@ -19,6 +19,7 @@ still use binary).
 - Auto-detects the appropriate version of `clang` and `objdump` to use.
 - Supports cross-compilation.
 - Annotated C functions will have their Go stubs auto-generated.
+- Compiler-emitted helper functions are supported with `--with-internal-functions`.
 - Automatically formats go assembly using `asmfmt`.
 
 ## Annotating C functions
@@ -67,7 +68,8 @@ This tool does not support most of the C features, it's not a replacement for C/
 
 - Only supports C code that can be compiled by `clang`.
 - Does not support C++ code or templates for now.
-- Does not support call statements, thus requires you to inline your C functions.
+- Calls to external C libraries are not supported. Internal helper calls require
+  `--with-internal-functions`; recursive helpers are rejected.
 - No dynamic memory allocation.
 - Currently limited to 6 arguments per function.
 
