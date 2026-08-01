@@ -7,12 +7,89 @@ import (
 	"github.com/mhr3/gocc/internal/config"
 )
 
-func ApplyTransforms(arch *config.Arch, functions []Function) []Function {
+func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error) {
+	if arch != nil && arch.Name == "arm64" {
+		if err := rejectRecursiveInternalCalls(functions); err != nil {
+			return nil, err
+		}
+	}
 	for i, function := range functions {
 		functions[i] = transformFunction(arch, function)
 	}
+	if arch != nil && arch.Name == "arm64" {
+		functions = reserveInternalStackFrames(functions)
+	}
 
-	return functions
+	return functions, nil
+}
+
+func rejectRecursiveInternalCalls(functions []Function) error {
+	internal := make(map[string]int)
+	for i := range functions {
+		if functions[i].Internal {
+			internal[functions[i].Name] = i
+		}
+	}
+
+	edges := make(map[string][]string, len(internal))
+	for name, functionIdx := range internal {
+		for _, line := range functions[functionIdx].Lines {
+			fields := strings.Fields(line.Disassembled)
+			if len(fields) != 2 || fields[0] != "CALL" {
+				continue
+			}
+			target := strings.TrimSuffix(fields[1], "<>(SB)")
+			if target == fields[1] {
+				continue
+			}
+			if _, ok := internal[target]; ok {
+				edges[name] = append(edges[name], target)
+			}
+		}
+	}
+
+	const (
+		unvisited = iota
+		visiting
+		visited
+	)
+	state := make(map[string]int, len(internal))
+	path := make([]string, 0, len(internal))
+	pathIndex := make(map[string]int, len(internal))
+	var visit func(string) error
+	visit = func(name string) error {
+		state[name] = visiting
+		pathIndex[name] = len(path)
+		path = append(path, name)
+		for _, target := range edges[name] {
+			switch state[target] {
+			case unvisited:
+				if err := visit(target); err != nil {
+					return err
+				}
+			case visiting:
+				start := pathIndex[target]
+				cycle := append(append([]string(nil), path[start:]...), target)
+				return fmt.Errorf("recursive internal helper call graph: %s", strings.Join(cycle, " -> "))
+			}
+		}
+		path = path[:len(path)-1]
+		delete(pathIndex, name)
+		state[name] = visited
+		return nil
+	}
+
+	// Walk in source order to keep diagnostics deterministic.
+	for i := range functions {
+		name := functions[i].Name
+		if !functions[i].Internal || state[name] != unvisited {
+			continue
+		}
+		if err := visit(name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func transformFunction(arch *config.Arch, function Function) Function {
@@ -24,9 +101,8 @@ func transformFunction(arch *config.Arch, function Function) Function {
 
 	// weird type of transform, but we'll keep it here for now
 	if !(arch != nil && arch.Name == "arm64" && function.Internal) {
-		// Keep raw encodings for the hidden C frames of internal ARM64 helpers.
-		// In particular, exposing SUB/ADD RSP to cmd/asm makes the linker treat
-		// these NOFRAME helpers as ordinary Go nosplit frames.
+		// Internal ARM64 helpers retain raw encodings where Plan 9 assembly lacks
+		// an exact spelling. Their stack references were already rebased above.
 		function = removeBinaryInstructions(arch, function)
 	}
 
@@ -93,10 +169,14 @@ func checkStackManipulation(arch *config.Arch, function Function) Function {
 		return checkStackUnified(arch, function)
 	case "arm64":
 		if function.Internal {
-			// Internal C-ABI helpers keep Clang's exact frame. A Go prologue would
-			// both clobber C callee-saved registers and attempt stack growth without
-			// knowing that the arguments live in registers. The public translated
-			// entry point remains a normal, stack-splitting Go frame.
+			// Internal helpers use the C register ABI, so they cannot safely run a
+			// Go morestack prologue. Flatten their C frames into fixed slots that a
+			// Go-visible caller reserves and expose the measured size for the global
+			// reservation pass.
+			archInfo := getArchStackInfo(arch)
+			layout := analyzeStackLayout(archInfo, function.Lines, true)
+			function = rewriteStackOpsWithLinkage(arch, archInfo, layout, function, false)
+			function.HiddenStackSize = function.LocalsSize
 			function.LocalsSize = 0
 			return function
 		}

@@ -49,17 +49,18 @@ type GoFunction struct {
 // ------------------------------------- Function -------------------------------------
 
 type Function struct {
-	Name         string  `json:"name"`
-	Internal     bool    `json:"internal,omitempty"`
-	PreserveCABI bool    `json:"preserveCABI,omitempty"`
-	SourcePath   string  `json:"sourcePath"`
-	Position     int     `json:"position"`
-	Params       []Param `json:"params"`
-	Consts       []Const `json:"consts,omitempty"`
-	Lines        []Line  `json:"lines"`
-	LocalsSize   int     `json:"localsSize,omitempty"`
-	Ret          *Param  `json:"return,omitempty"`
-	GoFunc       GoFunction
+	Name            string  `json:"name"`
+	Internal        bool    `json:"internal,omitempty"`
+	PreserveCABI    bool    `json:"preserveCABI,omitempty"`
+	SourcePath      string  `json:"sourcePath"`
+	Position        int     `json:"position"`
+	Params          []Param `json:"params"`
+	Consts          []Const `json:"consts,omitempty"`
+	Lines           []Line  `json:"lines"`
+	LocalsSize      int     `json:"localsSize,omitempty"`
+	HiddenStackSize int     `json:"hiddenStackSize,omitempty"`
+	Ret             *Param  `json:"return,omitempty"`
+	GoFunc          GoFunction
 }
 
 func (f *GoFunction) NumResults() int {
