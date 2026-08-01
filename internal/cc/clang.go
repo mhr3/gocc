@@ -113,6 +113,9 @@ func (c *Compiler) Compile(source, assembly, object string, compilerArgs ...stri
 	// conservative defaults (for example -mno-stackrealign on ARM64).
 	args := append(defaults, c.arch.ClangFlags...)
 	args = append(args, compilerArgs...)
+	// Generated functions cannot rely on a hosted C runtime. Keep this after
+	// user options so -fhosted cannot accidentally enable libc assumptions.
+	args = append(args, "-ffreestanding")
 
 	compileOutput, err := runCommandAndLog(c.clang, append([]string{"-S", "-c", source, "-o", assembly}, args...)...)
 	// Compile to assembly first
