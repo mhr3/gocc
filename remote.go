@@ -14,9 +14,10 @@ import (
 // WebRequest represents a request to the remote server
 type WebRequest struct {
 	File
-	Arch    string   `uri:"arch" binding:"required"`
-	Package string   `uri:"package" form:"package"`
-	Options []string `uri:"options" form:"options"`
+	Arch                  string   `uri:"arch" binding:"required"`
+	Package               string   `uri:"package" form:"package"`
+	Options               []string `uri:"options" form:"options"`
+	WithInternalFunctions bool     `form:"with_internal_functions"`
 }
 
 // File represents a file
@@ -33,12 +34,13 @@ type WebResult struct {
 
 // Remote represents a remote translator
 type Remote struct {
-	Target  string
-	Source  string
-	Package string
-	Output  string
-	Options []string
-	Client  *req.Client
+	Target                string
+	Source                string
+	Package               string
+	Output                string
+	Options               []string
+	WithInternalFunctions bool
+	Client                *req.Client
 }
 
 // NewRemote creates a new translator that uses remote server
@@ -105,6 +107,9 @@ func (t *Remote) endpoint() string {
 			args = append(args, fmt.Sprintf("options=%s", option))
 		}
 		// args = append(args, fmt.Sprintf("options=%s", strings.Join(t.Options, ",")))
+	}
+	if t.WithInternalFunctions {
+		args = append(args, "with_internal_functions=true")
 	}
 
 	if len(args) > 0 {

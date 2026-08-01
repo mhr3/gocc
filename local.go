@@ -40,6 +40,33 @@ type Local struct {
 	GoStub     string
 	Package    string
 	Options    []string
+	// WithInternalFunctions enables the compiler and ABI conventions required
+	// for C functions that call compiler-emitted helper functions.
+	WithInternalFunctions bool
+}
+
+func appendCompilerOption(options []string, option string) []string {
+	if slices.Contains(options, option) {
+		return options
+	}
+	return append(options, option)
+}
+
+func (t *Local) compilerOptions() []string {
+	options := slices.Clone(t.Options)
+	if !t.WithInternalFunctions {
+		return options
+	}
+
+	if t.Arch.Name == "arm64" {
+		// The ARM64 assembly rewrite moves Clang's X29 and X20 allocations to
+		// these registers, so keep them unavailable during register allocation.
+		options = appendCompilerOption(options, "-ffixed-x25")
+		options = appendCompilerOption(options, "-ffixed-x26")
+	}
+	options = appendCompilerOption(options, "-mno-stackrealign")
+	options = appendCompilerOption(options, "-fomit-frame-pointer")
+	return options
 }
 
 // NewLocal creates a new translator that uses locally installed toolchain
@@ -83,9 +110,10 @@ func (t *Local) Translate() error {
 	if err != nil {
 		return err
 	}
+	compilerOptions := t.compilerOptions()
 
 	// Compile the source file to assembly
-	if err := t.Clang.Compile(t.Source, t.Assembly, t.Object, t.Options...); err != nil {
+	if err := t.Clang.Compile(t.Source, t.Assembly, t.Object, compilerOptions...); err != nil {
 		return err
 	}
 
@@ -96,7 +124,7 @@ func (t *Local) Translate() error {
 	}
 
 	foundMapping := false
-	preserveCABI := slices.Contains(t.Options, "-fomit-frame-pointer")
+	preserveCABI := t.WithInternalFunctions || slices.Contains(compilerOptions, "-fomit-frame-pointer")
 	annotatedNames := make(map[string]struct{}, len(functions))
 	for _, function := range functions {
 		annotatedNames[function.Name] = struct{}{}
@@ -148,7 +176,7 @@ func (t *Local) Translate() error {
 
 	meta := asm.GeneratorMeta{
 		ClangVersion: t.Clang.Version(),
-		Options:      t.Options,
+		Options:      compilerOptions,
 	}
 
 	return asm.GenerateFile(t.Arch, t.GoAssembly, t.Source, functions, meta)

@@ -92,6 +92,7 @@ func translate(req *gocc.WebRequest) (*gocc.WebResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	translator.WithInternalFunctions = req.WithInternalFunctions
 
 	// Translate the file and read the output
 	if err := translator.Translate(); err != nil {
