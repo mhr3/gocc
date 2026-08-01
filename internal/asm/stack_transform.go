@@ -937,6 +937,10 @@ func rewriteArm64SavedPair(op *StackOp, line Line, layout *StackLayout) []Line {
 
 // rewriteStackOps performs the second pass to rewrite stack operations
 func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLayout, function Function) Function {
+	return rewriteStackOpsWithLinkage(arch, archInfo, layout, function, true)
+}
+
+func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layout *StackLayout, function Function, linkageBias bool) Function {
 	newLines := make([]Line, 0, len(function.Lines))
 
 	// Track push offset for rewriting non-callee-saved pushes to MOVs
@@ -1058,7 +1062,7 @@ func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLay
 
 	function.Lines = newLines
 	function.LocalsSize = layout.GoFrameSize
-	if archInfo.Name() == "arm64" && layout.GoFrameSize > 0 {
+	if archInfo.Name() == "arm64" && layout.GoFrameSize > 0 && linkageBias {
 		for i := range function.Lines {
 			// cmd/asm adds a 16-byte linkage/alignment area to framed ARM64
 			// functions. Keeping the emulated C SP above both words also retains
@@ -1068,6 +1072,45 @@ func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLay
 	}
 
 	return function
+}
+
+// reserveInternalStackFrames flattens every internal C-ABI helper frame into
+// the Go-visible frame. Each helper gets a disjoint fixed slot, so helper calls
+// never move RSP and the runtime-visible function's stack check covers all
+// translated C stack storage.
+func reserveInternalStackFrames(functions []Function) []Function {
+	maxVisibleLocals := 0
+	for i := range functions {
+		if !functions[i].Internal && functions[i].LocalsSize > maxVisibleLocals {
+			maxVisibleLocals = functions[i].LocalsSize
+		}
+	}
+
+	const arm64LinkageSize = 16
+	helperBase := maxVisibleLocals + arm64LinkageSize
+	reserved := 0
+	for i := range functions {
+		if !functions[i].Internal || functions[i].HiddenStackSize == 0 {
+			continue
+		}
+		reserved += -reserved & 15
+		bias := helperBase + reserved
+		for lineIdx := range functions[i].Lines {
+			functions[i].Lines[lineIdx] = shiftArm64CStackRef(functions[i].Lines[lineIdx], bias)
+		}
+		reserved += functions[i].HiddenStackSize
+	}
+	reserved += -reserved & 15
+
+	for i := range functions {
+		if functions[i].Internal {
+			continue
+		}
+		// Use a common helper base so the same internal symbols can be called by
+		// multiple exported entry points without per-caller variants.
+		functions[i].LocalsSize = maxVisibleLocals + reserved
+	}
+	return functions
 }
 
 // checkStackUnified is the new unified stack checking function

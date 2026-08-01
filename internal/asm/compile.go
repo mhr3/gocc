@@ -153,7 +153,10 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 
 // GenerateFile generates the Go PLAN9 assembly file
 func GenerateFile(arch *config.Arch, path string, srcPath string, functions []Function, meta GeneratorMeta) error {
-	functions = ApplyTransforms(arch, functions)
+	functions, err := ApplyTransforms(arch, functions)
+	if err != nil {
+		return err
+	}
 	bytes, err := Generate(arch, srcPath, functions, meta)
 	if err != nil {
 		return err

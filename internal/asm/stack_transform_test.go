@@ -571,6 +571,105 @@ func TestStackLayoutFormatStackRef(t *testing.T) {
 	assert.Equal(t, "spill-8(SP)", layout.FormatStackRef(40, "spill"))
 }
 
+func TestReserveInternalStackFramesArm64(t *testing.T) {
+	functions := []Function{
+		{Name: "entry", LocalsSize: 64},
+		{
+			Name:            "helper_one",
+			Internal:        true,
+			HiddenStackSize: 32,
+			Lines: []Line{{
+				Disassembled: "MOVD R0, 0(RSP)",
+				Binary:       wordToLineBinary(0xf90003e0),
+			}},
+		},
+		{
+			Name:            "helper_two",
+			Internal:        true,
+			HiddenStackSize: 48,
+			Lines: []Line{{
+				Disassembled: "ADD $8, RSP, R1",
+				Binary:       wordToLineBinary(0x910023e1),
+			}},
+		},
+	}
+
+	modified := reserveInternalStackFrames(functions)
+
+	// 64 bytes of visible locals plus both disjoint helper slots.
+	assert.Equal(t, 144, modified[0].LocalsSize)
+	// Helper slots begin above the visible locals and ARM64 linkage area.
+	assert.Equal(t, "MOVD R0, 80(RSP)", modified[1].Lines[0].Disassembled)
+	assert.Equal(t, "ADD $120, RSP, R1", modified[2].Lines[0].Disassembled)
+	assert.Empty(t, modified[1].Lines[0].Binary)
+	assert.Empty(t, modified[2].Lines[0].Binary)
+}
+
+func TestApplyTransformsFlattensInternalArm64Frame(t *testing.T) {
+	functions := []Function{
+		{Name: "entry"},
+		{
+			Name:     "helper",
+			Internal: true,
+			Lines: []Line{
+				{Assembly: "stp\tx29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
+				{Assembly: "str\tx0, [sp, #16]", Disassembled: "MOVD R0, 16(RSP)", Binary: wordToLineBinary(0xf9000be0)},
+				{Assembly: "ldr\tx0, [sp, #16]", Disassembled: "MOVD 16(RSP), R0", Binary: wordToLineBinary(0xf9400be0)},
+				{Assembly: "ldp\tx29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
+				{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+			},
+		},
+	}
+
+	modified, err := ApplyTransforms(config.ARM64(), functions)
+	require.NoError(t, err)
+
+	assert.Equal(t, 32, modified[0].LocalsSize)
+	assert.Equal(t, 0, modified[1].LocalsSize)
+	assert.Equal(t, 32, modified[1].HiddenStackSize)
+	for _, line := range modified[1].Lines {
+		assert.NotContains(t, line.Disassembled, "RSP, RSP")
+		if strings.Contains(line.Disassembled, "(RSP)") {
+			assert.Empty(t, line.Binary)
+		}
+	}
+}
+
+func TestApplyTransformsRejectsDirectInternalRecursion(t *testing.T) {
+	functions := []Function{{
+		Name:     "recursive_helper",
+		Internal: true,
+		Lines: []Line{{
+			Disassembled: "CALL recursive_helper<>(SB)",
+		}},
+	}}
+
+	_, err := ApplyTransforms(config.ARM64(), functions)
+	require.EqualError(t, err, "recursive internal helper call graph: recursive_helper -> recursive_helper")
+}
+
+func TestApplyTransformsRejectsMutualInternalRecursion(t *testing.T) {
+	functions := []Function{
+		{
+			Name:     "helper_a",
+			Internal: true,
+			Lines: []Line{{
+				Disassembled: "CALL helper_b<>(SB)",
+			}},
+		},
+		{
+			Name:     "helper_b",
+			Internal: true,
+			Lines: []Line{{
+				Disassembled: "CALL helper_a<>(SB)",
+			}},
+		},
+	}
+
+	_, err := ApplyTransforms(config.ARM64(), functions)
+	require.EqualError(t, err, "recursive internal helper call graph: helper_a -> helper_b -> helper_a")
+}
+
 func TestUnifiedStackTransformSimpleAmd64(t *testing.T) {
 	testFn := Function{
 		Lines: []Line{
