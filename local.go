@@ -69,6 +69,34 @@ func (t *Local) compilerOptions() []string {
 	return options
 }
 
+func validateInternalFunctionOptIn(functions []asm.Function, enabled bool) error {
+	if enabled {
+		return nil
+	}
+
+	for _, function := range functions {
+		if function.Internal {
+			continue
+		}
+		for _, line := range function.Lines {
+			fields := strings.Fields(line.Disassembled)
+			if len(fields) != 2 || fields[0] != "CALL" {
+				continue
+			}
+			target := strings.TrimSuffix(fields[1], "<>(SB)")
+			if target == fields[1] {
+				continue
+			}
+			return fmt.Errorf(
+				"C function %q calls %q; pass --with-internal-functions to enable C helper calls",
+				function.Name, target,
+			)
+		}
+	}
+
+	return nil
+}
+
 // NewLocal creates a new translator that uses locally installed toolchain
 func NewLocal(arch *config.Arch, source, outputDir, suffix, functionSuffix, packageName string, options ...string) (*Local, error) {
 	sourceExt := filepath.Ext(source)
@@ -143,9 +171,10 @@ func (t *Local) Translate() error {
 			})
 		}
 		if idx == -1 {
-			// Keep compiler-emitted helper functions. They use the C register ABI
-			// internally and are intentionally omitted from the generated Go stub.
-			if _, annotated := annotatedNames[assemblyName]; !annotated {
+			// Keep compiler-emitted helper functions only when explicitly enabled.
+			// They use the C register ABI internally and are intentionally omitted
+			// from the generated Go stub.
+			if _, annotated := annotatedNames[assemblyName]; !annotated && t.WithInternalFunctions {
 				v.Internal = true
 				functions = append(functions, v)
 			}
@@ -162,6 +191,9 @@ func (t *Local) Translate() error {
 
 	if !foundMapping {
 		return errors.New("cannot find mapping to machine code")
+	}
+	if err := validateInternalFunctionOptIn(functions, t.WithInternalFunctions); err != nil {
+		return err
 	}
 
 	// apply the function suffix, this needs to be done after the mapping
