@@ -36,3 +36,17 @@ func TestGenerate(t *testing.T) {
 	assert.Contains(t, string(asm), "GLOBL LCPI0_0<>(SB), (RODATA|NOPTR), $32")
 	assert.Contains(t, string(asm), "TEXT ·uint8_mul(SB), NOSPLIT, $0-32")
 }
+
+func TestGenerateInternalFunctionsUseNoFrame(t *testing.T) {
+	for _, arch := range []*config.Arch{config.AMD64(), config.ARM64()} {
+		t.Run(arch.Name, func(t *testing.T) {
+			generated, err := Generate(arch, "", []Function{{
+				Name:     "helper",
+				Internal: true,
+				Lines:    []Line{{Disassembled: "RET"}},
+			}}, GeneratorMeta{})
+			assert.NoError(t, err)
+			assert.Contains(t, string(generated), "TEXT helper<>(SB), NOSPLIT|NOFRAME, $0-0")
+		})
+	}
+}

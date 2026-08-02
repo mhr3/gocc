@@ -5,12 +5,21 @@ import (
 	"strings"
 
 	"github.com/mhr3/gocc/internal/config"
+	"golang.org/x/arch/arm64/arm64asm"
+	"golang.org/x/arch/x86/x86asm"
 )
 
 func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error) {
 	if arch != nil {
 		if err := rejectRecursiveInternalCalls(functions); err != nil {
 			return nil, err
+		}
+		for _, function := range functions {
+			if function.Internal {
+				if err := rejectInternalStackArguments(arch, function); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	for i, function := range functions {
@@ -25,6 +34,57 @@ func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error
 	}
 
 	return functions, nil
+}
+
+func rejectInternalStackArguments(arch *config.Arch, function Function) error {
+	if arch.Name != "amd64" && arch.Name != "arm64" {
+		return nil
+	}
+
+	archInfo := getArchStackInfo(arch)
+	layout := analyzeStackLayout(archInfo, function.Lines, true)
+	firstStackArgument := int64(layout.LocalsSize)
+	if arch.Name == "amd64" {
+		firstStackArgument += 8 // Skip x86 CALL's return address.
+	}
+	for _, line := range function.Lines {
+		if len(line.Binary) == 0 {
+			continue
+		}
+		usesStackArgument := false
+		switch arch.Name {
+		case "amd64":
+			if !strings.Contains(line.Assembly, "rsp") {
+				continue
+			}
+			for _, arg := range decodeAmd64Line(line).Args {
+				memory, ok := arg.(x86asm.Mem)
+				if ok && memory.Base == x86asm.RSP && memory.Disp >= firstStackArgument {
+					usesStackArgument = true
+					break
+				}
+			}
+		case "arm64":
+			if !strings.Contains(line.Assembly, "sp") {
+				continue
+			}
+			for _, arg := range decodeArm64Line(line).Args {
+				memory, ok := arg.(arm64asm.MemImmediate)
+				if ok && memory.Base == arm64asm.RegSP(arm64asm.SP) && memory.Mode == arm64asm.AddrOffset &&
+					int64(immFromMemImmediate(memory)) >= firstStackArgument {
+					usesStackArgument = true
+					break
+				}
+			}
+		}
+		if usesStackArgument {
+			return fmt.Errorf(
+				"internal helper %q uses stack-passed C arguments, which are unsupported",
+				function.Name,
+			)
+		}
+	}
+	return nil
 }
 
 func rejectRecursiveInternalCalls(functions []Function) error {

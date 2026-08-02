@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/carlmjohnson/versioninfo"
@@ -71,7 +72,12 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 	fmt.Fprintf(&builder, "// Target architecture : %s\n", arch.Name)
 	fmt.Fprintf(&builder, "// Compiler options    : %s\n", collectFlags())
 
-	builder.WriteString("\n#include \"textflag.h\"\n#include \"funcdata.h\"\n\n")
+	builder.WriteString("\n#include \"textflag.h\"\n")
+	if hasNonZeroLocals := slices.ContainsFunc(functions, func(function Function) bool { return function.LocalsSize > 0 }); hasNonZeroLocals {
+		builder.WriteString("#include \"funcdata.h\"\n")
+	}
+	builder.WriteString("\n")
+
 	for _, function := range functions {
 		for i, c := range function.Consts {
 			if i != 0 {
@@ -110,14 +116,16 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 			retSize = function.Ret.Size()
 		}
 		textAttrs := "NOSPLIT"
-		if function.Internal && arch.Name == "arm64" {
+		if function.Internal {
 			textAttrs = "NOSPLIT|NOFRAME"
 		}
-		// Large internal kernels must establish their own stack-growth point
-		// before taking addresses of their C-local scratch. Smaller callees stay
-		// NOSPLIT so those addresses remain valid for the duration of the call.
-		if function.LocalsSize > 512 || (function.LocalsSize > 0 && !function.Internal) {
+		// Only Go-visible roots own frames and perform stack growth. Internal C-ABI
+		// helpers use fixed slots reserved in their root's already-checked frame.
+		if function.LocalsSize > 0 && !function.Internal {
 			textAttrs = "0"
+		}
+		if function.Internal {
+			builder.WriteString("\n# internal function, its stack space has been flattened into its caller's frame")
 		}
 		builder.WriteString(fmt.Sprintf("\nTEXT %s(SB),%s,$%d-%d\n", name, textAttrs, function.LocalsSize, paramsSize+retSize))
 		if function.LocalsSize > 0 {
