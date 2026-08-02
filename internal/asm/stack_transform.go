@@ -776,7 +776,7 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 		}
 	}
 
-	if allCalleeSaved && len(layout.SavedRegs) > 0 && !hasStackRefs {
+	if !layout.PreserveCalleeSaved && allCalleeSaved && len(layout.SavedRegs) > 0 && !hasStackRefs {
 		// All register saves are callee-saved and no stack references, so we don't need any stack space
 		layout.GoFrameSize = 0
 	} else {
@@ -791,12 +791,14 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 	for _, op := range ops {
 		switch op.Kind {
 		case StackOpPush:
-			if !layout.NopIndices[op.LineIndex] {
-				if op.Immediate > 0 {
-					depth += int(op.Immediate)
-				} else if archInfo.Name() == "amd64" {
-					depth += op.Size
-				}
+			// Go's fixed frame replaces the entire C allocation, including the
+			// portion whose callee-save instructions are removed. Keep tracking
+			// that original C SP movement so ordinary locals below those saves
+			// resolve relative to the bottom of the fixed frame.
+			if op.Immediate > 0 {
+				depth += int(op.Immediate)
+			} else if archInfo.Name() == "amd64" {
+				depth += op.Size
 			}
 			layout.ResolvedOffsets[op.LineIndex] = layout.LocalsSize - depth
 			pushOffsets[registerKey(op)] = layout.ResolvedOffsets[op.LineIndex]
@@ -883,27 +885,14 @@ func shiftArm64CStackRef(line Line, bias int) Line {
 	return line
 }
 
-func rewriteArm64Writeback(op *StackOp, line Line, layout *StackLayout) Line {
-	inst := decodeArm64Line(line)
-	disassembled := arm64asm.GoSyntax(inst, 0, nil, nil)
-
-	// Go's TEXT frame has already applied the maximum stack allocation. Turn
-	// the writeback memory operand into a fixed reference within that frame.
-	// For the conventional prologue/epilogue shape, any later SUB allocation
-	// is the distance between this save slot and the final hardware RSP.
-	offset := layout.LocalsSize - int(op.Immediate)
-	if op.Kind == StackOpPop {
-		offset = layout.LocalsSize - op.Offset
-	}
-	disassembled = arm64RSPMemoryRef.ReplaceAllString(disassembled, fmt.Sprintf("%d(RSP)", offset))
-
-	line.Disassembled = disassembled
-	line.Binary = nil
-	return line
-}
-
 func arm64SavedRegMove(reg string) (goReg, store, load string, size int) {
 	reg = strings.ToLower(reg)
+	if reg == "xzr" {
+		return "ZR", "MOVD", "MOVD", 8
+	}
+	if reg == "wzr" {
+		return "ZR", "MOVW", "MOVW", 4
+	}
 	switch reg[0] {
 	case 'd':
 		return "F" + reg[1:], "FMOVD", "FMOVD", 8
@@ -1013,7 +1002,11 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 				// Non-callee-saved push: rewrite to MOV
 				if !stackOpCalleeSaved(archInfo, op) {
 					if archInfo.Name() == "arm64" && op.Immediate > 0 {
-						newLines = append(newLines, rewriteArm64Writeback(op, line, layout))
+						// A fixed Go frame has already performed the allocation. Split
+						// writeback pairs into fixed accesses: retaining STP.W here would
+						// both mutate the real Go SP and constrain the rebased offset to
+						// STP's small signed immediate range.
+						newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
 						continue
 					}
 					movInstr := arch.MovInstr[8]
@@ -1041,7 +1034,7 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 				// Non-callee-saved pop: rewrite to MOV
 				if !stackOpCalleeSaved(archInfo, op) {
 					if archInfo.Name() == "arm64" && op.Offset > 0 {
-						newLines = append(newLines, rewriteArm64Writeback(op, line, layout))
+						newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
 						continue
 					}
 					movInstr := arch.MovInstr[8]
@@ -1062,6 +1055,15 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 				}
 
 			case StackOpSpill, StackOpReload:
+				if archInfo.Name() == "arm64" && op.Reg2 != "" {
+					// Pair instructions only have a narrow signed displacement. Once
+					// an internal frame is moved into a root's arena, even a perfectly
+					// ordinary local STP/LDP can no longer encode its new address.
+					// Single fixed accesses preserve the C semantics and allow the Go
+					// assembler to encode the larger positive frame displacement.
+					newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
+					continue
+				}
 				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
 					newLines = append(newLines, rewriteSavedRegisters(archInfo, op, line, layout)...)
 					continue

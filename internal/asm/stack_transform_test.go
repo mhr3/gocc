@@ -246,14 +246,17 @@ func TestStackOpsArm64(t *testing.T) {
 
 	require.Equal(t, 96, modified.LocalsSize)
 
-	require.Len(t, modified.Lines, 21)
+	require.Len(t, modified.Lines, 23)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
 	// This excerpt has no matching restore, so it is not safe to assume that
-	// the fixed-offset store is only a C-ABI register save.
-	assert.Equal(t, testFn.Lines[1].Binary, modified.Lines[1].Binary)
-	assert.Equal(t, "NOP", modified.Lines[2].Disassembled)
-	assert.Equal(t, testFn.Lines[8].Binary, modified.Lines[8].Binary)
-	assert.Equal(t, testFn.Lines[15].Binary, modified.Lines[15].Binary)
+	// the fixed-offset store is only a C-ABI register save. It is split into
+	// fixed single-register stores so a later arena rebase remains encodable.
+	assert.Equal(t, "MOVD R26, 48(RSP)", modified.Lines[1].Disassembled)
+	assert.Equal(t, "MOVD R25, 56(RSP)", modified.Lines[2].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[3].Disassembled)
+	assert.Equal(t, "MOVD ZR, 16(RSP)", modified.Lines[9].Disassembled)
+	assert.Equal(t, "MOVD ZR, 24(RSP)", modified.Lines[10].Disassembled)
+	assert.Equal(t, testFn.Lines[15].Binary, modified.Lines[17].Binary)
 }
 
 func TestStackManipulationArm64(t *testing.T) {
@@ -316,11 +319,13 @@ func TestArm64StackDataKeepsFrame(t *testing.T) {
 	require.Equal(t, 32, modified.LocalsSize)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
-	assert.Equal(t, testFn.Lines[2].Binary, modified.Lines[2].Binary)
-	assert.Equal(t, testFn.Lines[3].Binary, modified.Lines[3].Binary)
-	assert.Equal(t, testFn.Lines[4].Binary, modified.Lines[4].Binary)
-	assert.Equal(t, testFn.Lines[5].Binary, modified.Lines[5].Binary)
-	assert.Equal(t, "NOP", modified.Lines[6].Disassembled)
+	assert.Equal(t, "MOVD ZR, 16(RSP)", modified.Lines[2].Disassembled)
+	assert.Equal(t, "MOVD ZR, 24(RSP)", modified.Lines[3].Disassembled)
+	assert.Equal(t, "FMOVQ F0, 16(RSP)", modified.Lines[4].Disassembled)
+	assert.Equal(t, "FMOVQ F0, 32(RSP)", modified.Lines[5].Disassembled)
+	assert.Equal(t, testFn.Lines[4].Binary, modified.Lines[6].Binary)
+	assert.Equal(t, testFn.Lines[5].Binary, modified.Lines[7].Binary)
+	assert.Equal(t, "NOP", modified.Lines[8].Disassembled)
 }
 
 func TestArm64PreindexedDataStoreUsesFixedGoFrame(t *testing.T) {
@@ -336,9 +341,9 @@ func TestArm64PreindexedDataStoreUsesFixedGoFrame(t *testing.T) {
 
 	require.Equal(t, 16, modified.LocalsSize)
 	assert.Empty(t, modified.Lines[0].Binary)
-	assert.Contains(t, modified.Lines[0].Disassembled, "(ZR, ZR)")
-	assert.Contains(t, modified.Lines[0].Disassembled, "16(RSP)")
-	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
+	assert.Equal(t, "MOVD ZR, 16(RSP)", modified.Lines[0].Disassembled)
+	assert.Equal(t, "MOVD ZR, 24(RSP)", modified.Lines[1].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled)
 }
 
 func TestArm64FramePointerIsRebasedToGoFrame(t *testing.T) {
@@ -691,6 +696,33 @@ func TestApplyTransformsRebasesAmd64NonCalleeSavedPush(t *testing.T) {
 	assert.NotContains(t, modified[1].Lines[2].Disassembled, "stack")
 }
 
+func TestApplyTransformsReservesAmd64CalleeSavedOnlyHelper(t *testing.T) {
+	functions := []Function{
+		{Name: "entry", Lines: []Line{{Disassembled: "CALL helper<>(SB)"}}},
+		{
+			Name:     "helper",
+			Internal: true,
+			Lines: []Line{
+				{Assembly: "push\tr14", Disassembled: "PUSHQ R14", Binary: binaryFromHex("41 56")},
+				{Assembly: "push\trbx", Disassembled: "PUSHQ BX", Binary: binaryFromHex("53")},
+				{Assembly: "pop\trbx", Disassembled: "POPQ BX", Binary: binaryFromHex("5b")},
+				{Assembly: "pop\tr14", Disassembled: "POPQ R14", Binary: binaryFromHex("41 5e")},
+				{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")},
+			},
+		},
+	}
+
+	modified, err := ApplyTransforms(config.AMD64(), functions)
+	require.NoError(t, err)
+
+	assert.Equal(t, 40, modified[0].LocalsSize)
+	assert.Equal(t, 16, modified[1].HiddenStackSize)
+	assert.Equal(t, "MOVQ R14, 16(SP)", modified[1].Lines[0].Disassembled)
+	assert.Equal(t, "MOVQ BX, 8(SP)", modified[1].Lines[1].Disassembled)
+	assert.Equal(t, "MOVQ 8(SP), BX", modified[1].Lines[2].Disassembled)
+	assert.Equal(t, "MOVQ 16(SP), R14", modified[1].Lines[3].Disassembled)
+}
+
 func TestApplyTransformsRejectsAmd64InternalStackArguments(t *testing.T) {
 	functions := []Function{
 		{Name: "entry", Lines: []Line{{Disassembled: "CALL helper<>(SB)"}}},
@@ -821,6 +853,7 @@ func TestApplyTransformsFlattensInternalArm64Frame(t *testing.T) {
 			Internal: true,
 			Lines: []Line{
 				{Assembly: "stp\tx29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
+				{Assembly: "stp\tx8, x8, [sp]", Disassembled: "STP (R8, R8), (RSP)", Binary: wordToLineBinary(0xa90023e8)},
 				{Assembly: "str\tx0, [sp, #16]", Disassembled: "MOVD R0, 16(RSP)", Binary: wordToLineBinary(0xf9000be0)},
 				{Assembly: "ldr\tx0, [sp, #16]", Disassembled: "MOVD 16(RSP), R0", Binary: wordToLineBinary(0xf9400be0)},
 				{Assembly: "ldp\tx29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
@@ -835,7 +868,10 @@ func TestApplyTransformsFlattensInternalArm64Frame(t *testing.T) {
 	assert.Equal(t, 32, modified[0].LocalsSize)
 	assert.Equal(t, 0, modified[1].LocalsSize)
 	assert.Equal(t, 32, modified[1].HiddenStackSize)
+	assert.Equal(t, "MOVD R8, 16(RSP)", modified[1].Lines[2].Disassembled)
+	assert.Equal(t, "MOVD R8, 24(RSP)", modified[1].Lines[3].Disassembled)
 	for _, line := range modified[1].Lines {
+		assert.NotContains(t, line.Disassembled, "STP")
 		assert.NotContains(t, line.Disassembled, "RSP, RSP")
 		if strings.Contains(line.Disassembled, "(RSP)") {
 			assert.Empty(t, line.Binary)
