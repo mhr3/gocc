@@ -3,8 +3,10 @@ package gocc
 import (
 	"testing"
 
+	"github.com/mhr3/gocc/internal/asm"
 	"github.com/mhr3/gocc/internal/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInternalFunctionCompilerOptions(t *testing.T) {
@@ -51,4 +53,28 @@ func TestInternalFunctionCompilerOptionsAreNotDuplicated(t *testing.T) {
 	}
 
 	assert.Equal(t, translator.Options, translator.compilerOptions())
+}
+
+func TestInternalFunctionCallsRequireExplicitOptIn(t *testing.T) {
+	functions := []asm.Function{
+		{
+			Name:  "entry",
+			Lines: []asm.Line{{Disassembled: "CALL helper<>(SB)"}},
+		},
+		{
+			Name:     "helper",
+			Internal: true,
+		},
+	}
+
+	err := validateInternalFunctionOptIn(functions, false)
+	require.EqualError(t, err,
+		`C function "entry" calls "helper"; pass --with-internal-functions to enable C helper calls`)
+	require.NoError(t, validateInternalFunctionOptIn(functions, true))
+}
+
+func TestInternalFunctionOptInNotRequiredWithoutEmittedCalls(t *testing.T) {
+	functions := []asm.Function{{Name: "entry", Lines: []asm.Line{{Disassembled: "RET"}}}}
+
+	require.NoError(t, validateInternalFunctionOptIn(functions, false))
 }
