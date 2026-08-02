@@ -791,13 +791,14 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 	for _, op := range ops {
 		switch op.Kind {
 		case StackOpPush:
-			// Go's fixed frame replaces the entire C allocation, including the
-			// portion whose callee-save instructions are removed. Keep tracking
-			// that original C SP movement so ordinary locals below those saves
-			// resolve relative to the bottom of the fixed frame.
+			// ARM64 pre-indexed saves combine the save with stack allocation, and
+			// that allocation remains part of the fixed Go frame even when the
+			// callee-save itself is removed. On AMD64, an ordinary PUSH only
+			// contributes to the compacted frame when it is retained. Internal
+			// helpers preserve their C-ABI saves, so those pushes are not NOPed.
 			if op.Immediate > 0 {
 				depth += int(op.Immediate)
-			} else if archInfo.Name() == "amd64" {
+			} else if archInfo.Name() == "amd64" && !layout.NopIndices[op.LineIndex] {
 				depth += op.Size
 			}
 			layout.ResolvedOffsets[op.LineIndex] = layout.LocalsSize - depth

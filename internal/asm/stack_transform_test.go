@@ -65,6 +65,51 @@ func TestStackNotPopAmd64(t *testing.T) {
 	assert.Equal(t, "RET", modified.Lines[4].Disassembled)
 }
 
+func TestAmd64RetainedPushUsesCompactedFrame(t *testing.T) {
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "push\trbp", Disassembled: "PUSHQ BP", Binary: binaryFromHex("55")},
+			{Assembly: "push\tr15", Disassembled: "PUSHQ R15", Binary: binaryFromHex("41 57")},
+			{Assembly: "push\tr14", Disassembled: "PUSHQ R14", Binary: binaryFromHex("41 56")},
+			{Assembly: "push\tr13", Disassembled: "PUSHQ R13", Binary: binaryFromHex("41 55")},
+			{Assembly: "push\tr12", Disassembled: "PUSHQ R12", Binary: binaryFromHex("41 54")},
+			{Assembly: "push\trbx", Disassembled: "PUSHQ BX", Binary: binaryFromHex("53")},
+			{Assembly: "push\trax", Disassembled: "PUSHQ AX", Binary: binaryFromHex("50")},
+		},
+	}
+
+	modified := checkStackUnified(config.AMD64(), testFn)
+
+	require.Equal(t, 8, modified.LocalsSize)
+	for i := 0; i < 6; i++ {
+		assert.Equal(t, "NOP", modified.Lines[i].Disassembled)
+	}
+	assert.Equal(t, "MOVQ AX, 0(SP)", modified.Lines[6].Disassembled)
+}
+
+func TestAmd64InternalPushUsesPreservedFrame(t *testing.T) {
+	testFn := Function{
+		Internal: true,
+		Lines: []Line{
+			{Assembly: "push\trbp", Disassembled: "PUSHQ BP", Binary: binaryFromHex("55")},
+			{Assembly: "push\tr15", Disassembled: "PUSHQ R15", Binary: binaryFromHex("41 57")},
+			{Assembly: "push\tr14", Disassembled: "PUSHQ R14", Binary: binaryFromHex("41 56")},
+			{Assembly: "push\tr13", Disassembled: "PUSHQ R13", Binary: binaryFromHex("41 55")},
+			{Assembly: "push\tr12", Disassembled: "PUSHQ R12", Binary: binaryFromHex("41 54")},
+			{Assembly: "push\trbx", Disassembled: "PUSHQ BX", Binary: binaryFromHex("53")},
+			{Assembly: "push\trax", Disassembled: "PUSHQ AX", Binary: binaryFromHex("50")},
+		},
+	}
+
+	modified := checkStackManipulation(config.AMD64(), testFn)
+
+	assert.Equal(t, 0, modified.LocalsSize)
+	require.Equal(t, 56, modified.HiddenStackSize)
+	assert.Equal(t, "MOVQ BP, 48(SP)", modified.Lines[0].Disassembled)
+	assert.Equal(t, "MOVQ BX, 8(SP)", modified.Lines[5].Disassembled)
+	assert.Equal(t, "MOVQ AX, 0(SP)", modified.Lines[6].Disassembled)
+}
+
 func TestStackGrowthAmd64(t *testing.T) {
 	/*
 		     9b5: 55                            push    rbp
@@ -721,6 +766,73 @@ func TestApplyTransformsReservesAmd64CalleeSavedOnlyHelper(t *testing.T) {
 	assert.Equal(t, "MOVQ BX, 8(SP)", modified[1].Lines[1].Disassembled)
 	assert.Equal(t, "MOVQ 8(SP), BX", modified[1].Lines[2].Disassembled)
 	assert.Equal(t, "MOVQ 16(SP), R14", modified[1].Lines[3].Disassembled)
+}
+
+func TestApplyTransformsSupportsSharedInternalHelperAtDifferentDepths(t *testing.T) {
+	functions := []Function{
+		{
+			Name: "A",
+			Lines: []Line{
+				{Disassembled: "CALL F<>(SB)"},
+				{Disassembled: "CALL B<>(SB)"},
+			},
+		},
+		{
+			Name:     "B",
+			Internal: true,
+			Lines: []Line{
+				{Assembly: "push\trax", Disassembled: "PUSHQ AX", Binary: binaryFromHex("50")},
+				{Disassembled: "CALL F<>(SB)"},
+				{Assembly: "pop\trax", Disassembled: "POPQ AX", Binary: binaryFromHex("58")},
+				{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")},
+			},
+		},
+		{
+			Name:     "F",
+			Internal: true,
+			Lines: []Line{
+				{Assembly: "push\tr14", Disassembled: "PUSHQ R14", Binary: binaryFromHex("41 56")},
+				{Assembly: "push\trbx", Disassembled: "PUSHQ BX", Binary: binaryFromHex("53")},
+				{Assembly: "pop\trbx", Disassembled: "POPQ BX", Binary: binaryFromHex("5b")},
+				{Assembly: "pop\tr14", Disassembled: "POPQ R14", Binary: binaryFromHex("41 5e")},
+				{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")},
+			},
+		},
+	}
+
+	modified, err := ApplyTransforms(config.AMD64(), functions)
+	require.NoError(t, err)
+
+	// Two internal helpers give every arena 16 bytes of downward call-depth
+	// slack. B is based at 16(SP), while F is based at 48(SP).
+	assert.Equal(t, 80, modified[0].LocalsSize)
+	assert.Equal(t, 8, modified[1].HiddenStackSize)
+	assert.Equal(t, "MOVQ AX, 16(SP)", modified[1].Lines[0].Disassembled)
+	assert.Equal(t, 16, modified[2].HiddenStackSize)
+	assert.Equal(t, "MOVQ R14, 56(SP)", modified[2].Lines[0].Disassembled)
+	assert.Equal(t, "MOVQ BX, 48(SP)", modified[2].Lines[1].Disassembled)
+
+	// Model addresses relative to A's hardware SP. A direct CALL places F's
+	// 16-byte frame at [40, 56); through B, the extra return address slides it
+	// down to [32, 48). B's active frame is [8, 16), and return addresses are
+	// below zero, so neither F invocation can overlap live caller state.
+	const (
+		callSlot    = 8
+		bBias       = 16
+		bSize       = 8
+		fBias       = 48
+		fSize       = 16
+		directDepth = 1
+		nestedDepth = 2
+	)
+	bStart := bBias - callSlot
+	fDirectStart := fBias - directDepth*callSlot
+	fNestedStart := fBias - nestedDepth*callSlot
+	assert.Equal(t, 40, fDirectStart)
+	assert.Equal(t, 32, fNestedStart)
+	assert.LessOrEqual(t, bStart+bSize, fNestedStart)
+	assert.LessOrEqual(t, fDirectStart+fSize, modified[0].LocalsSize)
+	assert.LessOrEqual(t, fNestedStart+fSize, modified[0].LocalsSize)
 }
 
 func TestApplyTransformsRejectsAmd64InternalStackArguments(t *testing.T) {
