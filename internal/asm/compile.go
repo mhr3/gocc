@@ -125,7 +125,7 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 			textAttrs = "0"
 		}
 		if function.Internal {
-			builder.WriteString("\n# internal function, its stack space has been flattened into its caller's frame")
+			builder.WriteString("\n// internal function, its stack space has been flattened into its caller's frame")
 		}
 		builder.WriteString(fmt.Sprintf("\nTEXT %s(SB),%s,$%d-%d\n", name, textAttrs, function.LocalsSize, paramsSize+retSize))
 		if function.LocalsSize > 0 {
