@@ -974,9 +974,10 @@ func rewriteStackOps(arch *config.Arch, archInfo ArchStackInfo, layout *StackLay
 
 func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layout *StackLayout, function Function, linkageBias bool) Function {
 	newLines := make([]Line, 0, len(function.Lines))
-
-	// Track push offset for rewriting non-callee-saved pushes to MOVs
-	pushOffset := layout.LocalsSize
+	hardwareSP := "SP"
+	if archInfo.Name() == "arm64" {
+		hardwareSP = "RSP"
+	}
 
 	for i, line := range function.Lines {
 		// Check if this line should be NOPed
@@ -1023,8 +1024,8 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 					} else {
 						reg = strings.ToUpper(op.Reg)
 					}
-					instr := fmt.Sprintf("%s %s, stack-%d(SP)", movInstr, reg, layout.GoFrameSize-pushOffset)
-					pushOffset += 8
+					offset := layout.ResolvedOffsets[i]
+					instr := fmt.Sprintf("%s %s, %d(%s)", movInstr, reg, offset, hardwareSP)
 					lineCpy := line
 					lineCpy.Disassembled = instr
 					lineCpy.Binary = nil
@@ -1043,7 +1044,6 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 						newLines = append(newLines, rewriteArm64Writeback(op, line, layout))
 						continue
 					}
-					pushOffset -= 8
 					movInstr := arch.MovInstr[8]
 					parts := strings.Fields(line.Disassembled)
 					var reg string
@@ -1052,7 +1052,8 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 					} else {
 						reg = strings.ToUpper(op.Reg)
 					}
-					instr := fmt.Sprintf("%s stack-%d(SP), %s", movInstr, layout.GoFrameSize-pushOffset, reg)
+					offset := layout.ResolvedOffsets[i]
+					instr := fmt.Sprintf("%s %d(%s), %s", movInstr, offset, hardwareSP, reg)
 					lineCpy := line
 					lineCpy.Disassembled = instr
 					lineCpy.Binary = nil

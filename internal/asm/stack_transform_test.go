@@ -659,6 +659,80 @@ func TestReserveInternalStackFramesAmd64RebasesStackAddress(t *testing.T) {
 	assert.Empty(t, modified[1].Lines[1].Binary)
 }
 
+func TestApplyTransformsRebasesAmd64NonCalleeSavedPush(t *testing.T) {
+	functions := []Function{
+		{Name: "entry", Lines: []Line{{Disassembled: "CALL helper<>(SB)"}}},
+		{
+			Name:     "helper",
+			Internal: true,
+			Lines: []Line{
+				{Assembly: "push\tr14", Disassembled: "PUSHQ R14", Binary: binaryFromHex("41 56")},
+				{Assembly: "push\trbx", Disassembled: "PUSHQ BX", Binary: binaryFromHex("53")},
+				{Assembly: "push\trax", Disassembled: "PUSHQ AX", Binary: binaryFromHex("50")},
+				{Disassembled: "CALL leaf<>(SB)"},
+				{Assembly: "add\trsp, 8", Disassembled: "ADDQ $0x8, SP", Binary: binaryFromHex("48 83 c4 08")},
+				{Assembly: "pop\trbx", Disassembled: "POPQ BX", Binary: binaryFromHex("5b")},
+				{Assembly: "pop\tr14", Disassembled: "POPQ R14", Binary: binaryFromHex("41 5e")},
+				{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")},
+			},
+		},
+		{Name: "leaf", Internal: true, Lines: []Line{{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")}}},
+	}
+
+	modified, err := ApplyTransforms(config.AMD64(), functions)
+	require.NoError(t, err)
+
+	assert.Equal(t, 64, modified[0].LocalsSize)
+	assert.Equal(t, 0, modified[1].LocalsSize)
+	assert.Equal(t, 24, modified[1].HiddenStackSize)
+	assert.Equal(t, "MOVQ R14, 32(SP)", modified[1].Lines[0].Disassembled)
+	assert.Equal(t, "MOVQ BX, 24(SP)", modified[1].Lines[1].Disassembled)
+	assert.Equal(t, "MOVQ AX, 16(SP)", modified[1].Lines[2].Disassembled)
+	assert.NotContains(t, modified[1].Lines[2].Disassembled, "stack")
+}
+
+func TestApplyTransformsRejectsAmd64InternalStackArguments(t *testing.T) {
+	functions := []Function{
+		{Name: "entry", Lines: []Line{{Disassembled: "CALL helper<>(SB)"}}},
+		{
+			Name:     "helper",
+			Internal: true,
+			Lines: []Line{
+				{Assembly: "sub\trsp, 32", Disassembled: "SUBQ $0x20, SP", Binary: binaryFromHex("48 83 ec 20")},
+				// At function entry the return address occupies [rsp], so after
+				// allocating 32 bytes the first stack argument is [rsp + 40].
+				{Assembly: "mov\trax, qword ptr [rsp + 40]", Disassembled: "MOVQ 40(SP), AX", Binary: binaryFromHex("48 8b 44 24 28")},
+				{Assembly: "add\trsp, 32", Disassembled: "ADDQ $0x20, SP", Binary: binaryFromHex("48 83 c4 20")},
+				{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")},
+			},
+		},
+	}
+
+	_, err := ApplyTransforms(config.AMD64(), functions)
+	require.EqualError(t, err, `internal helper "helper" uses stack-passed C arguments, which are unsupported`)
+}
+
+func TestApplyTransformsRejectsArm64InternalStackArguments(t *testing.T) {
+	functions := []Function{
+		{Name: "entry", Lines: []Line{{Disassembled: "CALL helper<>(SB)"}}},
+		{
+			Name:     "helper",
+			Internal: true,
+			Lines: []Line{
+				{Assembly: "stp\tx29, x30, [sp, #-32]!", Binary: wordToLineBinary(0xa9be7bfd)},
+				// AArch64 keeps the return address in X30. After allocating 32
+				// bytes, the first stack argument is therefore at [sp + 32].
+				{Assembly: "ldr\tx0, [sp, #32]", Disassembled: "MOVD 32(RSP), R0", Binary: wordToLineBinary(0xf94013e0)},
+				{Assembly: "ldp\tx29, x30, [sp], #32", Binary: wordToLineBinary(0xa8c27bfd)},
+				{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+			},
+		},
+	}
+
+	_, err := ApplyTransforms(config.ARM64(), functions)
+	require.EqualError(t, err, `internal helper "helper" uses stack-passed C arguments, which are unsupported`)
+}
+
 func TestAssignInternalFunctionOwnersAcceptsDisjointGraphs(t *testing.T) {
 	functions := []Function{
 		{Name: "FN1", Lines: []Line{{Disassembled: "CALL A<>(SB)"}}},
