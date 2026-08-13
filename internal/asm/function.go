@@ -178,6 +178,7 @@ type Line struct {
 	Binary       []string `json:"binary"`                 // Binary representation of the line
 	Assembly     string   `json:"assembly"`               // Assembly representation of the line
 	Disassembled string   `json:"disassembled,omitempty"` // Disassembled representation of the line
+	Comment      string   `json:"comment,omitempty"`      // Optional generated-code comment replacing Assembly
 }
 
 // Compile returns the string representation of a line in PLAN9 assembly
@@ -196,7 +197,7 @@ func (line *Line) Compile(arch *config.Arch) string {
 		if line.Disassembled == "NOP" {
 			comment = "(skipped)"
 		}
-		addInstructionComment(&builder, &Line{Assembly: line.Assembly, Disassembled: comment})
+		addInstructionComment(&builder, &Line{Assembly: line.Assembly, Disassembled: comment, Comment: line.Comment})
 		builder.WriteString("\n")
 		return builder.String()
 	}
@@ -242,13 +243,17 @@ func (line *Line) Compile(arch *config.Arch) string {
 }
 
 func addInstructionComment(builder *strings.Builder, line *Line) {
-	if line.Disassembled != "" && line.Assembly != "" {
-		fmt.Fprintf(builder, "\t// %-36s // %s", line.Disassembled, line.Assembly)
+	comment := line.Assembly
+	if line.Comment != "" {
+		comment = line.Comment
+	}
+	if line.Disassembled != "" && comment != "" {
+		fmt.Fprintf(builder, "\t// %-36s // %s", line.Disassembled, comment)
 	} else if line.Disassembled != "" {
 		builder.WriteString("\t// ")
 		builder.WriteString(line.Disassembled)
-	} else if line.Assembly != "" {
-		fmt.Fprintf(builder, "\t// %-36s // %s", "?", line.Assembly)
+	} else if comment != "" {
+		fmt.Fprintf(builder, "\t// %-36s // %s", "?", comment)
 	}
 }
 

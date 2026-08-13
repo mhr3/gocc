@@ -106,9 +106,9 @@ const _RelocType_name = "R_ADDRR_ADDRPOWERR_ADDRARM64R_ADDRMIPSR_ADDROFFR_SIZER_
 var _RelocType_index = [...]uint16{0, 6, 17, 28, 38, 47, 53, 59, 68, 79, 88, 99, 109, 116, 123, 131, 139, 147, 153, 159, 165, 175, 184, 194, 210, 226, 237, 243, 254, 264, 273, 286, 300, 314, 328, 344, 355, 368, 387, 407, 427, 447, 460, 474, 488, 502, 517, 531, 545, 556, 578, 600, 614, 629, 652, 669, 687, 708, 723, 742, 753, 770, 782, 801, 820, 834, 848, 864, 882, 902, 922, 936, 954, 970, 980, 993, 1007, 1023, 1040, 1053, 1078, 1097, 1113, 1129, 1141, 1152, 1165, 1176, 1188, 1198, 1210, 1221}
 
 func (i RelocType) String() string {
-	i -= 1
-	if i < 0 || i >= RelocType(len(_RelocType_index)-1) {
-		return "RelocType(" + strconv.FormatInt(int64(i+1), 10) + ")"
+	idx := int(i) - 1
+	if i < 1 || idx >= len(_RelocType_index)-1 {
+		return "RelocType(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _RelocType_name[_RelocType_index[i]:_RelocType_index[i+1]]
+	return _RelocType_name[_RelocType_index[idx]:_RelocType_index[idx+1]]
 }
