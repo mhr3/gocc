@@ -291,17 +291,15 @@ func TestStackOpsArm64(t *testing.T) {
 
 	require.Equal(t, 96, modified.LocalsSize)
 
-	require.Len(t, modified.Lines, 23)
+	require.Len(t, modified.Lines, 21)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
 	// This excerpt has no matching restore, so it is not safe to assume that
-	// the fixed-offset store is only a C-ABI register save. It is split into
-	// fixed single-register stores so a later arena rebase remains encodable.
-	assert.Equal(t, "MOVD R26, 48(RSP)", modified.Lines[1].Disassembled)
-	assert.Equal(t, "MOVD R25, 56(RSP)", modified.Lines[2].Disassembled)
-	assert.Equal(t, "NOP", modified.Lines[3].Disassembled)
-	assert.Equal(t, "MOVD ZR, 16(RSP)", modified.Lines[9].Disassembled)
-	assert.Equal(t, "MOVD ZR, 24(RSP)", modified.Lines[10].Disassembled)
-	assert.Equal(t, testFn.Lines[15].Binary, modified.Lines[17].Binary)
+	// the fixed-offset store is only a C-ABI register save. Its final offset
+	// fits STP's scaled immediate, so the pair remains intact.
+	assert.Equal(t, "STP (R26, R25), 48(RSP)", modified.Lines[1].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[2].Disassembled)
+	assert.Equal(t, "STP (ZR, ZR), 16(RSP)", modified.Lines[8].Disassembled)
+	assert.Equal(t, testFn.Lines[15].Binary, modified.Lines[15].Binary)
 }
 
 func TestStackManipulationArm64(t *testing.T) {
@@ -364,13 +362,11 @@ func TestArm64StackDataKeepsFrame(t *testing.T) {
 	require.Equal(t, 32, modified.LocalsSize)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
-	assert.Equal(t, "MOVD ZR, 16(RSP)", modified.Lines[2].Disassembled)
-	assert.Equal(t, "MOVD ZR, 24(RSP)", modified.Lines[3].Disassembled)
-	assert.Equal(t, "FMOVQ F0, 16(RSP)", modified.Lines[4].Disassembled)
-	assert.Equal(t, "FMOVQ F0, 32(RSP)", modified.Lines[5].Disassembled)
-	assert.Equal(t, testFn.Lines[4].Binary, modified.Lines[6].Binary)
-	assert.Equal(t, testFn.Lines[5].Binary, modified.Lines[7].Binary)
-	assert.Equal(t, "NOP", modified.Lines[8].Disassembled)
+	assert.Equal(t, "STP (ZR, ZR), 16(RSP)", modified.Lines[2].Disassembled)
+	assert.Equal(t, "FSTPQ (F0, F0), 16(RSP)", modified.Lines[3].Disassembled)
+	assert.Equal(t, testFn.Lines[4].Binary, modified.Lines[4].Binary)
+	assert.Equal(t, testFn.Lines[5].Binary, modified.Lines[5].Binary)
+	assert.Equal(t, "NOP", modified.Lines[6].Disassembled)
 }
 
 func TestArm64PreindexedDataStoreUsesFixedGoFrame(t *testing.T) {
@@ -386,9 +382,70 @@ func TestArm64PreindexedDataStoreUsesFixedGoFrame(t *testing.T) {
 
 	require.Equal(t, 16, modified.LocalsSize)
 	assert.Empty(t, modified.Lines[0].Binary)
-	assert.Equal(t, "MOVD ZR, 16(RSP)", modified.Lines[0].Disassembled)
-	assert.Equal(t, "MOVD ZR, 24(RSP)", modified.Lines[1].Disassembled)
-	assert.Equal(t, "NOP", modified.Lines[2].Disassembled)
+	assert.Equal(t, "STP (ZR, ZR), 16(RSP)", modified.Lines[0].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
+}
+
+func TestArm64StackPairKeptWhenFinalOffsetIsEncodable(t *testing.T) {
+	tests := []struct {
+		name, assembly, disassembled, want string
+		bias                               int
+	}{
+		{name: "32-bit", assembly: "stp\tw8, w9, [sp]", disassembled: "STPW (R8, R9), 248(RSP)", bias: 4, want: "STPW (R8, R9), 252(RSP)"},
+		{name: "64-bit", assembly: "stp\tx8, x9, [sp]", disassembled: "STP (R8, R9), 496(RSP)", bias: 8, want: "STP (R8, R9), 504(RSP)"},
+		{name: "128-bit", assembly: "stp\tq0, q1, [sp]", disassembled: "FSTPQ (F0, F1), 992(RSP)", bias: 16, want: "FSTPQ (F0, F1), 1008(RSP)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shifted := shiftArm64CStackRef(Line{Assembly: tt.assembly, Disassembled: tt.disassembled}, tt.bias)
+			require.Len(t, shifted, 1)
+			assert.Equal(t, tt.want, shifted[0].Disassembled)
+		})
+	}
+}
+
+func TestArm64StackPairSplitWhenFinalOffsetIsNotEncodable(t *testing.T) {
+	tests := []struct {
+		name, assembly, disassembled string
+		bias                         int
+		want                         []string
+	}{
+		{name: "32-bit", assembly: "stp\tw8, w9, [sp]", disassembled: "STPW (R8, R9), 248(RSP)", bias: 8, want: []string{"MOVW R8, 256(RSP)", "MOVW R9, 260(RSP)"}},
+		{name: "64-bit", assembly: "stp\tx8, x9, [sp]", disassembled: "STP (R8, R9), 496(RSP)", bias: 16, want: []string{"MOVD R8, 512(RSP)", "MOVD R9, 520(RSP)"}},
+		{name: "128-bit", assembly: "stp\tq0, q1, [sp]", disassembled: "FSTPQ (F0, F1), 992(RSP)", bias: 32, want: []string{"FMOVQ F0, 1024(RSP)", "FMOVQ F1, 1040(RSP)"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shifted := shiftArm64CStackRef(Line{Labels: []string{"target"}, Assembly: tt.assembly, Disassembled: tt.disassembled}, tt.bias)
+			require.Len(t, shifted, 2)
+			assert.Equal(t, tt.want[0], shifted[0].Disassembled)
+			assert.Equal(t, tt.want[1], shifted[1].Disassembled)
+			assert.Equal(t, []string{"target"}, shifted[0].Labels)
+			assert.Empty(t, shifted[1].Labels)
+			assert.Empty(t, shifted[0].Comment)
+			assert.Equal(t, "split continuation of preceding STP", shifted[1].Comment)
+			assert.Contains(t, shifted[1].Compile(config.ARM64()), "// split continuation of preceding STP")
+		})
+	}
+}
+
+func TestArm64StackPairLoadUsesSameFinalOffsetRule(t *testing.T) {
+	line := Line{
+		Assembly:     "ldp\tx8, x9, [sp]",
+		Disassembled: "LDP 496(RSP), (R8, R9)",
+	}
+
+	kept := shiftArm64CStackRef(line, 8)
+	require.Len(t, kept, 1)
+	assert.Equal(t, "LDP 504(RSP), (R8, R9)", kept[0].Disassembled)
+
+	split := shiftArm64CStackRef(line, 16)
+	require.Len(t, split, 2)
+	assert.Equal(t, "MOVD 512(RSP), R8", split[0].Disassembled)
+	assert.Equal(t, "MOVD 520(RSP), R9", split[1].Disassembled)
+	assert.Equal(t, "split continuation of preceding LDP", split[1].Comment)
 }
 
 func TestArm64FramePointerIsRebasedToGoFrame(t *testing.T) {
@@ -980,10 +1037,8 @@ func TestApplyTransformsFlattensInternalArm64Frame(t *testing.T) {
 	assert.Equal(t, 32, modified[0].LocalsSize)
 	assert.Equal(t, 0, modified[1].LocalsSize)
 	assert.Equal(t, 32, modified[1].HiddenStackSize)
-	assert.Equal(t, "MOVD R8, 16(RSP)", modified[1].Lines[2].Disassembled)
-	assert.Equal(t, "MOVD R8, 24(RSP)", modified[1].Lines[3].Disassembled)
+	assert.Equal(t, "STP (R8, R8), 16(RSP)", modified[1].Lines[1].Disassembled)
 	for _, line := range modified[1].Lines {
-		assert.NotContains(t, line.Disassembled, "STP")
 		assert.NotContains(t, line.Disassembled, "RSP, RSP")
 		if strings.Contains(line.Disassembled, "(RSP)") {
 			assert.Empty(t, line.Binary)

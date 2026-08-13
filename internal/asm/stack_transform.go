@@ -856,22 +856,110 @@ var arm64RSPMemoryRef = regexp.MustCompile(`[+-]?[0-9]*\(RSP\)`)
 var arm64RSPBaseAdd = regexp.MustCompile(`^ADD \$([0-9]+), RSP, (R[0-9]+)$`)
 var arm64RSPBaseMove = regexp.MustCompile(`^MOVD RSP, (R[0-9]+)$`)
 
+func arm64PairRegisters(line Line) (reg1, reg2 string, elementSize int, ok bool) {
+	fields := strings.Fields(line.Assembly)
+	if len(fields) < 3 || (fields[0] != "stp" && fields[0] != "ldp") {
+		return "", "", 0, false
+	}
+
+	reg1 = strings.TrimSuffix(fields[1], ",")
+	reg2 = strings.TrimSuffix(fields[2], ",")
+	_, _, _, elementSize = arm64SavedRegMove(reg1)
+	return reg1, reg2, elementSize, true
+}
+
+func arm64PairPlan9Opcode(reg string, load bool) string {
+	reg = strings.ToLower(reg)
+	switch reg[0] {
+	case 'w':
+		if load {
+			return "LDPW"
+		}
+		return "STPW"
+	case 'q':
+		if load {
+			return "FLDPQ"
+		}
+		return "FSTPQ"
+	case 'd':
+		if load {
+			return "FLDPD"
+		}
+		return "FSTPD"
+	case 's':
+		if load {
+			return "FLDPS"
+		}
+		return "FSTPS"
+	default:
+		if load {
+			return "LDP"
+		}
+		return "STP"
+	}
+}
+
+func arm64PairOffsetEncodable(offset, elementSize int) bool {
+	return elementSize > 0 && offset%elementSize == 0 &&
+		offset >= -64*elementSize && offset <= 63*elementSize
+}
+
+func arm64SplitContinuationComment(line Line) string {
+	fields := strings.Fields(line.Assembly)
+	if len(fields) == 0 {
+		return "split continuation of preceding pair instruction"
+	}
+	return "split continuation of preceding " + strings.ToUpper(fields[0])
+}
+
+func splitArm64StackPair(line Line, offset int) []Line {
+	reg1, reg2, _, ok := arm64PairRegisters(line)
+	if !ok {
+		return []Line{line}
+	}
+
+	regs := []string{reg1, reg2}
+	result := make([]Line, 0, len(regs))
+	isLoad := strings.HasPrefix(strings.TrimSpace(line.Assembly), "ldp")
+	for i, reg := range regs {
+		goReg, store, load, size := arm64SavedRegMove(reg)
+		instruction := fmt.Sprintf("%s %s, %d(RSP)", store, goReg, offset)
+		if isLoad {
+			instruction = fmt.Sprintf("%s %d(RSP), %s", load, offset, goReg)
+		}
+		rewritten := Line{Assembly: line.Assembly, Disassembled: instruction}
+		if i == 0 {
+			rewritten.Labels = line.Labels
+		} else {
+			rewritten.Comment = arm64SplitContinuationComment(line)
+		}
+		result = append(result, rewritten)
+		offset += size
+	}
+	return result
+}
+
 // shiftArm64CStackRef keeps translated C locals above the linkage word that
 // cmd/asm reserves at 0(RSP) for LR whenever a Go assembly function has a
 // frame. C sees its post-prologue SP as the bottom of its local area, whereas
-// Go's hardware RSP still points at that linkage word.
-func shiftArm64CStackRef(line Line, bias int) Line {
-	if bias == 0 || !strings.Contains(line.Disassembled, "RSP") {
-		return line
+// Go's hardware RSP still points at that linkage word. Stack pairs remain
+// paired when the final scaled offset is encodable and split otherwise.
+func shiftArm64CStackRef(line Line, bias int) []Line {
+	if !strings.Contains(line.Disassembled, "RSP") {
+		return []Line{line}
 	}
 
+	shiftedOffset := 0
+	foundStackRef := false
 	rewritten := arm64RSPMemoryRef.ReplaceAllStringFunc(line.Disassembled, func(ref string) string {
 		offsetText := strings.TrimSuffix(ref, "(RSP)")
 		offset := 0
 		if offsetText != "" {
 			offset, _ = strconv.Atoi(offsetText)
 		}
-		return fmt.Sprintf("%d(RSP)", offset+bias)
+		shiftedOffset = offset + bias
+		foundStackRef = true
+		return fmt.Sprintf("%d(RSP)", shiftedOffset)
 	})
 	if match := arm64RSPBaseAdd.FindStringSubmatch(rewritten); match != nil {
 		offset, _ := strconv.Atoi(match[1])
@@ -883,7 +971,22 @@ func shiftArm64CStackRef(line Line, bias int) Line {
 		line.Disassembled = rewritten
 		line.Binary = nil
 	}
-	return line
+
+	if foundStackRef {
+		_, _, elementSize, pair := arm64PairRegisters(line)
+		if pair && !arm64PairOffsetEncodable(shiftedOffset, elementSize) {
+			return splitArm64StackPair(line, shiftedOffset)
+		}
+	}
+	return []Line{line}
+}
+
+func shiftArm64CStackRefs(lines []Line, bias int) []Line {
+	shifted := make([]Line, 0, len(lines))
+	for _, line := range lines {
+		shifted = append(shifted, shiftArm64CStackRef(line, bias)...)
+	}
+	return shifted
 }
 
 func arm64SavedRegMove(reg string) (goReg, store, load string, size int) {
@@ -924,11 +1027,28 @@ func rewriteArm64SavedPair(op *StackOp, line Line, layout *StackLayout) []Line {
 		rewritten := Line{Assembly: line.Assembly, Disassembled: instruction}
 		if i == 0 {
 			rewritten.Labels = line.Labels
+		} else {
+			rewritten.Comment = arm64SplitContinuationComment(line)
 		}
 		result = append(result, rewritten)
 		offset += size
 	}
 	return result
+}
+
+func rewriteArm64FixedPair(op *StackOp, line Line, layout *StackLayout) Line {
+	disassembled := arm64asm.GoSyntax(decodeArm64Line(line), 0, nil, nil)
+	if space := strings.IndexByte(disassembled, ' '); space >= 0 {
+		disassembled = disassembled[space+1:]
+	}
+	opcode := arm64PairPlan9Opcode(op.Reg, op.Kind == StackOpPop || op.Kind == StackOpReload)
+	disassembled = opcode + " " + disassembled
+	disassembled = arm64RSPMemoryRef.ReplaceAllString(
+		disassembled, fmt.Sprintf("%d(RSP)", layout.ResolvedOffsets[op.LineIndex]),
+	)
+	line.Disassembled = disassembled
+	line.Binary = nil
+	return line
 }
 
 func amd64SavedRegName(reg string) string {
@@ -997,17 +1117,20 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 
 			case StackOpPush:
 				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
-					newLines = append(newLines, rewriteSavedRegisters(archInfo, op, line, layout)...)
+					if archInfo.Name() == "arm64" && op.Reg2 != "" {
+						newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
+					} else {
+						newLines = append(newLines, rewriteSavedRegisters(archInfo, op, line, layout)...)
+					}
 					continue
 				}
 				// Non-callee-saved push: rewrite to MOV
 				if !stackOpCalleeSaved(archInfo, op) {
 					if archInfo.Name() == "arm64" && op.Immediate > 0 {
-						// A fixed Go frame has already performed the allocation. Split
-						// writeback pairs into fixed accesses: retaining STP.W here would
-						// both mutate the real Go SP and constrain the rebased offset to
-						// STP's small signed immediate range.
-						newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
+						// A fixed Go frame has already performed the allocation. Remove
+						// writeback now; the final linkage/arena rebase will retain this
+						// fixed pair if its scaled immediate remains encodable.
+						newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
 						continue
 					}
 					movInstr := arch.MovInstr[8]
@@ -1029,13 +1152,17 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 
 			case StackOpPop:
 				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
-					newLines = append(newLines, rewriteSavedRegisters(archInfo, op, line, layout)...)
+					if archInfo.Name() == "arm64" && op.Reg2 != "" {
+						newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
+					} else {
+						newLines = append(newLines, rewriteSavedRegisters(archInfo, op, line, layout)...)
+					}
 					continue
 				}
 				// Non-callee-saved pop: rewrite to MOV
 				if !stackOpCalleeSaved(archInfo, op) {
 					if archInfo.Name() == "arm64" && op.Offset > 0 {
-						newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
+						newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
 						continue
 					}
 					movInstr := arch.MovInstr[8]
@@ -1057,12 +1184,9 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 
 			case StackOpSpill, StackOpReload:
 				if archInfo.Name() == "arm64" && op.Reg2 != "" {
-					// Pair instructions only have a narrow signed displacement. Once
-					// an internal frame is moved into a root's arena, even a perfectly
-					// ordinary local STP/LDP can no longer encode its new address.
-					// Single fixed accesses preserve the C semantics and allow the Go
-					// assembler to encode the larger positive frame displacement.
-					newLines = append(newLines, rewriteArm64SavedPair(op, line, layout)...)
+					// Keep the fixed pair provisionally. The final linkage/arena bias
+					// determines whether its scaled immediate fits or it must be split.
+					newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
 					continue
 				}
 				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
@@ -1099,12 +1223,10 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 	function.Lines = newLines
 	function.LocalsSize = layout.GoFrameSize
 	if archInfo.Name() == "arm64" && layout.GoFrameSize > 0 && linkageBias {
-		for i := range function.Lines {
-			// cmd/asm adds a 16-byte linkage/alignment area to framed ARM64
-			// functions. Keeping the emulated C SP above both words also retains
-			// the 16-byte alignment assumed by Clang's vector spills.
-			function.Lines[i] = shiftArm64CStackRef(function.Lines[i], 2*archInfo.PtrSize())
-		}
+		// cmd/asm adds a 16-byte linkage/alignment area to framed ARM64
+		// functions. Keeping the emulated C SP above both words also retains
+		// the 16-byte alignment assumed by Clang's vector spills.
+		function.Lines = shiftArm64CStackRefs(function.Lines, 2*archInfo.PtrSize())
 	}
 
 	return function
@@ -1302,10 +1424,10 @@ func reserveInternalStackFrames(arch *config.Arch, functions []Function) ([]Func
 			}
 			reserved += -reserved & 15
 			bias := helperBase + reserved
-			for lineIdx := range functions[helperIdx].Lines {
-				if arch.Name == "arm64" {
-					functions[helperIdx].Lines[lineIdx] = shiftArm64CStackRef(functions[helperIdx].Lines[lineIdx], bias)
-				} else {
+			if arch.Name == "arm64" {
+				functions[helperIdx].Lines = shiftArm64CStackRefs(functions[helperIdx].Lines, bias)
+			} else {
+				for lineIdx := range functions[helperIdx].Lines {
 					functions[helperIdx].Lines[lineIdx] = shiftAmd64CStackRef(functions[helperIdx].Lines[lineIdx], bias)
 				}
 			}
