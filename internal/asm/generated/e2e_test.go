@@ -14,6 +14,24 @@ func TestVoidRetFn(t *testing.T) {
 	assert.Equal(t, 5, res)
 }
 
+func TestVoidByteParamsFn(t *testing.T) {
+	// The C body has no observable result, but calling it exercises the
+	// three-byte-parameter ABI and its void return path.
+	generated.Test_fn_111_0(3, 2, 12)
+}
+
+func TestByteParamsByteRetFn(t *testing.T) {
+	res := generated.Test_fn_111_1(3, 2, 12)
+
+	assert.EqualValues(t, 38, res)
+}
+
+func TestByteInt32ParamsByteRetFn(t *testing.T) {
+	res := generated.Test_fn_1114_1(3, 2, 12, 4)
+
+	assert.EqualValues(t, 42, res)
+}
+
 func TestByteRetFn(t *testing.T) {
 	res := generated.Test_fn_481_1(3, 2, 12)
 
