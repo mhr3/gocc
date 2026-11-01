@@ -127,7 +127,13 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 		if function.Internal {
 			builder.WriteString("\n// internal function, its stack space has been flattened into its caller's frame")
 		}
-		builder.WriteString(fmt.Sprintf("\nTEXT %s(SB),%s,$%d-%d\n", name, textAttrs, function.LocalsSize, paramsSize+retSize))
+		frameSize := function.LocalsSize
+		if function.StackAlign > 0 && arch.Name == "amd64" && !function.Internal {
+			// Room to slide SP up to the next aligned address, plus a slot that
+			// keeps the original SP for the epilogue.
+			frameSize += function.StackAlign + 8
+		}
+		builder.WriteString(fmt.Sprintf("\nTEXT %s(SB),%s,$%d-%d\n", name, textAttrs, frameSize, paramsSize+retSize))
 		if function.LocalsSize > 0 {
 			// The translated C stack slots are either scalars or transient
 			// pointers whose lifetime is bounded by the assembly call. Tell the
@@ -150,6 +156,16 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 				genRegIdx++
 			}
 			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", loadInstr, param.Name, offsets[i], targetRegister))
+		}
+		if function.StackAlign > 0 && arch.Name == "amd64" && !function.Internal {
+			// Go only keeps SP 8-byte aligned on AMD64, while the C code relies on
+			// the alignment it had after its own prologue (legacy SSE memory
+			// operands fault otherwise). Realign within the reserved frame; the
+			// original SP is restored before every return (see
+			// realignAmd64Roots). R11 is a caller-saved scratch register here:
+			// the arguments have been loaded and no C instruction has run yet.
+			builder.WriteString(fmt.Sprintf("\tMOVQ SP, R11\n\tADDQ $%d, SP\n\tANDQ $-%d, SP\n\tMOVQ R11, %d(SP)\n",
+				function.StackAlign, function.StackAlign, function.LocalsSize))
 		}
 		for _, line := range function.Lines {
 			builder.WriteString(line.Compile(arch))

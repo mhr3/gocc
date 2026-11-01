@@ -1,6 +1,7 @@
 package asm
 
 import (
+	"fmt"
 	"encoding/binary"
 	"encoding/hex"
 	"strings"
@@ -26,7 +27,8 @@ func TestStackManipulationAmd64(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.AMD64(), testFn)
+	modified, err := checkStackUnified(config.AMD64(), testFn)
+	require.NoError(t, err)
 
 	require.Equal(t, 0, modified.LocalsSize)
 
@@ -53,7 +55,8 @@ func TestStackNotPopAmd64(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.AMD64(), testFn)
+	modified, err := checkStackUnified(config.AMD64(), testFn)
+	require.NoError(t, err)
 
 	require.Equal(t, 0, modified.LocalsSize)
 
@@ -78,7 +81,8 @@ func TestAmd64RetainedPushUsesCompactedFrame(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.AMD64(), testFn)
+	modified, err := checkStackUnified(config.AMD64(), testFn)
+	require.NoError(t, err)
 
 	require.Equal(t, 8, modified.LocalsSize)
 	for i := 0; i < 6; i++ {
@@ -101,7 +105,8 @@ func TestAmd64InternalPushUsesPreservedFrame(t *testing.T) {
 		},
 	}
 
-	modified := checkStackManipulation(config.AMD64(), testFn)
+	modified, err := checkStackManipulation(config.AMD64(), testFn)
+	require.NoError(t, err)
 
 	assert.Equal(t, 0, modified.LocalsSize)
 	require.Equal(t, 56, modified.HiddenStackSize)
@@ -161,7 +166,8 @@ func TestStackGrowthAmd64(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.AMD64(), testFn)
+	modified, err := checkStackUnified(config.AMD64(), testFn)
+	require.NoError(t, err)
 
 	require.Equal(t, 24, modified.LocalsSize)
 
@@ -198,7 +204,8 @@ func TestQuickStackManipulationArm64(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.ARM64(), testFn)
+	modified, err := checkStackUnified(config.ARM64(), testFn)
+	require.NoError(t, err)
 
 	// All saves are callee-saved and NOPed, so GoFrameSize should be 0
 	require.Equal(t, 0, modified.LocalsSize)
@@ -287,7 +294,8 @@ func TestStackOpsArm64(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.ARM64(), testFn)
+	modified, err := checkStackUnified(config.ARM64(), testFn)
+	require.NoError(t, err)
 
 	require.Equal(t, 96, modified.LocalsSize)
 
@@ -324,15 +332,16 @@ func TestStackManipulationArm64(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.ARM64(), testFn)
+	modified, err := checkStackUnified(config.ARM64(), testFn)
+	require.NoError(t, err)
 
-	require.Equal(t, 80, modified.LocalsSize)
+	// 80 bytes of saves plus the 16 bytes reserved below SP for realignment.
+	require.Equal(t, 96, modified.LocalsSize)
 
 	require.Len(t, modified.Lines, 15)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
-	// Reading SP into a general register is safe; keeping the original
-	// instruction also avoids mixing hardware RSP with Go's pseudo-SP.
-	assert.Equal(t, testFn.Lines[1].Binary, modified.Lines[1].Binary)
+	// sub x9, sp, #16 only feeds the realignment, which the fixed frame absorbs.
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[2].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[4].Disassembled)
 	assert.Equal(t, "NOP", modified.Lines[5].Disassembled)
@@ -357,7 +366,8 @@ func TestArm64StackDataKeepsFrame(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.ARM64(), testFn)
+	modified, err := checkStackUnified(config.ARM64(), testFn)
+	require.NoError(t, err)
 
 	require.Equal(t, 32, modified.LocalsSize)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
@@ -378,7 +388,8 @@ func TestArm64PreindexedDataStoreUsesFixedGoFrame(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.ARM64(), testFn)
+	modified, err := checkStackUnified(config.ARM64(), testFn)
+	require.NoError(t, err)
 
 	require.Equal(t, 16, modified.LocalsSize)
 	assert.Empty(t, modified.Lines[0].Binary)
@@ -463,7 +474,8 @@ func TestArm64FramePointerIsRebasedToGoFrame(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.ARM64(), testFn)
+	modified, err := checkStackUnified(config.ARM64(), testFn)
+	require.NoError(t, err)
 
 	require.Equal(t, 80, modified.LocalsSize)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
@@ -487,7 +499,8 @@ func TestStackRegisterSavingArm64(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.ARM64(), testFn)
+	modified, err := checkStackUnified(config.ARM64(), testFn)
+	require.NoError(t, err)
 
 	// All saves are callee-saved and NOPed, so GoFrameSize should be 0
 	require.Equal(t, 0, modified.LocalsSize)
@@ -547,7 +560,8 @@ func TestUnifiedStackAnalysisAmd64(t *testing.T) {
 	}
 
 	archInfo := newAmd64StackInfo()
-	layout := analyzeStackLayout(archInfo, testFn.Lines, false)
+	layout, err := analyzeStackLayout(archInfo, testFn.Lines, false)
+	require.NoError(t, err)
 
 	assert.True(t, layout.FramePointerUsed)
 	assert.Equal(t, 32, layout.LocalsSize)
@@ -571,7 +585,8 @@ func TestUnifiedStackAnalysisArm64(t *testing.T) {
 	}
 
 	archInfo := newArm64StackInfo()
-	layout := analyzeStackLayout(archInfo, testFn.Lines, false)
+	layout, err := analyzeStackLayout(archInfo, testFn.Lines, false)
+	require.NoError(t, err)
 
 	assert.True(t, layout.FramePointerUsed)
 	assert.True(t, layout.NopIndices[0]) // stp x29, x30
@@ -589,15 +604,13 @@ func TestAlignedToUnalignedConversion(t *testing.T) {
 	}{
 		{"MOVAPS", "MOVUPS"},
 		{"MOVAPD", "MOVUPD"},
-		{"MOVDQA", "MOVDQU"},
+		// cmd/asm spells the unaligned 128-bit integer move MOVOU.
+		{"MOVDQA", "MOVOU"},
 		{"VMOVAPS", "VMOVUPS"},
 		{"VMOVAPD", "VMOVUPD"},
 		{"VMOVDQA", "VMOVDQU"},
 		{"VMOVDQA32", "VMOVDQU32"},
 		{"VMOVDQA64", "VMOVDQU64"},
-		// lowercase variants
-		{"movaps", "movups"},
-		{"vmovdqa", "vmovdqu"},
 	}
 
 	for _, tc := range tests {
@@ -635,7 +648,8 @@ func TestAlignedToUnalignedOnlyForStackMemory(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.AMD64(), testFn)
+	modified, err := checkStackUnified(config.AMD64(), testFn)
+	require.NoError(t, err)
 
 	require.Len(t, modified.Lines, 7)
 
@@ -756,14 +770,16 @@ func TestReserveInternalStackFramesAmd64RebasesStackAddress(t *testing.T) {
 	modified, err := reserveInternalStackFrames(config.AMD64(), functions)
 	require.NoError(t, err)
 
-	// A depth guard separates each flattened helper slot from CALL return
-	// addresses. Both stack memory and pointers to a C local must receive the
-	// same slot bias.
-	assert.Equal(t, 120, modified[0].LocalsSize)
+	// The helper runs one CALL deep, so its slot bias is 8 above the root's
+	// locals: 72(SP) seen from the helper is 64(SP) seen from the root. Both
+	// stack memory and pointers to a C local must receive the same bias. A
+	// retained encoding is rebased in place so cmd/asm never sees the decoder's
+	// spelling.
+	assert.Equal(t, 96, modified[0].LocalsSize)
 	assert.Equal(t, "LEAQ 72(SP), R8", modified[1].Lines[0].Disassembled)
 	assert.Equal(t, "MOVQ AX, 80(SP)", modified[1].Lines[1].Disassembled)
 	assert.Empty(t, modified[1].Lines[0].Binary)
-	assert.Empty(t, modified[1].Lines[1].Binary)
+	assert.Equal(t, binaryFromHex("48 89 44 24 50"), modified[1].Lines[1].Binary)
 }
 
 func TestApplyTransformsRebasesAmd64NonCalleeSavedPush(t *testing.T) {
@@ -789,12 +805,12 @@ func TestApplyTransformsRebasesAmd64NonCalleeSavedPush(t *testing.T) {
 	modified, err := ApplyTransforms(config.AMD64(), functions)
 	require.NoError(t, err)
 
-	assert.Equal(t, 64, modified[0].LocalsSize)
+	assert.Equal(t, 32, modified[0].LocalsSize)
 	assert.Equal(t, 0, modified[1].LocalsSize)
 	assert.Equal(t, 24, modified[1].HiddenStackSize)
-	assert.Equal(t, "MOVQ R14, 32(SP)", modified[1].Lines[0].Disassembled)
-	assert.Equal(t, "MOVQ BX, 24(SP)", modified[1].Lines[1].Disassembled)
-	assert.Equal(t, "MOVQ AX, 16(SP)", modified[1].Lines[2].Disassembled)
+	assert.Equal(t, "MOVQ R14, 24(SP)", modified[1].Lines[0].Disassembled)
+	assert.Equal(t, "MOVQ BX, 16(SP)", modified[1].Lines[1].Disassembled)
+	assert.Equal(t, "MOVQ AX, 8(SP)", modified[1].Lines[2].Disassembled)
 	assert.NotContains(t, modified[1].Lines[2].Disassembled, "stack")
 }
 
@@ -817,7 +833,7 @@ func TestApplyTransformsReservesAmd64CalleeSavedOnlyHelper(t *testing.T) {
 	modified, err := ApplyTransforms(config.AMD64(), functions)
 	require.NoError(t, err)
 
-	assert.Equal(t, 40, modified[0].LocalsSize)
+	assert.Equal(t, 16, modified[0].LocalsSize)
 	assert.Equal(t, 16, modified[1].HiddenStackSize)
 	assert.Equal(t, "MOVQ R14, 16(SP)", modified[1].Lines[0].Disassembled)
 	assert.Equal(t, "MOVQ BX, 8(SP)", modified[1].Lines[1].Disassembled)
@@ -860,24 +876,25 @@ func TestApplyTransformsSupportsSharedInternalHelperAtDifferentDepths(t *testing
 	modified, err := ApplyTransforms(config.AMD64(), functions)
 	require.NoError(t, err)
 
-	// Two internal helpers give every arena 16 bytes of downward call-depth
-	// slack. B is based at 16(SP), while F is based at 48(SP).
-	assert.Equal(t, 80, modified[0].LocalsSize)
+	// B only runs one CALL deep, so it is based at 8(SP). F is reached one
+	// and two CALLs deep; its bias uses the deepest path and its arena gets 8
+	// bytes of slack so the shallower path stays inside it.
+	assert.Equal(t, 48, modified[0].LocalsSize)
 	assert.Equal(t, 8, modified[1].HiddenStackSize)
-	assert.Equal(t, "MOVQ AX, 16(SP)", modified[1].Lines[0].Disassembled)
+	assert.Equal(t, "MOVQ AX, 8(SP)", modified[1].Lines[0].Disassembled)
 	assert.Equal(t, 16, modified[2].HiddenStackSize)
-	assert.Equal(t, "MOVQ R14, 56(SP)", modified[2].Lines[0].Disassembled)
-	assert.Equal(t, "MOVQ BX, 48(SP)", modified[2].Lines[1].Disassembled)
+	assert.Equal(t, "MOVQ R14, 40(SP)", modified[2].Lines[0].Disassembled)
+	assert.Equal(t, "MOVQ BX, 32(SP)", modified[2].Lines[1].Disassembled)
 
 	// Model addresses relative to A's hardware SP. A direct CALL places F's
-	// 16-byte frame at [40, 56); through B, the extra return address slides it
-	// down to [32, 48). B's active frame is [8, 16), and return addresses are
+	// 16-byte frame at [24, 40); through B, the extra return address slides it
+	// down to [16, 32). B's active frame is [0, 8), and return addresses are
 	// below zero, so neither F invocation can overlap live caller state.
 	const (
 		callSlot    = 8
-		bBias       = 16
+		bBias       = 8
 		bSize       = 8
-		fBias       = 48
+		fBias       = 32
 		fSize       = 16
 		directDepth = 1
 		nestedDepth = 2
@@ -885,8 +902,8 @@ func TestApplyTransformsSupportsSharedInternalHelperAtDifferentDepths(t *testing
 	bStart := bBias - callSlot
 	fDirectStart := fBias - directDepth*callSlot
 	fNestedStart := fBias - nestedDepth*callSlot
-	assert.Equal(t, 40, fDirectStart)
-	assert.Equal(t, 32, fNestedStart)
+	assert.Equal(t, 24, fDirectStart)
+	assert.Equal(t, 16, fNestedStart)
 	assert.LessOrEqual(t, bStart+bSize, fNestedStart)
 	assert.LessOrEqual(t, fDirectStart+fSize, modified[0].LocalsSize)
 	assert.LessOrEqual(t, fNestedStart+fSize, modified[0].LocalsSize)
@@ -970,9 +987,9 @@ func TestReserveInternalStackFramesUsesPerRootArenas(t *testing.T) {
 
 	modified, err := reserveInternalStackFrames(config.AMD64(), functions)
 	require.NoError(t, err)
-	assert.Equal(t, 72, modified[0].LocalsSize)
+	assert.Equal(t, 48, modified[0].LocalsSize)
 	assert.Equal(t, "MOVQ AX, 24(SP)", modified[1].Lines[0].Disassembled)
-	assert.Equal(t, 88, modified[2].LocalsSize)
+	assert.Equal(t, 64, modified[2].LocalsSize)
 	assert.Equal(t, "MOVQ BX, 8(SP)", modified[3].Lines[0].Disassembled)
 }
 
@@ -992,16 +1009,37 @@ func TestAssignInternalFunctionOwnersRejectsSharedHelper(t *testing.T) {
 		`internal helper "B" is reachable from multiple exported functions: FN1 -> B; FN2 -> B`)
 }
 
-func TestApplyTransformsRejectsSharedInternalHelper(t *testing.T) {
+func TestApplyTransformsClonesSharedInternalHelpers(t *testing.T) {
+	ret := Line{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")}
 	functions := []Function{
-		{Name: "FN1", Lines: []Line{{Disassembled: "CALL shared<>(SB)"}}},
-		{Name: "FN2", Lines: []Line{{Disassembled: "CALL shared<>(SB)"}}},
-		{Name: "shared", Internal: true},
+		{Name: "FN1", Lines: []Line{{Disassembled: "CALL mid<>(SB)"}, {Disassembled: "CALL shared<>(SB)"}}},
+		{Name: "FN2", Lines: []Line{{Disassembled: "JMP shared<>(SB)"}}},
+		// Only FN1 reaches mid, but mid reaches the shared leaf.
+		{Name: "mid", Internal: true, Lines: []Line{{Disassembled: "CALL shared<>(SB)"}, ret}},
+		{Name: "shared", Internal: true, Consts: []Const{{Label: "LCPI3_0"}}, Lines: []Line{
+			{Assembly: "push\trbx", Disassembled: "PUSHQ BX", Binary: binaryFromHex("53")},
+			{Assembly: "pop\trbx", Disassembled: "POPQ BX", Binary: binaryFromHex("5b")},
+			ret,
+		}},
 	}
 
-	_, err := ApplyTransforms(config.AMD64(), functions)
-	require.EqualError(t, err,
-		`internal helper "shared" is reachable from multiple exported functions: FN1 -> shared; FN2 -> shared`)
+	modified, err := ApplyTransforms(config.AMD64(), functions)
+	require.NoError(t, err)
+
+	names := make([]string, len(modified))
+	for i, f := range modified {
+		names[i] = f.Name
+	}
+	assert.Equal(t, []string{"FN1", "FN2", "mid", "shared_FN1", "shared_FN2"}, names)
+	assert.Equal(t, "CALL shared_FN1<>(SB)", modified[0].Lines[1].Disassembled)
+	assert.Equal(t, "CALL shared_FN2<>(SB)", modified[1].Lines[0].Disassembled) // root tail call expanded
+	assert.Equal(t, "CALL shared_FN1<>(SB)", modified[2].Lines[0].Disassembled)
+	assert.Len(t, modified[3].Consts, 1)
+	assert.Empty(t, modified[4].Consts)
+	// Each root reserves its own clone's 8-byte slot: FN1 reaches it at depths
+	// 1 and 2 (8 bytes of slack), FN2 only at depth 1.
+	assert.Equal(t, 16, modified[0].LocalsSize)
+	assert.Equal(t, 16, modified[1].LocalsSize)
 }
 
 func TestAssignInternalFunctionOwnersRejectsExportedCallee(t *testing.T) {
@@ -1101,7 +1139,8 @@ func TestUnifiedStackTransformSimpleAmd64(t *testing.T) {
 		},
 	}
 
-	modified := checkStackUnified(config.AMD64(), testFn)
+	modified, err := checkStackUnified(config.AMD64(), testFn)
+	require.NoError(t, err)
 
 	require.Len(t, modified.Lines, 6)
 	assert.Equal(t, "NOP", modified.Lines[0].Disassembled)
@@ -1133,4 +1172,288 @@ func TestArchStackInfoIsCalleeSaved(t *testing.T) {
 	assert.True(t, arm64.IsCalleeSaved("x30"))
 	assert.False(t, arm64.IsCalleeSaved("x0"))
 	assert.False(t, arm64.IsCalleeSaved("x10"))
+}
+
+func TestPatchAmd64RSPDisplacement(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		bias int64
+		want string
+	}{
+		// legacy SSE, disp32 stays disp32
+		{"punpcklwd disp32", "66 44 0f 61 8c 24 e0 00 00 00", 16, "66 44 0f 61 8c 24 f0 00 00 00"},
+		// disp8 grows to disp32 when the rebased offset no longer fits
+		{"paddq disp8 to disp32", "66 0f d4 44 24 20", 136, "66 0f d4 84 24 a8 00 00 00"},
+		// no displacement gains a disp8
+		{"mov no disp", "48 89 04 24", 24, "48 89 44 24 18"},
+		// VEX3-less (VEX2) encoding
+		{"vpaddq vex2", "c5 f5 d4 44 24 40", 8, "c5 f5 d4 44 24 48"},
+		// scaled index keeps its SIB byte
+		{"lea sib", "48 8d 44 cc 10", 120, "48 8d 84 cc 88 00 00 00"},
+		{"mov sib no disp", "48 89 14 cc", 8, "48 89 54 cc 08"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := patchAmd64RSPDisplacement(Line{Binary: binaryFromHex(tc.in)}, tc.bias)
+			require.True(t, ok)
+			assert.Equal(t, binaryFromHex(tc.want), got)
+		})
+	}
+
+	// Register-only operands have nothing to rebase.
+	_, ok := patchAmd64RSPDisplacement(Line{Binary: binaryFromHex("49 89 e0")}, 16)
+	assert.False(t, ok)
+	// EVEX encodings are not understood by x86asm and must be left alone.
+	_, ok = patchAmd64RSPDisplacement(Line{Binary: binaryFromHex("62 f1 fe 48 6f 44 24 02")}, 16)
+	assert.False(t, ok)
+}
+
+func TestArm64ShiftedStackImmediate(t *testing.T) {
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "sub\tsp, sp, #1, lsl #12", Binary: wordToLineBinary(0xd14007ff)},
+			{Assembly: "sub\tsp, sp, #704", Binary: wordToLineBinary(0xd10b03ff)},
+			{Assembly: "str\tx8, [sp]", Disassembled: "MOVD R8, (RSP)", Binary: wordToLineBinary(0xf90003e8)},
+			{Assembly: "add\tsp, sp, #1, lsl #12", Binary: wordToLineBinary(0x914007ff)},
+			{Assembly: "add\tsp, sp, #704", Binary: wordToLineBinary(0x910b03ff)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified, err := checkStackUnified(config.ARM64(), testFn)
+	require.NoError(t, err)
+
+	// Frames above 4095 bytes are allocated in two parts; both are locals.
+	assert.Equal(t, 4096+704, modified.LocalsSize)
+	for _, i := range []int{0, 1, 3, 4} {
+		assert.Equal(t, "NOP", modified.Lines[i].Disassembled)
+	}
+	assert.Equal(t, "MOVD R8, 16(RSP)", modified.Lines[2].Disassembled)
+}
+
+func TestDynamicStackAllocationIsRejected(t *testing.T) {
+	t.Run("arm64 alloca", func(t *testing.T) {
+		testFn := Function{
+			Name: "vla",
+			Lines: []Line{
+				{Assembly: "stp\tx29, x30, [sp, #-16]!", Binary: wordToLineBinary(0xa9bf7bfd)},
+				{Assembly: "mov\tx29, sp", Binary: wordToLineBinary(0x910003fd)},
+				{Assembly: "mov\tx8, sp", Binary: wordToLineBinary(0x910003e8)},
+				{Assembly: "sub\tx8, x8, x9", Disassembled: "SUB R9, R8, R8", Binary: wordToLineBinary(0xcb090108)},
+				{Assembly: "mov\tsp, x8", Binary: wordToLineBinary(0x9100011f)},
+				{Assembly: "mov\tsp, x29", Binary: wordToLineBinary(0x910003bf)},
+				{Assembly: "ldp\tx29, x30, [sp], #16", Binary: wordToLineBinary(0xa8c17bfd)},
+				{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+			},
+		}
+		_, err := checkStackUnified(config.ARM64(), testFn)
+		require.ErrorContains(t, err, `unsupported stack pointer update "mov\tsp, x8"`)
+	})
+
+	t.Run("arm64 register allocation", func(t *testing.T) {
+		testFn := Function{
+			Lines: []Line{
+				{Assembly: "sub\tsp, sp, x9", Binary: wordToLineBinary(0xcb2963ff)},
+				{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+			},
+		}
+		_, err := checkStackUnified(config.ARM64(), testFn)
+		require.ErrorContains(t, err, `unsupported stack pointer update "sub\tsp, sp, x9"`)
+	})
+
+	t.Run("amd64 alloca", func(t *testing.T) {
+		testFn := Function{
+			Lines: []Line{
+				{Assembly: "push\trbp", Disassembled: "PUSHQ BP", Binary: binaryFromHex("55")},
+				{Assembly: "mov\trbp, rsp", Disassembled: "MOVQ SP, BP", Binary: binaryFromHex("48 89 e5")},
+				{Assembly: "mov\trcx, rsp", Disassembled: "MOVQ SP, CX", Binary: binaryFromHex("48 89 e1")},
+				{Assembly: "sub\trcx, rax", Disassembled: "SUBQ AX, CX", Binary: binaryFromHex("48 29 c1")},
+				{Assembly: "mov\trsp, rcx", Disassembled: "MOVQ CX, SP", Binary: binaryFromHex("48 89 cc")},
+				{Assembly: "mov\trsp, rbp", Disassembled: "MOVQ BP, SP", Binary: binaryFromHex("48 89 ec")},
+				{Assembly: "pop\trbp", Disassembled: "POPQ BP", Binary: binaryFromHex("5d")},
+				{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")},
+			},
+		}
+		_, err := checkStackUnified(config.AMD64(), testFn)
+		require.ErrorContains(t, err, `unsupported stack pointer update "mov\trsp, rcx"`)
+	})
+
+	t.Run("amd64 register allocation", func(t *testing.T) {
+		testFn := Function{
+			Lines: []Line{
+				{Assembly: "sub\trsp, rax", Disassembled: "SUBQ AX, SP", Binary: binaryFromHex("48 29 c4")},
+				{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")},
+			},
+		}
+		_, err := checkStackUnified(config.AMD64(), testFn)
+		require.ErrorContains(t, err, `unsupported stack pointer update "sub\trsp, rax"`)
+	})
+}
+
+func TestAmd64LeaStackDealloc(t *testing.T) {
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "push\trax", Disassembled: "PUSHQ AX", Binary: binaryFromHex("50")},
+			{Assembly: "lea\trsp, [rsp + 8]", Disassembled: "LEAQ 0x8(SP), SP", Binary: binaryFromHex("48 8d 64 24 08")},
+			{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")},
+		},
+	}
+	modified, err := checkStackUnified(config.AMD64(), testFn)
+	require.NoError(t, err)
+	assert.Equal(t, 8, modified.LocalsSize)
+	assert.Equal(t, "MOVQ AX, 0(SP)", modified.Lines[0].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
+}
+
+func TestArm64RealignedLocalsAreAllocated(t *testing.T) {
+	// Over-aligned locals: the compiler reserves the area below SP in a
+	// scratch register and realigns SP from it. x29 is kept as the frame
+	// pointer and restored by `mov sp, x29`.
+	testFn := Function{
+		Name: "align",
+		Lines: []Line{
+			{Assembly: "stp\tx29, x30, [sp, #-16]!", Binary: wordToLineBinary(0xa9bf7bfd)},
+			{Assembly: "sub\tx9, sp, #176", Disassembled: "SUB $176, RSP, R9", Binary: wordToLineBinary(0xd102c3e9)},
+			{Assembly: "mov\tx29, sp", Binary: wordToLineBinary(0x910003fd)},
+			{Assembly: "and\tsp, x9, #0xffffffffffffffc0", Binary: wordToLineBinary(0x927ae53f)},
+			{Assembly: "str\tx8, [sp]", Disassembled: "MOVD R8, (RSP)", Binary: wordToLineBinary(0xf90003e8)},
+			{Assembly: "mov\tsp, x29", Binary: wordToLineBinary(0x910003bf)},
+			{Assembly: "ldp\tx29, x30, [sp], #16", Binary: wordToLineBinary(0xa8c17bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified, err := checkStackUnified(config.ARM64(), testFn)
+	require.NoError(t, err)
+
+	assert.Equal(t, 16+176, modified.LocalsSize)
+	for _, i := range []int{0, 1, 2, 3, 5, 6} {
+		assert.Equal(t, "NOP", modified.Lines[i].Disassembled, "line %d", i)
+	}
+	// The local sits at the bottom of the realigned area, above the linkage words.
+	assert.Equal(t, "MOVD R8, 16(RSP)", modified.Lines[4].Disassembled)
+}
+
+func TestArm64LinkRegisterScratchKeepsSaveAndRestore(t *testing.T) {
+	// Under register pressure Clang reuses X30 after saving it. Go's leaf
+	// epilogue returns through X30, so the save/restore pair must survive.
+	testFn := Function{
+		Lines: []Line{
+			{Assembly: "stp\tx29, x30, [sp, #-80]!", Binary: wordToLineBinary(0xa9bb7bfd)},
+			{Assembly: "mov\tx29, sp", Binary: wordToLineBinary(0x910003fd)},
+			{Assembly: "madd\tx30, x3, x8, x4", Disassembled: "MADD R8, R4, R3, R30", Binary: wordToLineBinary(0x9b08107e)},
+			{Assembly: "ldp\tx29, x30, [sp], #80", Binary: wordToLineBinary(0xa8c57bfd)},
+			{Assembly: "ret", Disassembled: "RET", Binary: wordToLineBinary(0xd65f03c0)},
+		},
+	}
+
+	modified, err := checkStackUnified(config.ARM64(), testFn)
+	require.NoError(t, err)
+
+	assert.Equal(t, 80, modified.LocalsSize)
+	assert.Equal(t, "STP (R29, R30), 16(RSP)", modified.Lines[0].Disassembled)
+	assert.Equal(t, "NOP", modified.Lines[1].Disassembled)
+	assert.Equal(t, "LDP 16(RSP), (R29, R30)", modified.Lines[3].Disassembled)
+}
+
+func TestExpandTailCallsInGoVisibleFunctions(t *testing.T) {
+	root := Function{
+		Name: "root",
+		Lines: []Line{
+			{Assembly: "ldp\tx29, x30, [sp], #16", Binary: wordToLineBinary(0xa8c17bfd)},
+			{Assembly: "b\thelper", Disassembled: "JMP helper<>(SB)", Labels: []string{"LBB0_2"}},
+		},
+	}
+	expanded := expandTailCalls(root)
+	require.Len(t, expanded.Lines, 3)
+	assert.Equal(t, "CALL helper<>(SB)", expanded.Lines[1].Disassembled)
+	assert.Equal(t, []string{"LBB0_2"}, expanded.Lines[1].Labels)
+	assert.Equal(t, "ret", expanded.Lines[2].Assembly)
+	assert.Equal(t, "RET", expanded.Lines[2].Disassembled)
+
+	// Helpers share the C ABI with their callee; their tail calls stay.
+	helper := Function{Name: "helper", Internal: true, Lines: []Line{{Disassembled: "JMP leaf<>(SB)"}}}
+	assert.Equal(t, helper.Lines, expandTailCalls(helper).Lines)
+}
+
+func TestTailCallsParticipateInHelperGraphChecks(t *testing.T) {
+	shared := []Function{
+		{Name: "a", Lines: []Line{{Disassembled: "JMP helper<>(SB)"}}},
+		{Name: "b", Lines: []Line{{Disassembled: "CALL helper<>(SB)"}}},
+		{Name: "helper", Internal: true, Lines: []Line{{Assembly: "ret", Disassembled: "RET", Binary: binaryFromHex("c3")}}},
+	}
+	modified, err := ApplyTransforms(config.AMD64(), shared)
+	require.NoError(t, err)
+	assert.Equal(t, "CALL helper_a<>(SB)", modified[0].Lines[0].Disassembled)
+	assert.Equal(t, "CALL helper_b<>(SB)", modified[1].Lines[0].Disassembled)
+
+	recursive := []Function{{
+		Name:     "helper",
+		Internal: true,
+		Lines:    []Line{{Disassembled: "JMP helper<>(SB)"}},
+	}}
+	_, err = ApplyTransforms(config.AMD64(), recursive)
+	require.EqualError(t, err, "recursive internal helper call graph: helper -> helper")
+}
+
+func TestAmd64HelperArenaKeepsSSEAlignmentPerCallDepth(t *testing.T) {
+	// paddq with a stack operand faults unless the helper's emulated SP is
+	// 16-byte aligned. The root realigns its SP, every CALL pushes 8 bytes,
+	// so a helper reached two CALLs deep needs a bias that is 0 mod 16.
+	paddq := Line{Assembly: "paddq\txmm0, xmmword ptr [rsp + 32]", Disassembled: "PADDQ 0x20(SP), X0", Binary: binaryFromHex("66 0f d4 44 24 20")}
+	functions := []Function{
+		{Name: "root", Lines: []Line{{Disassembled: "CALL mid<>(SB)"}}},
+		{Name: "mid", Internal: true, HiddenStackSize: 16, Lines: []Line{{Disassembled: "CALL leaf<>(SB)"}}},
+		{Name: "leaf", Internal: true, HiddenStackSize: 48, Lines: []Line{paddq}},
+	}
+	modified, err := reserveInternalStackFrames(config.AMD64(), functions)
+	require.NoError(t, err)
+	assert.Equal(t, "PADDQ 64(SP), X0", modified[2].Lines[0].Disassembled) // bias 32: 16 for mid, +16 for depth 2
+	assert.Equal(t, binaryFromHex("66 0f d4 44 24 40"), modified[2].Lines[0].Binary)
+	assert.Equal(t, 64, modified[0].LocalsSize) // mid [0,16) and leaf [16,64) seen from the root
+
+	// Reached at both depth 1 and 2, no bias satisfies the alignment.
+	functions[0].Lines = append(functions[0].Lines, Line{Disassembled: "CALL leaf<>(SB)"})
+	_, err = reserveInternalStackFrames(config.AMD64(), functions)
+	require.ErrorContains(t, err, `internal helper "leaf" is called at depths 1 and 2`)
+}
+
+func TestRealignAmd64RootsRestoresSPBeforeReturn(t *testing.T) {
+	functions := []Function{{
+		Name:       "root",
+		LocalsSize: 24,
+		Lines: []Line{
+			{Disassembled: "MOVQ AX, ret+8(FP)", Labels: []string{"LBB0_2"}},
+			{Assembly: "ret", Disassembled: "RET"},
+		},
+	}}
+	modified := realignAmd64Roots(functions)
+	require.Len(t, modified[0].Lines, 3)
+	assert.Equal(t, 16, modified[0].StackAlign)
+	assert.Equal(t, "MOVQ 24(SP), SP", modified[0].Lines[0].Disassembled)
+	assert.Equal(t, []string{"LBB0_2"}, modified[0].Lines[0].Labels)
+	assert.Equal(t, "MOVQ AX, ret+8(FP)", modified[0].Lines[1].Disassembled)
+	assert.Empty(t, modified[0].Lines[1].Labels)
+}
+
+func TestInternalHelpersNeverRealign(t *testing.T) {
+	// A helper that realigns its own stack in C must not get the root
+	// realignment prologue (it is NOFRAME and would never restore SP); the
+	// root inherits the stricter alignment instead.
+	functions := []Function{
+		{Name: "root", LocalsSize: 16, Lines: []Line{{Disassembled: "CALL helper<>(SB)"}, {Assembly: "ret", Disassembled: "RET"}}},
+		{Name: "helper", Internal: true, HiddenStackSize: 64, StackAlign: 32, Lines: []Line{{Disassembled: "MOVQ AX, 0(SP)"}}},
+	}
+	modified, err := reserveInternalStackFrames(config.AMD64(), functions)
+	require.NoError(t, err)
+	modified = realignAmd64Roots(modified)
+	assert.Equal(t, 32, modified[0].StackAlign)
+	assert.Equal(t, 32, modified[1].StackAlign)
+
+	asm, err := Generate(config.AMD64(), "x.c", modified, GeneratorMeta{})
+	require.NoError(t, err)
+	assert.Contains(t, string(asm), "TEXT ·root(SB), 0, $"+fmt.Sprint(modified[0].LocalsSize+32+8)+"-0")
+	assert.Contains(t, string(asm), "TEXT helper<>(SB), NOSPLIT|NOFRAME, $0-0")
+	assert.Equal(t, 1, strings.Count(string(asm), "ANDQ $-32, SP"))
 }

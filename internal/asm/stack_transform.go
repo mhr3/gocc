@@ -23,10 +23,11 @@ const (
 	StackOpAlloc                     // sub rsp, N (AMD64) or sub sp, sp, N (ARM64)
 	StackOpDealloc                   // add rsp, N (AMD64) or add sp, sp, N (ARM64)
 	StackOpAlign                     // and rsp, -N (AMD64) or and sp, xN, -N (ARM64)
-	StackOpFrameSetup                // mov rbp, rsp (AMD64) or mov x29, sp (ARM64)
-	StackOpFrameTeardown             // mov rsp, rbp (AMD64) or mov sp, x29 (ARM64)
+	StackOpFrameSetup                // mov rbp, rsp (AMD64) or mov xN, sp / add xN, sp, #N (ARM64)
+	StackOpFrameTeardown             // mov rsp, rbp (AMD64) or mov sp, xN (ARM64)
 	StackOpSpill                     // fixed-offset store into an existing stack frame
 	StackOpReload                    // fixed-offset load from an existing stack frame
+	StackOpUnsupported               // any other write to the stack pointer (dynamic allocation)
 )
 
 // StackOp represents a parsed stack-related operation
@@ -89,6 +90,11 @@ type StackLayout struct {
 	// helper functions that call each other using the C register convention.
 	PreserveCalleeSaved bool
 	ResolvedOffsets     map[int]int
+
+	// RetainedSaves marks callee-saved register saves/restores that must be
+	// kept as fixed-slot moves even when callee-saved registers are otherwise
+	// removable (for example the ARM64 link register when the body reuses it).
+	RetainedSaves map[int]bool
 }
 
 // ArchStackInfo provides architecture-specific stack details
@@ -123,6 +129,9 @@ type ArchStackInfo interface {
 
 	// HasStackMemoryRef returns true if the operands contain a stack-relative memory reference
 	HasStackMemoryRef(operands string) bool
+
+	// WritesRegister reports whether any of lines[from:to] may modify reg.
+	WritesRegister(lines []Line, from, to int, reg string) bool
 }
 
 // amd64StackInfo implements ArchStackInfo for AMD64
@@ -147,6 +156,39 @@ func (a *amd64StackInfo) PtrSize() int                    { return 8 }
 func (a *amd64StackInfo) SPRegex() *regexp.Regexp         { return a.spRegex }
 func (a *amd64StackInfo) HasStackMemoryRef(s string) bool { return a.spMemRegex.MatchString(s) }
 
+func (a *amd64StackInfo) WritesRegister(lines []Line, from, to int, reg string) bool {
+	ref := frameRegisterRef("amd64", reg)
+	for i := from; i < to && i < len(lines); i++ {
+		line := lines[i]
+		if len(line.Binary) == 0 || !ref.MatchString(line.Assembly) {
+			continue
+		}
+		inst, ok := tryDecodeAmd64Line(line)
+		if !ok {
+			// Unknown encoding (EVEX): Intel syntax names the destination first.
+			fields := strings.Fields(line.Assembly)
+			if len(fields) > 1 && ref.MatchString(strings.TrimSuffix(fields[1], ",")) {
+				return true
+			}
+			continue
+		}
+		switch inst.Op {
+		case x86asm.CMP, x86asm.TEST, x86asm.PUSH, x86asm.POP:
+			// Epilogue pops on other control-flow paths restore the register;
+			// they are rewritten to fixed-slot loads and never precede a
+			// teardown on the same path.
+			continue
+		}
+		if len(inst.Args) == 0 {
+			continue
+		}
+		if dst, ok := inst.Args[0].(x86asm.Reg); ok && ref.MatchString(strings.ToLower(dst.String())) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *amd64StackInfo) IsCalleeSaved(reg string) bool {
 	switch strings.ToLower(reg) {
 	case "rbp", "rbx", "r12", "r13", "r14", "r15",
@@ -161,22 +203,14 @@ var amd64AlignedToUnaligned = map[string]string{
 	// SSE
 	"MOVAPS": "MOVUPS",
 	"MOVAPD": "MOVUPD",
-	"MOVDQA": "MOVDQU",
-	"movaps": "movups",
-	"movapd": "movupd",
-	"movdqa": "movdqu",
+	"MOVDQA": "MOVOU",
 	// AVX
 	"VMOVAPS": "VMOVUPS",
 	"VMOVAPD": "VMOVUPD",
 	"VMOVDQA": "VMOVDQU",
-	"vmovaps": "vmovups",
-	"vmovapd": "vmovupd",
-	"vmovdqa": "vmovdqu",
 	// AVX-512
 	"VMOVDQA32": "VMOVDQU32",
 	"VMOVDQA64": "VMOVDQU64",
-	"vmovdqa32": "vmovdqu32",
-	"vmovdqa64": "vmovdqu64",
 }
 
 func (a *amd64StackInfo) ToUnalignedInsn(insn string) *string {
@@ -188,7 +222,7 @@ func (a *amd64StackInfo) ToUnalignedInsn(insn string) *string {
 
 func (a *amd64StackInfo) ParseStackOp(idx int, line Line) *StackOp {
 	asm := line.Assembly
-	if asm == "" {
+	if asm == "" || len(line.Binary) == 0 {
 		return nil
 	}
 
@@ -198,123 +232,90 @@ func (a *amd64StackInfo) ParseStackOp(idx int, line Line) *StackOp {
 	}
 
 	instr := strings.ToLower(fields[0])
-
-	// Handle push/pop
-	if instr == "push" {
-		inst := decodeAmd64Line(line)
-		if inst.Op != x86asm.PUSH {
-			return nil
-		}
-		reg, ok := inst.Args[0].(x86asm.Reg)
-		if !ok {
-			return nil
-		}
-		return &StackOp{
-			Kind:      StackOpPush,
-			Reg:       strings.ToLower(reg.String()),
-			Size:      8,
-			LineIndex: idx,
-		}
-	}
-
-	if instr == "pop" {
-		inst := decodeAmd64Line(line)
-		if inst.Op != x86asm.POP {
-			return nil
-		}
-		reg, ok := inst.Args[0].(x86asm.Reg)
-		if !ok {
-			return nil
-		}
-		return &StackOp{
-			Kind:      StackOpPop,
-			Reg:       strings.ToLower(reg.String()),
-			Size:      8,
-			LineIndex: idx,
-		}
-	}
-
-	// Check if instruction involves SP
-	if !a.spRegex.MatchString(asm) {
+	if instr != "push" && instr != "pop" && !a.spRegex.MatchString(asm) {
 		return nil
 	}
 
-	// Handle mov rbp, rsp (frame setup)
-	if strings.HasPrefix(instr, "mov") && strings.Contains(asm, "rbp") {
-		inst := decodeAmd64Line(line)
-		if inst.Op == x86asm.MOV {
-			dst, dstOk := inst.Args[0].(x86asm.Reg)
-			src, srcOk := inst.Args[1].(x86asm.Reg)
-			if dstOk && srcOk {
-				if dst == x86asm.RBP && src == x86asm.RSP {
-					return &StackOp{Kind: StackOpFrameSetup, LineIndex: idx}
-				}
-				if dst == x86asm.RSP && src == x86asm.RBP {
-					return &StackOp{Kind: StackOpFrameTeardown, LineIndex: idx}
-				}
-			}
+	inst, ok := tryDecodeAmd64Line(line)
+	if !ok {
+		// x86asm has no EVEX support; AVX-512 instructions never write RSP.
+		return nil
+	}
+	unsupported := &StackOp{Kind: StackOpUnsupported, LineIndex: idx}
+
+	switch inst.Op {
+	case x86asm.PUSH, x86asm.POP:
+		reg, ok := inst.Args[0].(x86asm.Reg)
+		if !ok {
+			return unsupported
 		}
+		kind := StackOpPush
+		if inst.Op == x86asm.POP {
+			kind = StackOpPop
+		}
+		return &StackOp{
+			Kind:      kind,
+			Reg:       strings.ToLower(reg.String()),
+			Size:      8,
+			LineIndex: idx,
+		}
+
+	case x86asm.MOV:
+		dst, dstOk := inst.Args[0].(x86asm.Reg)
+		src, srcOk := inst.Args[1].(x86asm.Reg)
+		if dstOk && srcOk && dst == x86asm.RBP && src == x86asm.RSP {
+			return &StackOp{Kind: StackOpFrameSetup, Reg: "rbp", LineIndex: idx}
+		}
+		if dstOk && srcOk && dst == x86asm.RSP && src == x86asm.RBP {
+			return &StackOp{Kind: StackOpFrameTeardown, Reg: "rbp", LineIndex: idx}
+		}
+
+	case x86asm.SUB, x86asm.ADD, x86asm.AND:
+		dst, dstOk := inst.Args[0].(x86asm.Reg)
+		if !dstOk || dst != x86asm.RSP {
+			return nil
+		}
+		imm, immOk := inst.Args[1].(x86asm.Imm)
+		if !immOk {
+			return unsupported
+		}
+		switch inst.Op {
+		case x86asm.SUB:
+			return &StackOp{Kind: StackOpAlloc, Immediate: int64(imm), LineIndex: idx}
+		case x86asm.ADD:
+			return &StackOp{Kind: StackOpDealloc, Immediate: int64(imm), LineIndex: idx}
+		default:
+			return &StackOp{Kind: StackOpAlign, Immediate: int64(imm), LineIndex: idx}
+		}
+
+	case x86asm.LEA:
+		dst, dstOk := inst.Args[0].(x86asm.Reg)
+		if !dstOk || dst != x86asm.RSP {
+			return nil
+		}
+		mem, memOk := inst.Args[1].(x86asm.Mem)
+		if !memOk || mem.Index != 0 {
+			return unsupported
+		}
+		switch mem.Base {
+		case x86asm.RBP:
+			// lea rsp, [rbp - N]: frame teardown variant
+			return &StackOp{Kind: StackOpFrameTeardown, Reg: "rbp", LineIndex: idx}
+		case x86asm.RSP:
+			if mem.Disp < 0 {
+				return &StackOp{Kind: StackOpAlloc, Immediate: -mem.Disp, LineIndex: idx}
+			}
+			return &StackOp{Kind: StackOpDealloc, Immediate: mem.Disp, LineIndex: idx}
+		}
+		return unsupported
 	}
 
-	// Handle sub rsp, N (stack allocation)
-	if instr == "sub" {
-		inst := decodeAmd64Line(line)
-		if inst.Op == x86asm.SUB {
-			dst, dstOk := inst.Args[0].(x86asm.Reg)
-			imm, immOk := inst.Args[1].(x86asm.Imm)
-			if dstOk && immOk && dst == x86asm.RSP {
-				return &StackOp{
-					Kind:      StackOpAlloc,
-					Immediate: int64(imm),
-					LineIndex: idx,
-				}
-			}
+	// Any other instruction that writes RSP cannot be mapped onto a fixed Go frame.
+	if len(inst.Args) > 0 {
+		if dst, ok := inst.Args[0].(x86asm.Reg); ok && dst == x86asm.RSP {
+			return unsupported
 		}
 	}
-
-	// Handle add rsp, N (stack deallocation)
-	if instr == "add" {
-		inst := decodeAmd64Line(line)
-		if inst.Op == x86asm.ADD {
-			dst, dstOk := inst.Args[0].(x86asm.Reg)
-			imm, immOk := inst.Args[1].(x86asm.Imm)
-			if dstOk && immOk && dst == x86asm.RSP {
-				return &StackOp{
-					Kind:      StackOpDealloc,
-					Immediate: int64(imm),
-					LineIndex: idx,
-				}
-			}
-		}
-	}
-
-	// Handle and rsp, -N (stack alignment)
-	if instr == "and" {
-		inst := decodeAmd64Line(line)
-		if inst.Op == x86asm.AND {
-			dst, dstOk := inst.Args[0].(x86asm.Reg)
-			imm, immOk := inst.Args[1].(x86asm.Imm)
-			if dstOk && immOk && dst == x86asm.RSP {
-				return &StackOp{
-					Kind:      StackOpAlign,
-					Immediate: int64(imm),
-					LineIndex: idx,
-				}
-			}
-		}
-	}
-
-	// Handle lea rsp, [rbp - N] (frame teardown variant)
-	if instr == "lea" {
-		inst := decodeAmd64Line(line)
-		if inst.Op == x86asm.LEA {
-			dst, dstOk := inst.Args[0].(x86asm.Reg)
-			if dstOk && dst == x86asm.RSP {
-				return &StackOp{Kind: StackOpFrameTeardown, LineIndex: idx}
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -323,8 +324,6 @@ type arm64StackInfo struct {
 	spRegex    *regexp.Regexp
 	spMemRegex *regexp.Regexp // matches stack memory references
 }
-
-var arm64FramePointerRef = regexp.MustCompile(`\bx29\b`)
 
 func newArm64StackInfo() *arm64StackInfo {
 	return &arm64StackInfo{
@@ -341,6 +340,44 @@ func (a *arm64StackInfo) LinkReg() string                 { return "x30" }
 func (a *arm64StackInfo) PtrSize() int                    { return 8 }
 func (a *arm64StackInfo) SPRegex() *regexp.Regexp         { return a.spRegex }
 func (a *arm64StackInfo) HasStackMemoryRef(s string) bool { return a.spMemRegex.MatchString(s) }
+
+func (a *arm64StackInfo) WritesRegister(lines []Line, from, to int, reg string) bool {
+	ref := frameRegisterRef("arm64", reg)
+	for i := from; i < to && i < len(lines); i++ {
+		line := lines[i]
+		if len(line.Binary) == 0 || !ref.MatchString(line.Assembly) {
+			continue
+		}
+		inst := decodeArm64Line(line)
+		switch inst.Op {
+		case arm64asm.STR, arm64asm.STP, arm64asm.STUR, arm64asm.STRB, arm64asm.STRH, arm64asm.STURB, arm64asm.STURH,
+			arm64asm.CMP, arm64asm.CMN, arm64asm.TST, arm64asm.B, arm64asm.BL, arm64asm.CBZ, arm64asm.CBNZ,
+			arm64asm.TBZ, arm64asm.TBNZ:
+			continue
+		case arm64asm.LDR, arm64asm.LDP:
+			// Epilogue reloads from the stack on other control-flow paths.
+			if op := a.ParseStackOp(i, line); op != nil && (op.Kind == StackOpPop || op.Kind == StackOpReload) {
+				continue
+			}
+		}
+		if len(inst.Args) == 0 {
+			continue
+		}
+		var dst string
+		switch arg := inst.Args[0].(type) {
+		case arm64asm.Reg:
+			dst = strings.ToLower(arg.String())
+		case arm64asm.RegSP:
+			dst = strings.ToLower(arg.String())
+		default:
+			continue
+		}
+		if ref.MatchString(dst) {
+			return true
+		}
+	}
+	return false
+}
 
 func (a *arm64StackInfo) IsCalleeSaved(reg string) bool {
 	switch strings.ToLower(reg) {
@@ -464,78 +501,96 @@ func (a *arm64StackInfo) ParseStackOp(idx int, line Line) *StackOp {
 			}
 		}
 
-	case arm64asm.SUB:
-		// sub sp, sp, #N or sub xN, sp, #N
-		if len(inst.Args) >= 3 {
-			dst := inst.Args[0]
-			src := inst.Args[1]
-			if dst == arm64asm.RegSP(arm64asm.SP) && src == arm64asm.RegSP(arm64asm.SP) {
-				// Parse immediate from assembly since Args[2] might be complex
-				if len(fields) > 3 {
-					immStr := strings.TrimPrefix(fields[3], "#")
-					if n, err := strconv.ParseInt(immStr, 0, 64); err == nil {
-						return &StackOp{
-							Kind:      StackOpAlloc,
-							Immediate: n,
-							LineIndex: idx,
-						}
-					}
-				}
-			}
+	case arm64asm.SUB, arm64asm.ADD:
+		// sub sp, sp, #N (alloc), add sp, sp, #N (dealloc),
+		// mov/add xN, sp, #N (frame pointer or address of a local),
+		// sub xN, sp, #N (address below SP, used by stack realignment).
+		if len(inst.Args) < 3 {
+			return nil
 		}
-
-	case arm64asm.ADD:
-		// add sp, sp, #N (dealloc), or add x29, sp, #N (frame setup)
-		if len(inst.Args) >= 3 {
-			dst := inst.Args[0]
-			src := inst.Args[1]
-			if dst == arm64asm.RegSP(arm64asm.X29) && src == arm64asm.RegSP(arm64asm.SP) && len(fields) > 3 {
-				immStr := strings.TrimPrefix(fields[3], "#")
-				if n, err := strconv.ParseInt(immStr, 0, 64); err == nil {
-					return &StackOp{Kind: StackOpFrameSetup, Offset: int(n), LineIndex: idx}
-				}
-			}
-			if dst == arm64asm.RegSP(arm64asm.SP) && src == arm64asm.RegSP(arm64asm.SP) {
-				if len(fields) > 3 {
-					immStr := strings.TrimPrefix(fields[3], "#")
-					if n, err := strconv.ParseInt(immStr, 0, 64); err == nil {
-						return &StackOp{
-							Kind:      StackOpDealloc,
-							Immediate: n,
-							LineIndex: idx,
-						}
-					}
-				}
-			}
+		dst, dstOk := inst.Args[0].(arm64asm.RegSP)
+		src := inst.Args[1]
+		if !dstOk || src != arm64asm.RegSP(arm64asm.SP) {
+			break
 		}
+		imm, immOk := arm64SPImmediate(fields)
+		if !immOk {
+			if dst == arm64asm.RegSP(arm64asm.SP) {
+				return &StackOp{Kind: StackOpUnsupported, LineIndex: idx}
+			}
+			return nil
+		}
+		if inst.Op == arm64asm.SUB {
+			imm = -imm
+		}
+		if dst == arm64asm.RegSP(arm64asm.SP) {
+			if imm <= 0 {
+				return &StackOp{Kind: StackOpAlloc, Immediate: -imm, LineIndex: idx}
+			}
+			return &StackOp{Kind: StackOpDealloc, Immediate: imm, LineIndex: idx}
+		}
+		return &StackOp{Kind: StackOpFrameSetup, Reg: strings.ToLower(dst.String()), Offset: int(imm), LineIndex: idx}
 
 	case arm64asm.AND:
 		// and sp, xN, #-M (alignment)
-		if len(inst.Args) >= 1 {
-			dst := inst.Args[0]
-			if dst == arm64asm.RegSP(arm64asm.SP) || dst == arm64asm.SP {
-				return &StackOp{
-					Kind:      StackOpAlign,
-					LineIndex: idx,
+		if len(inst.Args) >= 2 && inst.Args[0] == arm64asm.RegSP(arm64asm.SP) {
+			op := &StackOp{Kind: StackOpAlign, LineIndex: idx}
+			switch src := inst.Args[1].(type) {
+			case arm64asm.RegSP:
+				op.Reg = strings.ToLower(src.String())
+			case arm64asm.Reg:
+				op.Reg = strings.ToLower(src.String())
+			}
+			if len(fields) > 3 {
+				if mask, err := strconv.ParseUint(strings.TrimPrefix(fields[3], "#"), 0, 64); err == nil {
+					op.Immediate = int64(mask)
 				}
 			}
+			return op
 		}
 
 	case arm64asm.MOV:
-		// mov x29, sp (frame setup) or mov sp, x29 (frame teardown)
+		// mov xN, sp (frame setup / address of locals) or mov sp, xN (frame teardown)
 		if len(inst.Args) >= 2 {
-			dst := inst.Args[0]
-			src := inst.Args[1]
-			if dst == arm64asm.RegSP(arm64asm.X29) && src == arm64asm.RegSP(arm64asm.SP) {
-				return &StackOp{Kind: StackOpFrameSetup, LineIndex: idx}
+			dst, dstOk := inst.Args[0].(arm64asm.RegSP)
+			src, srcOk := inst.Args[1].(arm64asm.RegSP)
+			if dstOk && srcOk && src == arm64asm.RegSP(arm64asm.SP) && dst != arm64asm.RegSP(arm64asm.SP) {
+				return &StackOp{Kind: StackOpFrameSetup, Reg: strings.ToLower(dst.String()), LineIndex: idx}
 			}
-			if dst == arm64asm.RegSP(arm64asm.SP) && src == arm64asm.RegSP(arm64asm.X29) {
-				return &StackOp{Kind: StackOpFrameTeardown, LineIndex: idx}
+			if dstOk && srcOk && dst == arm64asm.RegSP(arm64asm.SP) {
+				return &StackOp{Kind: StackOpFrameTeardown, Reg: strings.ToLower(src.String()), LineIndex: idx}
 			}
 		}
 	}
 
+	// Any other instruction that writes SP cannot be mapped onto a fixed Go frame.
+	if len(inst.Args) > 0 {
+		if dst, ok := inst.Args[0].(arm64asm.RegSP); ok && dst == arm64asm.RegSP(arm64asm.SP) {
+			return &StackOp{Kind: StackOpUnsupported, LineIndex: idx}
+		}
+	}
 	return nil
+}
+
+// arm64SPImmediate parses the immediate of `op sp/xN, sp, #imm[, lsl #12]`.
+func arm64SPImmediate(fields []string) (int64, bool) {
+	if len(fields) < 4 || !strings.HasPrefix(fields[3], "#") {
+		return 0, false
+	}
+	imm, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(fields[3], "#"), ","), 0, 64)
+	if err != nil {
+		return 0, false
+	}
+	if len(fields) >= 6 && strings.EqualFold(fields[4], "lsl") {
+		shift, err := strconv.ParseInt(strings.TrimPrefix(fields[5], "#"), 0, 64)
+		if err != nil {
+			return 0, false
+		}
+		imm <<= uint(shift)
+	} else if len(fields) != 4 {
+		return 0, false
+	}
+	return imm, true
 }
 
 func boolToInt(b bool) int64 {
@@ -590,28 +645,85 @@ func getArchStackInfo(arch *config.Arch) ArchStackInfo {
 	panic(fmt.Sprintf("no ArchStackInfo for architecture: %s", arch.Name))
 }
 
+// frameRegisterRef matches any spelling of a general-purpose register in the
+// compiler's assembly text.
+func frameRegisterRef(archName, reg string) *regexp.Regexp {
+	reg = strings.ToLower(reg)
+	if archName == "arm64" {
+		return regexp.MustCompile(`\b[xw]` + strings.TrimLeft(reg, "xw") + `\b`)
+	}
+	switch reg {
+	case "rbp", "ebp", "bp":
+		return regexp.MustCompile(`\b(?:rbp|ebp|bpl|bp)\b`)
+	}
+	return regexp.MustCompile(`\b` + regexp.QuoteMeta(reg) + `\b`)
+}
+
+var arm64LinkRegisterRef = regexp.MustCompile(`\b[xw]30\b`)
+
+// arm64LinkRegisterScratch reports whether the body uses X30 for anything
+// other than saving/restoring it. Go's leaf epilogue returns through the live
+// X30, so such functions must keep the compiler's LR save and restore.
+func arm64LinkRegisterScratch(lines []Line, ops []*StackOp) bool {
+	isStackOp := make(map[int]bool, len(ops))
+	for _, op := range ops {
+		switch op.Kind {
+		case StackOpPush, StackOpPop, StackOpSpill, StackOpReload:
+			isStackOp[op.LineIndex] = true
+		}
+	}
+	for i, line := range lines {
+		if isStackOp[i] || strings.HasPrefix(line.Assembly, "ret") {
+			continue
+		}
+		if arm64LinkRegisterRef.MatchString(line.Assembly) || strings.HasPrefix(line.Disassembled, "CALL ") {
+			return true
+		}
+	}
+	return false
+}
+
+func stackOpTouches(op *StackOp, reg string) bool {
+	return op.Reg == reg || op.Reg2 == reg
+}
+
 // analyzeStackLayout performs the first pass analysis to build StackLayout
-func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSaved bool) *StackLayout {
+func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSaved bool) (*StackLayout, error) {
 	layout := &StackLayout{
 		FrameSetupOffsets:   make(map[int]int),
 		NopIndices:          make(map[int]bool),
 		AllocIndices:        make(map[int]bool),
 		PreserveCalleeSaved: preserveCalleeSaved,
 		ResolvedOffsets:     make(map[int]int),
-	}
-	removableSave := func(op *StackOp) bool {
-		if !stackOpCalleeSaved(archInfo, op) {
-			return false
-		}
-		return !layout.PreserveCalleeSaved
+		RetainedSaves:       make(map[int]bool),
 	}
 
 	// Parse all stack operations
 	var ops []*StackOp
 	for i, line := range lines {
-		if op := archInfo.ParseStackOp(i, line); op != nil {
-			ops = append(ops, op)
+		op := archInfo.ParseStackOp(i, line)
+		if op == nil {
+			continue
 		}
+		if op.Kind == StackOpUnsupported {
+			return nil, fmt.Errorf(
+				"unsupported stack pointer update %q: dynamic stack allocation (VLA, alloca) cannot be mapped onto a fixed Go frame",
+				line.Assembly,
+			)
+		}
+		ops = append(ops, op)
+	}
+
+	// Saves that must stay even though the register is callee-saved in C.
+	linkRegisterScratch := archInfo.Name() == "arm64" && arm64LinkRegisterScratch(lines, ops)
+	retain := func(op *StackOp) bool {
+		return linkRegisterScratch && stackOpTouches(op, "x30")
+	}
+	removableSave := func(op *StackOp) bool {
+		if !stackOpCalleeSaved(archInfo, op) {
+			return false
+		}
+		return !layout.PreserveCalleeSaved && !retain(op)
 	}
 
 	// A fixed-offset ARM64 store is only a removable C-ABI register save when
@@ -632,19 +744,30 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 		}
 	}
 
-	// Analyze the operations. Track where ARM64 establishes X29 so it can be
-	// recreated relative to the fixed Go frame if the body actually uses it.
+	// Analyze the operations. Track where the compiler copies SP into a
+	// register so the copy can be recreated relative to the fixed Go frame if
+	// the body actually uses it.
 	frameSetupDepths := make(map[int]int)
-	frameSetupOriginalOffsets := make(map[int]int)
+	frameSetupOps := make(map[int]*StackOp)
+	lastFrameSetup := make(map[string]*StackOp)
+	alignAllocs := make(map[int]int)
 	for _, op := range ops {
 		switch op.Kind {
 		case StackOpFrameSetup:
 			layout.FramePointerUsed = true
 			frameSetupDepths[op.LineIndex] = layout.LocalsSize
-			frameSetupOriginalOffsets[op.LineIndex] = op.Offset
+			frameSetupOps[op.LineIndex] = op
+			lastFrameSetup[op.Reg] = op
 			layout.NopIndices[op.LineIndex] = true
 
 		case StackOpFrameTeardown:
+			setup, ok := lastFrameSetup[op.Reg]
+			if !ok || archInfo.WritesRegister(lines, setup.LineIndex+1, op.LineIndex, op.Reg) {
+				return nil, fmt.Errorf(
+					"unsupported stack pointer update %q: %s does not hold a fixed stack pointer offset (dynamic stack allocation such as VLA/alloca is not supported)",
+					lines[op.LineIndex].Assembly, op.Reg,
+				)
+			}
 			layout.NopIndices[op.LineIndex] = true
 
 		case StackOpPush:
@@ -665,6 +788,8 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 			// If this is a callee-saved register push, NOP it
 			if isRemovable {
 				layout.NopIndices[op.LineIndex] = true
+			} else if isCalleeSaved {
+				layout.RetainedSaves[op.LineIndex] = true
 			}
 
 			// If this is a pre-indexed push (stp x29, x30, [sp, #-N]!)
@@ -676,11 +801,11 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 			}
 
 		case StackOpPop:
-			isCalleeSaved := removableSave(op)
-
 			// If this is a callee-saved register pop, NOP it
-			if isCalleeSaved {
+			if removableSave(op) {
 				layout.NopIndices[op.LineIndex] = true
+			} else if stackOpCalleeSaved(archInfo, op) {
+				layout.RetainedSaves[op.LineIndex] = true
 			}
 
 		case StackOpSpill:
@@ -716,27 +841,66 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 			if op.Immediate != 0 && op.Immediate != -8 {
 				layout.Alignment = op.Immediate
 			}
+			if op.Reg != "" && op.Reg != "sp" {
+				// and sp, xN, #-A realigns an area reserved by sub xN, sp, #size.
+				// Go only guarantees 16-byte alignment, so keep the size and
+				// drop the realignment.
+				setup, ok := lastFrameSetup[op.Reg]
+				if !ok || setup.Offset >= 0 || archInfo.WritesRegister(lines, setup.LineIndex+1, op.LineIndex, op.Reg) {
+					return nil, fmt.Errorf(
+						"unsupported stack realignment %q: %s does not hold a fixed stack pointer offset",
+						lines[op.LineIndex].Assembly, op.Reg,
+					)
+				}
+				layout.LocalsSize += -setup.Offset
+				alignAllocs[op.LineIndex] = -setup.Offset
+				layout.AllocIndices[op.LineIndex] = true
+			}
 			// NOP out alignment instructions since Go handles alignment differently
 			layout.NopIndices[op.LineIndex] = true
 		}
 	}
 
-	if archInfo.Name() == "arm64" && len(frameSetupDepths) > 0 {
-		framePointerUsedByBody := false
+	// Recreate SP copies that the body still reads. Saving and restoring the
+	// register itself does not count as a read of the copied address.
+	saveRestoreOf := make(map[int]*StackOp)
+	for _, op := range ops {
+		switch op.Kind {
+		case StackOpPush, StackOpPop, StackOpSpill, StackOpReload:
+			saveRestoreOf[op.LineIndex] = op
+		}
+	}
+	hasCalls := false
+	for _, line := range lines {
+		if _, ok := BranchTarget(line); ok {
+			hasCalls = true
+			break
+		}
+	}
+	for lineIndex, setupDepth := range frameSetupDepths {
+		op := frameSetupOps[lineIndex]
+		ref := frameRegisterRef(archInfo.Name(), op.Reg)
+		// A call consumes argument registers implicitly, so the copied
+		// address may be live even if no instruction names the register.
+		used := hasCalls
 		for i, line := range lines {
+			if used {
+				break
+			}
 			if layout.NopIndices[i] {
 				continue
 			}
-			if arm64FramePointerRef.MatchString(line.Assembly) {
-				framePointerUsedByBody = true
+			if save, ok := saveRestoreOf[i]; ok && stackOpTouches(save, op.Reg) && stackOpCalleeSaved(archInfo, save) {
+				continue
+			}
+			if ref.MatchString(line.Assembly) {
+				used = true
 				break
 			}
 		}
-		if framePointerUsedByBody {
-			for lineIndex, setupDepth := range frameSetupDepths {
-				layout.NopIndices[lineIndex] = false
-				layout.FrameSetupOffsets[lineIndex] = layout.LocalsSize - setupDepth + frameSetupOriginalOffsets[lineIndex]
-			}
+		if used {
+			layout.NopIndices[lineIndex] = false
+			layout.FrameSetupOffsets[lineIndex] = layout.LocalsSize - setupDepth + op.Offset
 		}
 	}
 
@@ -754,12 +918,9 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 	// Check if any operations still need the stack frame.
 	hasStackRefs := false
 	for _, op := range ops {
-		switch op.Kind {
-		case StackOpAlloc:
-			// Explicit stack allocation (sub rsp, N) means we have locals
+		// Explicit stack allocation (sub rsp, N) means we have locals
+		if op.Kind == StackOpAlloc || alignAllocs[op.LineIndex] > 0 {
 			hasStackRefs = true
-		}
-		if hasStackRefs {
 			break
 		}
 	}
@@ -780,7 +941,13 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 		// All register saves are callee-saved and no stack references, so we don't need any stack space
 		layout.GoFrameSize = 0
 	} else {
-		layout.GoFrameSize += layout.LocalsSize
+		// cmd/asm requires 8-byte (AMD64) or 16-byte (ARM64) frame sizes; the
+		// compiler's allocation may be smaller when it has no call boundary.
+		align := archInfo.PtrSize()
+		if archInfo.Name() == "arm64" {
+			align = 16
+		}
+		layout.GoFrameSize += (layout.LocalsSize + align - 1) &^ (align - 1)
 	}
 
 	// Resolve every compiler stack reference against the final fixed Go frame.
@@ -816,6 +983,8 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 			}
 		case StackOpAlloc:
 			depth += int(op.Immediate)
+		case StackOpAlign:
+			depth += alignAllocs[op.LineIndex]
 		case StackOpDealloc:
 			// Epilogues are often duplicated on multiple control-flow paths. Keep
 			// the body depth fixed; restore operations resolve through their
@@ -829,7 +998,7 @@ func analyzeStackLayout(archInfo ArchStackInfo, lines []Line, preserveCalleeSave
 		}
 	}
 
-	return layout
+	return layout, nil
 }
 
 // TranslateOffset converts a C stack offset to Go's stack-N(SP) format
@@ -1105,9 +1274,15 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 			switch op.Kind {
 			case StackOpFrameSetup:
 				if offset, ok := layout.FrameSetupOffsets[i]; ok {
-					instr := "MOVD RSP, R29"
-					if offset != 0 {
-						instr = fmt.Sprintf("ADD $%d, RSP, R29", offset)
+					var instr string
+					if archInfo.Name() == "arm64" {
+						reg := "R" + strings.TrimLeft(op.Reg, "x")
+						instr = fmt.Sprintf("MOVD RSP, %s", reg)
+						if offset != 0 {
+							instr = fmt.Sprintf("ADD $%d, RSP, %s", offset, reg)
+						}
+					} else {
+						instr = fmt.Sprintf("LEAQ %d(SP), %s", offset, amd64SavedRegName(op.Reg))
 					}
 					line.Disassembled = instr
 					line.Binary = nil
@@ -1116,7 +1291,7 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 				}
 
 			case StackOpPush:
-				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
+				if (layout.PreserveCalleeSaved || layout.RetainedSaves[i]) && stackOpCalleeSaved(archInfo, op) {
 					if archInfo.Name() == "arm64" && op.Reg2 != "" {
 						newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
 					} else {
@@ -1130,7 +1305,11 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 						// A fixed Go frame has already performed the allocation. Remove
 						// writeback now; the final linkage/arena rebase will retain this
 						// fixed pair if its scaled immediate remains encodable.
-						newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
+						if op.Reg2 != "" {
+							newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
+						} else {
+							newLines = append(newLines, rewriteSavedRegisters(archInfo, op, line, layout)...)
+						}
 						continue
 					}
 					movInstr := arch.MovInstr[8]
@@ -1151,7 +1330,7 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 				}
 
 			case StackOpPop:
-				if layout.PreserveCalleeSaved && stackOpCalleeSaved(archInfo, op) {
+				if (layout.PreserveCalleeSaved || layout.RetainedSaves[i]) && stackOpCalleeSaved(archInfo, op) {
 					if archInfo.Name() == "arm64" && op.Reg2 != "" {
 						newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
 					} else {
@@ -1162,7 +1341,12 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 				// Non-callee-saved pop: rewrite to MOV
 				if !stackOpCalleeSaved(archInfo, op) {
 					if archInfo.Name() == "arm64" && op.Offset > 0 {
-						newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
+						// Post-indexed load that also deallocates (ldr x0, [sp], #N).
+						if op.Reg2 != "" {
+							newLines = append(newLines, rewriteArm64FixedPair(op, line, layout))
+						} else {
+							newLines = append(newLines, rewriteSavedRegisters(archInfo, op, line, layout)...)
+						}
 						continue
 					}
 					movInstr := arch.MovInstr[8]
@@ -1240,11 +1424,151 @@ var amd64RSPMemoryRef = regexp.MustCompile(`(?i)(-?(?:0x[0-9a-f]+|[0-9]+))?\((?:
 var amd64RSPAdd = regexp.MustCompile(`^ADDQ (?:R?SP), ([A-Z][A-Z0-9]*)$`)
 var amd64RSPMove = regexp.MustCompile(`^MOVQ (?:R?SP), ([A-Z][A-Z0-9]*)$`)
 
+// amd64ModRMOffset returns the index of the ModRM byte of a 64-bit x86
+// instruction encoding (-1 if the encoding is not understood) and whether
+// the instruction uses an EVEX prefix, whose 8-bit displacements are scaled.
+func amd64ModRMOffset(code []byte) (int, bool) {
+	i := 0
+	for i < len(code) {
+		switch code[i] {
+		case 0x66, 0x67, 0xF2, 0xF3, 0xF0, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65:
+			i++
+			continue
+		}
+		break
+	}
+	if i < len(code) && code[i]&0xF0 == 0x40 { // REX
+		i++
+	}
+	if i >= len(code) {
+		return -1, false
+	}
+	evex := false
+	switch code[i] {
+	case 0xC5: // VEX2
+		i += 3
+	case 0xC4: // VEX3
+		i += 4
+	case 0x62: // EVEX
+		evex = true
+		i += 5
+	case 0x0F:
+		i++
+		if i < len(code) && (code[i] == 0x38 || code[i] == 0x3A) {
+			i++
+		}
+		i++
+	default:
+		i++
+	}
+	if i >= len(code) {
+		return -1, false
+	}
+	return i, evex
+}
+
+// patchAmd64RSPDisplacement re-encodes an instruction whose memory operand is
+// RSP-relative so that its displacement is shifted by bias. It verifies the
+// ModRM/SIB location against the decoder before touching any byte.
+func patchAmd64RSPDisplacement(line Line, bias int64) ([]string, bool) {
+	code, err := hex.DecodeString(strings.Join(line.Binary, ""))
+	if err != nil {
+		return nil, false
+	}
+	inst, err := x86asm.Decode(code, 64)
+	if err != nil || inst.Len != len(code) {
+		return nil, false
+	}
+	var disp int64
+	found := false
+	for _, arg := range inst.Args {
+		if mem, ok := arg.(x86asm.Mem); ok && mem.Base == x86asm.RSP {
+			disp = mem.Disp
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, false
+	}
+
+	modrm, evex := amd64ModRMOffset(code)
+	if modrm < 0 || modrm+1 >= len(code) {
+		return nil, false
+	}
+	mod := code[modrm] >> 6
+	if code[modrm]&7 != 4 || code[modrm+1]&7 != 4 || mod == 3 {
+		return nil, false // not a SIB form with an RSP/R12 base
+	}
+	dispOffset := modrm + 2
+	var dispLen int
+	var encodedDisp int64
+	switch mod {
+	case 0:
+		dispLen = 0
+	case 1:
+		dispLen = 1
+		if dispOffset+1 > len(code) {
+			return nil, false
+		}
+		encodedDisp = int64(int8(code[dispOffset]))
+	case 2:
+		dispLen = 4
+		if dispOffset+4 > len(code) {
+			return nil, false
+		}
+		encodedDisp = int64(int32(uint32(code[dispOffset]) | uint32(code[dispOffset+1])<<8 |
+			uint32(code[dispOffset+2])<<16 | uint32(code[dispOffset+3])<<24))
+	}
+	if encodedDisp != disp {
+		return nil, false
+	}
+
+	newDisp := disp + bias
+	patched := append([]byte(nil), code[:modrm]...)
+	if newDisp == 0 {
+		patched = append(patched, code[modrm]&0x3F, code[modrm+1])
+	} else if !evex && newDisp >= -128 && newDisp <= 127 {
+		patched = append(patched, code[modrm]&0x3F|0x40, code[modrm+1], byte(int8(newDisp)))
+	} else if newDisp >= -1<<31 && newDisp < 1<<31 {
+		patched = append(patched, code[modrm]&0x3F|0x80, code[modrm+1],
+			byte(newDisp), byte(newDisp>>8), byte(newDisp>>16), byte(newDisp>>24))
+	} else {
+		return nil, false
+	}
+	patched = append(patched, code[dispOffset+dispLen:]...)
+
+	if reencoded, err := x86asm.Decode(patched, 64); err != nil || reencoded.Op != inst.Op || reencoded.Len != len(patched) {
+		return nil, false
+	}
+	binary := make([]string, len(patched))
+	for i, b := range patched {
+		binary[i] = fmt.Sprintf("%02x", b)
+	}
+	return binary, true
+}
+
 func shiftAmd64CStackRef(line Line, bias int) Line {
 	if bias == 0 || (!strings.Contains(line.Disassembled, "SP") && !strings.Contains(line.Disassembled, "sp")) {
 		return line
 	}
 
+	// Encodings are retained when cmd/asm has no trusted spelling for the
+	// instruction. Rebase those in place instead of forcing the decoder's text.
+	if len(line.Binary) > 0 {
+		if patched, ok := patchAmd64RSPDisplacement(line, int64(bias)); ok {
+			line.Binary = patched
+			line.Disassembled = amd64RSPMemoryRef.ReplaceAllStringFunc(line.Disassembled, func(ref string) string {
+				match := amd64RSPMemoryRef.FindStringSubmatch(ref)
+				offset := int64(0)
+				if match[1] != "" {
+					offset, _ = strconv.ParseInt(match[1], 0, 64)
+				}
+				return fmt.Sprintf("%d(SP)", int(offset)+bias)
+			})
+			return line
+		}
+	}
 	rewritten := amd64RSPMemoryRef.ReplaceAllStringFunc(line.Disassembled, func(ref string) string {
 		match := amd64RSPMemoryRef.FindStringSubmatch(ref)
 		offset := int64(0)
@@ -1299,9 +1623,11 @@ func shiftAmd64CStackRef(line Line, bias int) Line {
 	return line
 }
 
-func internalCallTarget(line Line) (string, bool) {
+// BranchTarget returns the function targeted by a translated direct call or
+// tail call (`CALL name<>(SB)` / `JMP name<>(SB)`).
+func BranchTarget(line Line) (string, bool) {
 	fields := strings.Fields(line.Disassembled)
-	if len(fields) != 2 || fields[0] != "CALL" {
+	if len(fields) != 2 || (fields[0] != "CALL" && fields[0] != "JMP") {
 		return "", false
 	}
 	target := strings.TrimSuffix(fields[1], "<>(SB)")
@@ -1321,7 +1647,7 @@ func assignInternalFunctionOwners(functions []Function) ([]int, error) {
 	// function that has a Go ABI entry sequence would therefore be invalid.
 	for i := range functions {
 		for _, line := range functions[i].Lines {
-			targetName, ok := internalCallTarget(line)
+			targetName, ok := BranchTarget(line)
 			if !ok {
 				continue
 			}
@@ -1346,7 +1672,7 @@ func assignInternalFunctionOwners(functions []Function) ([]int, error) {
 		var visit func(int, []string) error
 		visit = func(callerIdx int, path []string) error {
 			for _, line := range functions[callerIdx].Lines {
-				targetName, ok := internalCallTarget(line)
+				targetName, ok := BranchTarget(line)
 				if !ok {
 					continue
 				}
@@ -1383,6 +1709,69 @@ func assignInternalFunctionOwners(functions []Function) ([]int, error) {
 	return owners, nil
 }
 
+// helperCallDepths returns, for every internal helper owned by root, the
+// minimum and maximum number of x86 CALL return addresses that sit between
+// the root's SP and the helper's SP. A tail call (JMP) reuses the caller's
+// return address, so it does not add depth.
+func helperCallDepths(functions []Function, rootIdx int, owners []int) (minDepth, maxDepth map[int]int) {
+	functionByName := make(map[string]int, len(functions))
+	for i := range functions {
+		functionByName[functions[i].Name] = i
+	}
+	minDepth = make(map[int]int)
+	maxDepth = make(map[int]int)
+	var visit func(callerIdx, depth int)
+	visit = func(callerIdx, depth int) {
+		for _, line := range functions[callerIdx].Lines {
+			target, ok := BranchTarget(line)
+			if !ok {
+				continue
+			}
+			targetIdx, exists := functionByName[target]
+			if !exists || owners[targetIdx] != rootIdx {
+				continue
+			}
+			targetDepth := depth
+			if strings.HasPrefix(line.Disassembled, "CALL ") {
+				targetDepth++
+			}
+			lo, seen := minDepth[targetIdx]
+			if seen && targetDepth >= lo && targetDepth <= maxDepth[targetIdx] {
+				continue
+			}
+			if !seen || targetDepth < lo {
+				minDepth[targetIdx] = targetDepth
+			}
+			if !seen || targetDepth > maxDepth[targetIdx] {
+				maxDepth[targetIdx] = targetDepth
+			}
+			visit(targetIdx, targetDepth)
+		}
+	}
+	visit(rootIdx, 0)
+	return minDepth, maxDepth
+}
+
+// amd64NeedsAlignedStack reports whether a helper's code depends on the
+// alignment of its stack pointer: it asked for explicit realignment, or it
+// uses legacy SSE instructions with 128-bit stack operands (aligned moves are
+// rewritten to their unaligned forms and do not count).
+func amd64NeedsAlignedStack(function *Function) bool {
+	if function.StackAlign > 0 {
+		return true
+	}
+	archInfo := newAmd64StackInfo()
+	for _, line := range function.Lines {
+		if !amd64LegacySSEStackOperand.MatchString(line.Assembly) {
+			continue
+		}
+		if archInfo.ToUnalignedInsn(strings.ToUpper(strings.Fields(line.Assembly)[0])) == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func reserveInternalStackFrames(arch *config.Arch, functions []Function) ([]Function, error) {
 	owners, err := assignInternalFunctionOwners(functions)
 	if err != nil {
@@ -1394,82 +1783,116 @@ func reserveInternalStackFrames(arch *config.Arch, functions []Function) ([]Func
 			continue
 		}
 
-		internalCount := 0
+		hasHelpers := false
 		for helperIdx := range functions {
 			if owners[helperIdx] == rootIdx {
-				internalCount++
+				hasHelpers = true
+				break
 			}
 		}
-		if internalCount == 0 {
+		if !hasHelpers {
 			continue
 		}
 
-		linkageSize := 0
-		depthGuard := 0
+		rootLocals := functions[rootIdx].LocalsSize
 		if arch.Name == "arm64" {
-			linkageSize = 16
-		} else {
-			// Every x86 CALL temporarily pushes an 8-byte return address. Internal
-			// recursion is rejected, so the number of helpers owned by this root is
-			// a safe call-depth bound. Gaps keep slots valid at every such depth.
-			depthGuard = 8 * internalCount
+			// BL does not touch SP, and Go keeps RSP 16-byte aligned, so every
+			// helper sees the same SP as its root. Slots start above the root's
+			// locals and the 16-byte linkage area cmd/asm reserves.
+			reserved := 0
+			for helperIdx := range functions {
+				if owners[helperIdx] != rootIdx || functions[helperIdx].HiddenStackSize == 0 {
+					continue
+				}
+				reserved += -reserved & 15
+				functions[helperIdx].Lines = shiftArm64CStackRefs(functions[helperIdx].Lines, rootLocals+16+reserved)
+				reserved += functions[helperIdx].HiddenStackSize
+			}
+			reserved += -reserved & 15
+			functions[rootIdx].LocalsSize = rootLocals + reserved
+			continue
 		}
 
-		rootLocals := functions[rootIdx].LocalsSize
-		helperBase := rootLocals + linkageSize + depthGuard
-		reserved := 0
+		// Every x86 CALL pushes an 8-byte return address, so a helper's SP is
+		// 8*depth below the root's realigned SP. The C code expects its own SP to
+		// be aligned after the prologue, so each helper's slot bias is chosen so
+		// that bias-8*depth is aligned for every depth the helper is reached at.
+		minDepth, maxDepth := helperCallDepths(functions, rootIdx, owners)
+		reserved := rootLocals
 		for helperIdx := range functions {
 			if owners[helperIdx] != rootIdx || functions[helperIdx].HiddenStackSize == 0 {
 				continue
 			}
-			reserved += -reserved & 15
-			bias := helperBase + reserved
-			if arch.Name == "arm64" {
-				functions[helperIdx].Lines = shiftArm64CStackRefs(functions[helperIdx].Lines, bias)
-			} else {
-				for lineIdx := range functions[helperIdx].Lines {
-					functions[helperIdx].Lines[lineIdx] = shiftAmd64CStackRef(functions[helperIdx].Lines[lineIdx], bias)
-				}
+			helper := &functions[helperIdx]
+			align := 16
+			if helper.StackAlign > align {
+				align = helper.StackAlign
 			}
-			reserved += functions[helperIdx].HiddenStackSize + depthGuard
+			if align > functions[rootIdx].StackAlign {
+				// The root's realigned SP is the base every helper slot is
+				// measured from, so it must satisfy the strictest helper.
+				functions[rootIdx].StackAlign = align
+			}
+			lo, hi := minDepth[helperIdx], maxDepth[helperIdx]
+			if (hi-lo)*8%align != 0 && amd64NeedsAlignedStack(helper) {
+				return nil, fmt.Errorf(
+					"internal helper %q is called at depths %d and %d, which cannot both satisfy its %d-byte stack alignment",
+					helper.Name, lo, hi, align,
+				)
+			}
+			reserved += -reserved & (align - 1)
+			bias := reserved + 8*hi
+			for lineIdx := range helper.Lines {
+				helper.Lines[lineIdx] = shiftAmd64CStackRef(helper.Lines[lineIdx], bias)
+			}
+			reserved += helper.HiddenStackSize + 8*(hi-lo)
 		}
 		reserved += -reserved & 15
-		functions[rootIdx].LocalsSize = rootLocals + depthGuard + reserved
+		functions[rootIdx].LocalsSize = reserved
 	}
 	return functions, nil
 }
 
 // checkStackUnified is the new unified stack checking function
-func checkStackUnified(arch *config.Arch, function Function) Function {
+func checkStackUnified(arch *config.Arch, function Function) (Function, error) {
 	archInfo := getArchStackInfo(arch)
 
 	// Pass 1: Analyze stack layout
-	layout := analyzeStackLayout(archInfo, function.Lines, function.Internal || function.PreserveCABI)
-
-	// Check if we need complex rewrite
-	needsComplexRewrite := false
-	for _, reg := range layout.SavedRegs {
-		if !reg.IsCalleeSaved {
-			needsComplexRewrite = true
-			break
-		}
+	layout, err := analyzeStackLayout(archInfo, function.Lines, function.Internal || function.PreserveCABI)
+	if err != nil {
+		return function, err
 	}
 
-	// Also need complex rewrite if alignment > 8
-	if layout.Alignment != 0 && layout.Alignment != -8 {
-		needsComplexRewrite = true
-	}
-
-	if needsComplexRewrite {
-		fnName := function.Name
-		if fnName == "" {
-			fnName = "[unknown]"
-		}
-		fmt.Fprintf(os.Stderr, "WARN: %s: contains complex stack manipulation, running experimental transform\n", fnName)
+	warnStackAlignment(archInfo, layout, function)
+	if layout.Alignment < 0 && archInfo.Name() == "amd64" {
+		// Go keeps ARM64 RSP 16-byte aligned and NEON has no alignment faults;
+		// only AMD64 roots need the realignment prologue (see realignAmd64Roots).
+		function.StackAlign = int(-layout.Alignment)
 	}
 
 	// Pass 2: Rewrite stack operations
-	return rewriteStackOps(arch, archInfo, layout, function)
+	return rewriteStackOps(arch, archInfo, layout, function), nil
+}
+
+// amd64LegacySSEStackOperand matches a non-VEX SSE instruction with a stack
+// memory operand. Unlike VEX/EVEX encodings, legacy SSE requires 16-byte
+// aligned memory operands, which a Go frame does not guarantee.
+var amd64LegacySSEStackOperand = regexp.MustCompile(`^[a-uw-z]\w*\s.*\bxmmword ptr \[rsp\b`)
+
+// warnStackAlignment reports stack alignment the fixed Go frame cannot
+// provide. AMD64 roots realign SP to whatever the compiler asked for (see
+// realignAmd64Roots); ARM64 RSP is 16-byte aligned and larger requests are
+// dropped, which is harmless for NEON/SVE but not for code that inspects
+// addresses.
+func warnStackAlignment(archInfo ArchStackInfo, layout *StackLayout, function Function) {
+	if archInfo.Name() != "arm64" || layout.Alignment == 0 || -layout.Alignment <= 16 {
+		return
+	}
+	fnName := function.Name
+	if fnName == "" {
+		fnName = "[unknown]"
+	}
+	fmt.Fprintf(os.Stderr, "WARN: %s: requests %d-byte stack alignment, Go only guarantees 16 bytes on arm64\n", fnName, -layout.Alignment)
 }
 
 type virtualSP struct {
@@ -1484,16 +1907,25 @@ func (v *virtualSP) String() string {
 }
 
 func decodeAmd64Line(line Line) x86asm.Inst {
-	binary := strings.Join(line.Binary, "")
-	code, err := hex.DecodeString(binary)
-	if err != nil {
-		panic(err)
-	}
-	inst, err := x86asm.Decode(code, 64)
-	if err != nil {
-		panic(fmt.Errorf("failed to decode instruction: %v (%q)", err, binary))
+	inst, ok := tryDecodeAmd64Line(line)
+	if !ok {
+		panic(fmt.Errorf("failed to decode instruction %q", strings.Join(line.Binary, "")))
 	}
 	return inst
+}
+
+// tryDecodeAmd64Line decodes the machine code of a line; it reports false for
+// encodings x86asm does not understand (notably EVEX/AVX-512).
+func tryDecodeAmd64Line(line Line) (x86asm.Inst, bool) {
+	code, err := hex.DecodeString(strings.Join(line.Binary, ""))
+	if err != nil {
+		return x86asm.Inst{}, false
+	}
+	inst, err := x86asm.Decode(code, 64)
+	if err != nil || inst.Len != len(code) {
+		return x86asm.Inst{}, false
+	}
+	return inst, true
 }
 
 func decodeArm64Line(line Line) arm64asm.Inst {

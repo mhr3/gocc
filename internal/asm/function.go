@@ -59,8 +59,12 @@ type Function struct {
 	Lines           []Line  `json:"lines"`
 	LocalsSize      int     `json:"localsSize,omitempty"`
 	HiddenStackSize int     `json:"hiddenStackSize,omitempty"`
-	Ret             *Param  `json:"return,omitempty"`
-	GoFunc          GoFunction
+	// StackAlign is the alignment the C code expects of its stack pointer. A
+	// non-zero value makes the generated AMD64 prologue realign SP within the
+	// frame (Go only guarantees 8 bytes there) and the epilogue restore it.
+	StackAlign int    `json:"stackAlign,omitempty"`
+	Ret        *Param `json:"return,omitempty"`
+	GoFunc     GoFunction
 }
 
 func (f *GoFunction) NumResults() int {
@@ -452,7 +456,7 @@ func (c *Const) Compile(arch *config.Arch) string {
 	return output.String()
 }
 
-var directiveParseRegex = regexp.MustCompile(`\.((zero|byte|short|hword|word|long|int|quad|xword)\s+(-?\d+)(.*)|(ascii|asciz)\s+("(?:[\\].|[^\\"])+"))$`)
+var directiveParseRegex = regexp.MustCompile(`\.((zero|byte|short|hword|word|long|int|quad|xword)\s+(-?(?:0[xX][0-9a-fA-F]+|\d+))(.*)|(ascii|asciz)\s+("(?:[\\].|[^\\"])+"))$`)
 
 // parseConstLine parses a line in the constant section
 func parseConstLine(arch *config.Arch, constType string, line string) ConstLine {
@@ -495,9 +499,9 @@ func parseConstLine(arch *config.Arch, constType string, line string) ConstLine 
 		return NewConstLine(bytes.Repeat([]byte{fillVal}, zeroSz))
 	}
 
-	value, err := strconv.ParseUint(match[3], 10, 64)
+	value, err := strconv.ParseUint(match[3], 0, 64)
 	if errors.Is(err, strconv.ErrSyntax) {
-		val, parseErr := strconv.ParseInt(match[3], 10, 64)
+		val, parseErr := strconv.ParseInt(match[3], 0, 64)
 		if parseErr == nil {
 			value = uint64(val)
 			err = nil

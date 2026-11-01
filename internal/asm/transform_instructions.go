@@ -119,8 +119,8 @@ func removeBinaryInstructionsArm64(_ *config.Arch, function Function) Function {
 					line.Binary = nil
 				case strings.HasPrefix(dInst, inst) && len(dInst) == len(inst)+1:
 					switch dInst {
-					// denylist
-					case "LDURBW":
+					// denylist: cmd/asm has no spelling for these
+					case "LDURBW", "SMOVW", "SMOVD":
 					default:
 						line.Binary = nil
 					}

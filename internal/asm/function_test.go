@@ -148,6 +148,17 @@ func TestParseConst(t *testing.T) {
 			ExpectedVal: "8080808080808080",
 		},
 		{
+			// Recent Clang emits floating-point constant pools in hexadecimal.
+			Name: "quad-hex",
+			Const: `	.quad	0x3fef9add3c0e56b8              # double 0.98765432099999994`,
+			ExpectedVal: "b8560e3cdd9aef3f",
+		},
+		{
+			Name: "xword-hex",
+			Const: `	.xword	0x4012c3c9eecbfb16              // double 4.6912000000000003`,
+			ExpectedVal: "16fbcbeec9c31240",
+		},
+		{
 			Name: "ascii",
 			Const: `	.ascii	"\000\377\377\377\001\377\377\377\002\377\377\377\003\377\377\377"`,
 			ExpectedVal: "00ffffff01ffffff02ffffff03ffffff",

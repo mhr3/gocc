@@ -68,11 +68,17 @@ This tool does not support most of the C features, it's not a replacement for C/
 
 - Only supports C code that can be compiled by `clang`.
 - Does not support C++ code or templates for now.
-- Calls to external C libraries are not supported. Internal helper calls require
-  `--with-internal-functions`; recursive helpers and helpers shared by multiple
-  exported functions are rejected.
+- Calls to external C libraries are not supported. Internal helper calls (including
+  tail calls) require `--with-internal-functions`; recursive helpers and helpers
+  reachable from multiple exported functions are rejected, as are helpers that
+  take arguments on the stack (more than 8 integer arguments on arm64, 6 on amd64).
+- No dynamic stack allocation: VLAs and `alloca` are rejected. Over-aligned locals
+  (`aligned(32)` and larger) are honoured on amd64 but only 16-byte aligned on arm64.
 - No dynamic memory allocation.
 - Currently limited to 6 arguments per function.
+- Function-local `static const` tables are supported on arm64; on amd64 clang's
+  Intel-syntax assembler cannot re-assemble the dotted `fn.table` symbol it emits,
+  so use file-scope `static const` tables instead.
 
 ## Resources
 
