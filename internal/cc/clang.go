@@ -36,10 +36,20 @@ type Compiler struct {
 var arm64X29Register = regexp.MustCompile(`\b([xw])29\b`)
 var arm64X20Register = regexp.MustCompile(`\b([xw])20\b`)
 
+// arm64RegisterRemapFlags are the compiler flags that must all be present
+// before the X29/X20 rewrite is applied: the frame pointer must be omitted,
+// and the destination registers must be reserved from the register allocator
+// so the rewrite cannot alias them with the compiler's own X25/X26 uses.
+var arm64RegisterRemapFlags = []string{"-fomit-frame-pointer", "-mno-stackrealign", "-ffixed-x25", "-ffixed-x26"}
+
 func (c *Compiler) remapArm64FrameRegister(assembly string, args []string) error {
-	if c.arch.Name != "arm64" || !slicesContains(args, "-fomit-frame-pointer") ||
-		!slicesContains(args, "-mno-stackrealign") {
+	if c.arch.Name != "arm64" {
 		return nil
+	}
+	for _, flag := range arm64RegisterRemapFlags {
+		if !slicesContains(args, flag) {
+			return nil
+		}
 	}
 	contents, err := os.ReadFile(assembly)
 	if err != nil {

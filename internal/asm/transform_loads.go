@@ -15,7 +15,7 @@ func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string,
 	op := arch.MovInstr[8]
 	register := reParams["register"]
 	register2 := reParams["register2"]
-	symbol := reParams["var"]
+	symbol := DataSymbolName(reParams["var"])
 
 	// sigh, why oh why do we have to do this?
 	switch instr := reParams["instr"]; {
@@ -23,6 +23,9 @@ func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string,
 		op = "MOVO"
 	case instr == "MOVDQU":
 		op = "MOVOU"
+	case instr == "MOVSD_XMM":
+		// x86asm distinguishes the SSE move from the string instruction.
+		op = "MOVSD"
 	default:
 		op = instr
 	}
@@ -67,7 +70,7 @@ func rewriteLoadArm64(arch *config.Arch, _ Function, _ Line, combined string, li
 
 	op := arch.MovInstr[8]
 	register := reParams["register"]
-	symbol := reParams["var"]
+	symbol := DataSymbolName(reParams["var"])
 
 	// addrMode := "$" // absolute addressing
 	rewritten := fmt.Sprintf("%s $%s<>(SB), %s", op, symbol, register)

@@ -11,6 +11,7 @@ import (
 
 func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error) {
 	if arch != nil {
+		functions = cloneSharedInternalHelpers(functions)
 		if err := rejectRecursiveInternalCalls(functions); err != nil {
 			return nil, err
 		}
@@ -23,7 +24,11 @@ func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error
 		}
 	}
 	for i, function := range functions {
-		functions[i] = transformFunction(arch, function)
+		transformed, err := transformFunction(arch, function)
+		if err != nil {
+			return nil, err
+		}
+		functions[i] = transformed
 	}
 	if arch != nil {
 		var err error
@@ -31,9 +36,166 @@ func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error
 		if err != nil {
 			return nil, err
 		}
+		if arch.Name == "amd64" {
+			functions = realignAmd64Roots(functions)
+		}
 	}
 
 	return functions, nil
+}
+
+// realignAmd64Roots makes every Go-visible AMD64 function with a frame
+// realign SP to what the C code expects: at least the 16 bytes the SysV ABI
+// guarantees after a C prologue, or more if the compiler asked for it. The
+// prologue is emitted by Generate (after the argument loads); the original
+// SP is restored here before each return so the result store and Go's own
+// epilogue see the frame the assembler laid out.
+func realignAmd64Roots(functions []Function) []Function {
+	for i := range functions {
+		function := &functions[i]
+		if function.Internal || function.LocalsSize == 0 {
+			continue
+		}
+		if function.StackAlign < 16 {
+			function.StackAlign = 16
+		}
+		restore := Line{Disassembled: fmt.Sprintf("MOVQ %d(SP), SP", function.LocalsSize), Comment: "restore SP realigned in the prologue"}
+		lines := make([]Line, 0, len(function.Lines)+4)
+		for j, line := range function.Lines {
+			if !strings.HasPrefix(line.Assembly, "ret") {
+				lines = append(lines, line)
+				continue
+			}
+			// storeReturnValue places the result store directly before RET and
+			// moved the labels onto it.
+			if n := len(lines); j > 0 && n > 0 && isReturnValueStore(lines[n-1]) {
+				store := lines[n-1]
+				lines = lines[:n-1]
+				restore.Labels, store.Labels = store.Labels, nil
+				lines = append(lines, restore, store, line)
+				continue
+			}
+			restore.Labels, line.Labels = line.Labels, nil
+			lines = append(lines, restore, line)
+		}
+		function.Lines = lines
+	}
+	return functions
+}
+
+func isReturnValueStore(line Line) bool {
+	return line.Assembly == "" && line.Binary == nil && strings.Contains(line.Disassembled, " ret+") && strings.HasSuffix(line.Disassembled, "(FP)")
+}
+
+// cloneSharedInternalHelpers gives every Go-visible function its own copy of
+// the internal helpers it shares with other Go-visible functions. Helper stack
+// slots live in a fixed arena inside one root's frame, so a helper can only
+// serve one root; cloning keeps the common C pattern of helpers shared by
+// several entry points working at the cost of duplicated code.
+func cloneSharedInternalHelpers(functions []Function) []Function {
+	index := make(map[string]int, len(functions))
+	for i := range functions {
+		index[functions[i].Name] = i
+	}
+	reachable := func(from int) []int {
+		var order []int
+		seen := map[int]bool{}
+		var visit func(int)
+		visit = func(i int) {
+			for _, line := range functions[i].Lines {
+				target, ok := BranchTarget(line)
+				if !ok {
+					continue
+				}
+				j, exists := index[target]
+				if !exists || !functions[j].Internal || seen[j] {
+					continue
+				}
+				seen[j] = true
+				order = append(order, j)
+				visit(j)
+			}
+		}
+		visit(from)
+		return order
+	}
+
+	rootsOf := make(map[int][]int) // helper -> roots reaching it
+	reach := make(map[int][]int)   // root -> reachable helpers
+	for i := range functions {
+		if functions[i].Internal {
+			continue
+		}
+		reach[i] = reachable(i)
+		for _, h := range reach[i] {
+			rootsOf[h] = append(rootsOf[h], i)
+		}
+	}
+	shared := make(map[int]bool)
+	for h, roots := range rootsOf {
+		if len(roots) > 1 {
+			shared[h] = true
+		}
+	}
+	if len(shared) == 0 {
+		return functions
+	}
+
+	retarget := func(lines []Line, rename map[string]string) []Line {
+		out := make([]Line, len(lines))
+		for i, line := range lines {
+			out[i] = line
+			if target, ok := BranchTarget(line); ok {
+				if to, renamed := rename[target]; renamed {
+					out[i].Disassembled = strings.Fields(line.Disassembled)[0] + " " + to + "<>(SB)"
+				}
+			}
+		}
+		return out
+	}
+
+	result := make([]Function, 0, len(functions))
+	for i := range functions {
+		if !shared[i] {
+			result = append(result, functions[i])
+		}
+	}
+	consts := make(map[int]bool)
+	for rootIdx := range functions {
+		if functions[rootIdx].Internal {
+			continue
+		}
+		rename := make(map[string]string)
+		for _, h := range reach[rootIdx] {
+			if shared[h] {
+				rename[functions[h].Name] = functions[h].Name + "_" + functions[rootIdx].Name
+			}
+		}
+		if len(rename) == 0 {
+			continue
+		}
+		// Exclusive helpers of this root are rewritten in place; shared ones
+		// are cloned under the root-specific name.
+		for j := range result {
+			if result[j].Name == functions[rootIdx].Name || (result[j].Internal && len(rootsOf[index[result[j].Name]]) == 1 && rootsOf[index[result[j].Name]][0] == rootIdx) {
+				result[j].Lines = retarget(result[j].Lines, rename)
+			}
+		}
+		for _, h := range reach[rootIdx] {
+			if !shared[h] {
+				continue
+			}
+			clone := functions[h]
+			clone.Name = rename[clone.Name]
+			clone.Lines = retarget(clone.Lines, rename)
+			if consts[h] {
+				clone.Consts = nil // constants are emitted once, by the first clone
+			}
+			consts[h] = true
+			result = append(result, clone)
+		}
+	}
+	return result
 }
 
 func rejectInternalStackArguments(arch *config.Arch, function Function) error {
@@ -42,7 +204,10 @@ func rejectInternalStackArguments(arch *config.Arch, function Function) error {
 	}
 
 	archInfo := getArchStackInfo(arch)
-	layout := analyzeStackLayout(archInfo, function.Lines, true)
+	layout, err := analyzeStackLayout(archInfo, function.Lines, true)
+	if err != nil {
+		return fmt.Errorf("%s: %w", function.Name, err)
+	}
 	firstStackArgument := int64(layout.LocalsSize)
 	if arch.Name == "amd64" {
 		firstStackArgument += 8 // Skip x86 CALL's return address.
@@ -57,7 +222,11 @@ func rejectInternalStackArguments(arch *config.Arch, function Function) error {
 			if !strings.Contains(line.Assembly, "rsp") {
 				continue
 			}
-			for _, arg := range decodeAmd64Line(line).Args {
+			inst, ok := tryDecodeAmd64Line(line)
+			if !ok {
+				continue
+			}
+			for _, arg := range inst.Args {
 				memory, ok := arg.(x86asm.Mem)
 				if ok && memory.Base == x86asm.RSP && memory.Disp >= firstStackArgument {
 					usesStackArgument = true
@@ -98,12 +267,8 @@ func rejectRecursiveInternalCalls(functions []Function) error {
 	edges := make(map[string][]string, len(internal))
 	for name, functionIdx := range internal {
 		for _, line := range functions[functionIdx].Lines {
-			fields := strings.Fields(line.Disassembled)
-			if len(fields) != 2 || fields[0] != "CALL" {
-				continue
-			}
-			target := strings.TrimSuffix(fields[1], "<>(SB)")
-			if target == fields[1] {
+			target, ok := BranchTarget(line)
+			if !ok {
 				continue
 			}
 			if _, ok := internal[target]; ok {
@@ -156,11 +321,15 @@ func rejectRecursiveInternalCalls(functions []Function) error {
 	return nil
 }
 
-func transformFunction(arch *config.Arch, function Function) Function {
+func transformFunction(arch *config.Arch, function Function) (Function, error) {
 	// Apply the transforms
+	function = expandTailCalls(function)
 	function = transformReturns(arch, function)
 	function = rewriteJumpsAndLoads(arch, function)
-	function = checkStackManipulation(arch, function)
+	function, err := checkStackManipulation(arch, function)
+	if err != nil {
+		return function, fmt.Errorf("%s: %w", function.Name, err)
+	}
 	function = storeReturnValue(arch, function)
 
 	// weird type of transform, but we'll keep it here for now
@@ -170,6 +339,31 @@ func transformFunction(arch *config.Arch, function Function) Function {
 		function = removeBinaryInstructions(arch, function)
 	}
 
+	return function, nil
+}
+
+// expandTailCalls turns a Go-visible function's tail calls into a call plus
+// return. The C compiler had already torn down the frame before the tail
+// call, so the helper runs with the root's fixed frame intact, and the usual
+// return bridge stores the helper's result into the Go result slot. Internal
+// helpers keep their tail calls: they share the C register ABI with their
+// callee and the caller's return address is still valid.
+func expandTailCalls(function Function) Function {
+	if function.Internal {
+		return function
+	}
+	expanded := make([]Line, 0, len(function.Lines))
+	for _, line := range function.Lines {
+		target, ok := BranchTarget(line)
+		if !ok || !strings.HasPrefix(line.Disassembled, "JMP ") {
+			expanded = append(expanded, line)
+			continue
+		}
+		call := line
+		call.Disassembled = fmt.Sprintf("CALL %s<>(SB)", target)
+		expanded = append(expanded, call, Line{Assembly: "ret", Disassembled: "RET"})
+	}
+	function.Lines = expanded
 	return function
 }
 
@@ -223,9 +417,9 @@ func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
 	return function
 }
 
-func checkStackManipulation(arch *config.Arch, function Function) Function {
+func checkStackManipulation(arch *config.Arch, function Function) (Function, error) {
 	if arch == nil {
-		return function
+		return function, nil
 	}
 
 	switch arch.Name {
@@ -236,11 +430,17 @@ func checkStackManipulation(arch *config.Arch, function Function) Function {
 			// Go-visible caller reserves and expose the measured size for the global
 			// reservation pass.
 			archInfo := getArchStackInfo(arch)
-			layout := analyzeStackLayout(archInfo, function.Lines, true)
+			layout, err := analyzeStackLayout(archInfo, function.Lines, true)
+			if err != nil {
+				return function, err
+			}
 			function = rewriteStackOpsWithLinkage(arch, archInfo, layout, function, false)
 			function.HiddenStackSize = function.LocalsSize
 			function.LocalsSize = 0
-			return function
+			if layout.Alignment < 0 && arch.Name == "amd64" {
+				function.StackAlign = int(-layout.Alignment)
+			}
+			return function, nil
 		}
 		return checkStackUnified(arch, function)
 	}

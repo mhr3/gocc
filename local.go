@@ -79,12 +79,8 @@ func validateInternalFunctionOptIn(functions []asm.Function, enabled bool) error
 			continue
 		}
 		for _, line := range function.Lines {
-			fields := strings.Fields(line.Disassembled)
-			if len(fields) != 2 || fields[0] != "CALL" {
-				continue
-			}
-			target := strings.TrimSuffix(fields[1], "<>(SB)")
-			if target == fields[1] {
+			target, ok := asm.BranchTarget(line)
+			if !ok {
 				continue
 			}
 			return fmt.Errorf(
@@ -201,17 +197,19 @@ func (t *Local) Translate() error {
 		functions[i].GoFunc.Name += t.FuncSuffix
 	}
 
-	// Generate the Go stubs for the functions
-	if err := asm.GenerateGoStubs(t.Arch, t.Package, t.GoStub, functions); err != nil {
-		return err
-	}
-
 	meta := asm.GeneratorMeta{
 		ClangVersion: t.Clang.Version(),
 		Options:      compilerOptions,
 	}
 
-	return asm.GenerateFile(t.Arch, t.GoAssembly, t.Source, functions, meta)
+	// Generate the assembly first: it performs the final validation, and a
+	// rejected translation must not leave a stub without an implementation.
+	if err := asm.GenerateFile(t.Arch, t.GoAssembly, t.Source, functions, meta); err != nil {
+		return err
+	}
+
+	// Generate the Go stubs for the functions
+	return asm.GenerateGoStubs(t.Arch, t.Package, t.GoStub, functions)
 }
 
 // Output returns the output files as a web result
