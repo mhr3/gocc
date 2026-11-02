@@ -44,20 +44,25 @@ func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error
 	return functions, nil
 }
 
-// realignAmd64Roots makes every Go-visible AMD64 function with a frame
-// realign SP to what the C code expects: at least the 16 bytes the SysV ABI
-// guarantees after a C prologue, or more if the compiler asked for it. The
-// prologue is emitted by Generate (after the argument loads); the original
-// SP is restored here before each return so the result store and Go's own
-// epilogue see the frame the assembler laid out.
+// realignAmd64Roots makes a Go-visible AMD64 function realign SP when its
+// code, or the code of a helper it owns, depends on stack alignment that Go
+// does not provide (see amd64RequiredStackAlign). Writing SP marks the
+// function SPWRITE for the Go toolchain, which disables asynchronous
+// preemption inside it, so functions that do not need it are left alone.
+// The prologue is emitted by Generate (after the argument loads); the
+// original SP is restored here before each return so the result store and
+// Go's own epilogue see the frame the assembler laid out.
 func realignAmd64Roots(functions []Function) []Function {
 	for i := range functions {
 		function := &functions[i]
-		if function.Internal || function.LocalsSize == 0 {
+		if function.Internal {
 			continue
 		}
-		if function.StackAlign < 16 {
-			function.StackAlign = 16
+		if required := amd64RequiredStackAlign(function); required > function.StackAlign {
+			function.StackAlign = required
+		}
+		if function.StackAlign == 0 {
+			continue
 		}
 		restore := Line{Disassembled: fmt.Sprintf("MOVQ %d(SP), SP", function.LocalsSize), Comment: "restore SP realigned in the prologue"}
 		lines := make([]Line, 0, len(function.Lines)+4)
@@ -437,9 +442,6 @@ func checkStackManipulation(arch *config.Arch, function Function) (Function, err
 			function = rewriteStackOpsWithLinkage(arch, archInfo, layout, function, false)
 			function.HiddenStackSize = function.LocalsSize
 			function.LocalsSize = 0
-			if layout.Alignment < 0 && arch.Name == "amd64" {
-				function.StackAlign = int(-layout.Alignment)
-			}
 			return function, nil
 		}
 		return checkStackUnified(arch, function)

@@ -72,8 +72,13 @@ This tool does not support most of the C features, it's not a replacement for C/
   tail calls) require `--with-internal-functions`; recursive helpers and helpers
   reachable from multiple exported functions are rejected, as are helpers that
   take arguments on the stack (more than 8 integer arguments on arm64, 6 on amd64).
-- No dynamic stack allocation: VLAs and `alloca` are rejected. Over-aligned locals
-  (`aligned(32)` and larger) are honoured on amd64 but only 16-byte aligned on arm64.
+- No dynamic stack allocation: VLAs and `alloca` are rejected. Go only keeps the
+  amd64 stack 8-byte aligned; aligned vector moves are rewritten to unaligned ones,
+  and a function whose code still depends on stack alignment (legacy SSE
+  instructions with stack operands, 512-bit aligned moves) realigns SP inside its
+  frame, which makes it SPWRITE for the Go toolchain (no asynchronous preemption
+  inside it). Compile with AVX to avoid this. Over-aligned locals are only 16-byte
+  aligned on arm64.
 - No dynamic memory allocation.
 - Currently limited to 6 arguments per function.
 - Function-local `static const` tables are supported on arm64; on amd64 clang's

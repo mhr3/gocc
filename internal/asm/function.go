@@ -59,9 +59,10 @@ type Function struct {
 	Lines           []Line  `json:"lines"`
 	LocalsSize      int     `json:"localsSize,omitempty"`
 	HiddenStackSize int     `json:"hiddenStackSize,omitempty"`
-	// StackAlign is the alignment the C code expects of its stack pointer. A
-	// non-zero value makes the generated AMD64 prologue realign SP within the
-	// frame (Go only guarantees 8 bytes there) and the epilogue restore it.
+	// StackAlign is the stack alignment the C code depends on, when its
+	// instructions require more than the 8 bytes Go guarantees on AMD64. A
+	// non-zero value makes the generated prologue realign SP within the frame
+	// and the epilogue restore it; zero leaves SP untouched.
 	StackAlign int    `json:"stackAlign,omitempty"`
 	Ret        *Param `json:"return,omitempty"`
 	GoFunc     GoFunction
