@@ -1752,24 +1752,33 @@ func helperCallDepths(functions []Function, rootIdx int, owners []int) (minDepth
 	return minDepth, maxDepth
 }
 
-// amd64NeedsAlignedStack reports whether a helper's code depends on the
-// alignment of its stack pointer: it asked for explicit realignment, or it
-// uses legacy SSE instructions with 128-bit stack operands (aligned moves are
-// rewritten to their unaligned forms and do not count).
-func amd64NeedsAlignedStack(function *Function) bool {
-	if function.StackAlign > 0 {
-		return true
-	}
+// amd64EVEXAlignedStackMove matches 512-bit aligned moves with a stack
+// operand. They cannot be rewritten to unaligned forms (x86asm has no EVEX
+// support), so the stack must really be 64-byte aligned for them.
+var amd64EVEXAlignedStackMove = regexp.MustCompile(`^vmov(?:aps|apd|dqa(?:32|64)?)\s.*\bzmmword ptr \[rsp\b`)
+
+// amd64RequiredStackAlign returns the stack alignment a function's code
+// depends on, or 0 when none of its instructions care. Aligned moves are
+// rewritten to their unaligned forms and do not count; legacy SSE
+// instructions with 128-bit stack operands fault on a misaligned stack and
+// do. Go only guarantees 8-byte alignment, so a non-zero result makes the
+// owning Go-visible function realign SP (see realignAmd64Roots).
+func amd64RequiredStackAlign(function *Function) int {
+	required := 0
 	archInfo := newAmd64StackInfo()
 	for _, line := range function.Lines {
-		if !amd64LegacySSEStackOperand.MatchString(line.Assembly) {
-			continue
-		}
-		if archInfo.ToUnalignedInsn(strings.ToUpper(strings.Fields(line.Assembly)[0])) == nil {
-			return true
+		switch {
+		case amd64EVEXAlignedStackMove.MatchString(line.Assembly):
+			if required < 64 {
+				required = 64
+			}
+		case amd64LegacySSEStackOperand.MatchString(line.Assembly):
+			if archInfo.ToUnalignedInsn(strings.ToUpper(strings.Fields(line.Assembly)[0])) == nil && required < 16 {
+				required = 16
+			}
 		}
 	}
-	return false
+	return required
 }
 
 func reserveInternalStackFrames(arch *config.Arch, functions []Function) ([]Function, error) {
@@ -1824,17 +1833,18 @@ func reserveInternalStackFrames(arch *config.Arch, functions []Function) ([]Func
 				continue
 			}
 			helper := &functions[helperIdx]
-			align := 16
-			if helper.StackAlign > align {
-				align = helper.StackAlign
-			}
-			if align > functions[rootIdx].StackAlign {
+			required := amd64RequiredStackAlign(helper)
+			if required > functions[rootIdx].StackAlign {
 				// The root's realigned SP is the base every helper slot is
 				// measured from, so it must satisfy the strictest helper.
-				functions[rootIdx].StackAlign = align
+				functions[rootIdx].StackAlign = required
+			}
+			align := required
+			if align < 16 {
+				align = 16
 			}
 			lo, hi := minDepth[helperIdx], maxDepth[helperIdx]
-			if (hi-lo)*8%align != 0 && amd64NeedsAlignedStack(helper) {
+			if (hi-lo)*8%align != 0 && required > 0 {
 				return nil, fmt.Errorf(
 					"internal helper %q is called at depths %d and %d, which cannot both satisfy its %d-byte stack alignment",
 					helper.Name, lo, hi, align,
@@ -1864,11 +1874,6 @@ func checkStackUnified(arch *config.Arch, function Function) (Function, error) {
 	}
 
 	warnStackAlignment(archInfo, layout, function)
-	if layout.Alignment < 0 && archInfo.Name() == "amd64" {
-		// Go keeps ARM64 RSP 16-byte aligned and NEON has no alignment faults;
-		// only AMD64 roots need the realignment prologue (see realignAmd64Roots).
-		function.StackAlign = int(-layout.Alignment)
-	}
 
 	// Pass 2: Rewrite stack operations
 	return rewriteStackOps(arch, archInfo, layout, function), nil

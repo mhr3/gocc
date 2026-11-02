@@ -1,9 +1,9 @@
 package asm
 
 import (
-	"fmt"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1419,41 +1419,79 @@ func TestAmd64HelperArenaKeepsSSEAlignmentPerCallDepth(t *testing.T) {
 	require.ErrorContains(t, err, `internal helper "leaf" is called at depths 1 and 2`)
 }
 
-func TestRealignAmd64RootsRestoresSPBeforeReturn(t *testing.T) {
-	functions := []Function{{
-		Name:       "root",
-		LocalsSize: 24,
-		Lines: []Line{
-			{Disassembled: "MOVQ AX, ret+8(FP)", Labels: []string{"LBB0_2"}},
-			{Assembly: "ret", Disassembled: "RET"},
-		},
-	}}
-	modified := realignAmd64Roots(functions)
-	require.Len(t, modified[0].Lines, 3)
+func TestRealignAmd64RootsOnlyWhenInstructionsRequireIt(t *testing.T) {
+	store := Line{Disassembled: "MOVQ AX, ret+8(FP)", Labels: []string{"LBB0_2"}}
+	ret := Line{Assembly: "ret", Disassembled: "RET"}
+
+	// Plain loads/stores and aligned moves (rewritten to unaligned forms) work
+	// on an 8-byte aligned stack: SP stays untouched, no SPWRITE.
+	plain := []Function{{Name: "root", LocalsSize: 24, Lines: []Line{
+		{Assembly: "movaps\txmmword ptr [rsp + 16], xmm0", Disassembled: "MOVUPS X0, 0x10(SP)"},
+		{Assembly: "mov\tqword ptr [rsp], rax", Disassembled: "MOVQ AX, 0(SP)"},
+		store, ret,
+	}}}
+	modified := realignAmd64Roots(plain)
+	assert.Equal(t, 0, modified[0].StackAlign)
+	assert.Len(t, modified[0].Lines, 4)
+
+	// A legacy SSE instruction with a 128-bit stack operand faults unless the
+	// stack is 16-byte aligned, so SP is realigned and restored before RET.
+	sse := []Function{{Name: "root", LocalsSize: 24, Lines: []Line{
+		{Assembly: "paddq\txmm0, xmmword ptr [rsp + 16]", Disassembled: "PADDQ 0x10(SP), X0"},
+		store, ret,
+	}}}
+	modified = realignAmd64Roots(sse)
+	require.Len(t, modified[0].Lines, 4)
 	assert.Equal(t, 16, modified[0].StackAlign)
-	assert.Equal(t, "MOVQ 24(SP), SP", modified[0].Lines[0].Disassembled)
-	assert.Equal(t, []string{"LBB0_2"}, modified[0].Lines[0].Labels)
-	assert.Equal(t, "MOVQ AX, ret+8(FP)", modified[0].Lines[1].Disassembled)
-	assert.Empty(t, modified[0].Lines[1].Labels)
+	assert.Equal(t, "MOVQ 24(SP), SP", modified[0].Lines[1].Disassembled)
+	assert.Equal(t, []string{"LBB0_2"}, modified[0].Lines[1].Labels)
+	assert.Equal(t, "MOVQ AX, ret+8(FP)", modified[0].Lines[2].Disassembled)
+	assert.Empty(t, modified[0].Lines[2].Labels)
+
+	// 512-bit aligned moves cannot be rewritten and need 64 bytes.
+	evex := []Function{{Name: "root", LocalsSize: 128, Lines: []Line{
+		{Assembly: "vmovaps\tzmmword ptr [rsp + 64], zmm0", Disassembled: "VMOVAPS Z0, 0x40(SP)"},
+		ret,
+	}}}
+	assert.Equal(t, 64, realignAmd64Roots(evex)[0].StackAlign)
 }
 
 func TestInternalHelpersNeverRealign(t *testing.T) {
-	// A helper that realigns its own stack in C must not get the root
-	// realignment prologue (it is NOFRAME and would never restore SP); the
-	// root inherits the stricter alignment instead.
+	// A helper whose code needs an aligned stack must not get the
+	// realignment prologue itself (it is NOFRAME and would never restore
+	// SP); the owning root realigns instead, even though its own code is
+	// alignment-agnostic.
 	functions := []Function{
 		{Name: "root", LocalsSize: 16, Lines: []Line{{Disassembled: "CALL helper<>(SB)"}, {Assembly: "ret", Disassembled: "RET"}}},
-		{Name: "helper", Internal: true, HiddenStackSize: 64, StackAlign: 32, Lines: []Line{{Disassembled: "MOVQ AX, 0(SP)"}}},
+		{Name: "helper", Internal: true, HiddenStackSize: 64, Lines: []Line{
+			{Assembly: "paddq\txmm0, xmmword ptr [rsp]", Disassembled: "PADDQ 0(SP), X0", Binary: binaryFromHex("66 0f d4 04 24")},
+		}},
 	}
 	modified, err := reserveInternalStackFrames(config.AMD64(), functions)
 	require.NoError(t, err)
 	modified = realignAmd64Roots(modified)
-	assert.Equal(t, 32, modified[0].StackAlign)
-	assert.Equal(t, 32, modified[1].StackAlign)
+	assert.Equal(t, 16, modified[0].StackAlign)
+	assert.Equal(t, 0, modified[1].StackAlign)
 
 	asm, err := Generate(config.AMD64(), "x.c", modified, GeneratorMeta{})
 	require.NoError(t, err)
-	assert.Contains(t, string(asm), "TEXT ·root(SB), 0, $"+fmt.Sprint(modified[0].LocalsSize+32+8)+"-0")
+	assert.Contains(t, string(asm), "TEXT ·root(SB), 0, $"+fmt.Sprint(modified[0].LocalsSize+16+8)+"-0")
 	assert.Contains(t, string(asm), "TEXT helper<>(SB), NOSPLIT|NOFRAME, $0-0")
-	assert.Equal(t, 1, strings.Count(string(asm), "ANDQ $-32, SP"))
+	assert.Equal(t, 1, strings.Count(string(asm), "ANDQ $-16, SP"))
+
+	// Without alignment-dependent code nobody realigns and the frame is exact.
+	functions = []Function{
+		{Name: "root", LocalsSize: 16, Lines: []Line{{Disassembled: "CALL helper<>(SB)"}, {Assembly: "ret", Disassembled: "RET"}}},
+		{Name: "helper", Internal: true, HiddenStackSize: 64, Lines: []Line{
+			{Assembly: "mov\tqword ptr [rsp], rax", Disassembled: "MOVQ AX, 0(SP)", Binary: binaryFromHex("48 89 04 24")},
+		}},
+	}
+	modified, err = reserveInternalStackFrames(config.AMD64(), functions)
+	require.NoError(t, err)
+	modified = realignAmd64Roots(modified)
+	asm, err = Generate(config.AMD64(), "x.c", modified, GeneratorMeta{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, modified[0].StackAlign)
+	assert.Contains(t, string(asm), "TEXT ·root(SB), 0, $"+fmt.Sprint(modified[0].LocalsSize)+"-0")
+	assert.NotContains(t, string(asm), "ANDQ")
 }
