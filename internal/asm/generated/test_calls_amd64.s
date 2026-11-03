@@ -148,7 +148,7 @@ LBB2_18:
 	LONG  $0x44d40f66; WORD $0x7024 // PADDQ 0x70(SP), X0                   // paddq	xmm0, xmmword ptr [rsp + 112]
 
 LBB2_14:
-	LONG $0xc8700f66; BYTE $0xee // PSHUFD $mix_with_locals+46(SB), X0, X1 // pshufd	xmm1, xmm0, 238
+	LONG $0xc8700f66; BYTE $0xee // PSHUFD $0xee, X0, X1                 // pshufd	xmm1, xmm0, 238
 	LONG $0xc8d40f66             // PADDQ X0, X1                         // paddq	xmm1, xmm0
 	LONG $0x7e0f4866; BYTE $0xc8 // MOVQ X1, AX                          // movq	rax, xmm1
 	JMP  LBB2_15                 // <--                                  // jmp	.LBB2_15
@@ -263,7 +263,7 @@ TEXT ·Test_calls_local_pointer(SB), 0, $296-16
 	LONG  $0xc1d40f66                     // PADDQ X1, X0                         // paddq	xmm0, xmm1
 	LONG  $0xc4d40f66                     // PADDQ X4, X0                         // paddq	xmm0, xmm4
 	LONG  $0xc7d40f66                     // PADDQ X7, X0                         // paddq	xmm0, xmm7
-	LONG  $0xc8700f66; BYTE $0xee         // PSHUFD $mix_with_locals+46(SB), X0, X1 // pshufd	xmm1, xmm0, 238
+	LONG  $0xc8700f66; BYTE $0xee         // PSHUFD $0xee, X0, X1                 // pshufd	xmm1, xmm0, 238
 	LONG  $0xc8d40f66                     // PADDQ X0, X1                         // paddq	xmm1, xmm0
 	LONG  $0x7e0f4866; BYTE $0xc8         // MOVQ X1, AX                          // movq	rax, xmm1
 	NOP                                   // (skipped)                            // add	rsp, 264
@@ -374,10 +374,10 @@ TEXT big_frame_helper<>(SB), NOSPLIT|NOFRAME, $0-0
 	JMP  LBB5_1                  // <--                                  // jmp	.LBB5_1
 
 LBB5_7:
-	MOVQ CX, 24(SP)(AX*8)          // <--                                  // mov	qword ptr [rsp + 8*rax], rcx
-	ADDQ $0x3, AX                  // <--                                  // add	rax, 3
-	LONG $0x025a3d48; WORD $0x0000 // CMPQ AX, $test_calls_tail+154(SB)    // cmp	rax, 602
-	JE   LBB5_8                    // <--                                  // je	.LBB5_8
+	MOVQ CX, 24(SP)(AX*8) // <--                                  // mov	qword ptr [rsp + 8*rax], rcx
+	ADDQ $0x3, AX         // <--                                  // add	rax, 3
+	CMPQ AX, $0x25a       // <--                                  // cmp	rax, 602
+	JE   LBB5_8           // <--                                  // je	.LBB5_8
 
 LBB5_1:
 	LEAQ -0x2(AX), CX    // <--                                  // lea	rcx, [rax - 2]
@@ -418,19 +418,19 @@ LBB5_8:
 	XORL AX, AX                  // <--                                  // xor	eax, eax
 
 LBB5_9:
-	ADDQ -32(SP)(CX*8), AX                     // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 56]
-	ADDQ -24(SP)(CX*8), AX                     // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 48]
-	ADDQ -16(SP)(CX*8), AX                     // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 40]
-	ADDQ -8(SP)(CX*8), AX                      // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 32]
-	ADDQ 0(SP)(CX*8), AX                       // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 24]
-	ADDQ 8(SP)(CX*8), AX                       // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 16]
-	ADDQ 16(SP)(CX*8), AX                      // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 8]
-	ADDQ 24(SP)(CX*8), AX                      // <--                                  // add	rax, qword ptr [rsp + 8*rcx]
-	ADDQ $0x8, CX                              // <--                                  // add	rcx, 8
-	LONG $0x5ff98148; WORD $0x0002; BYTE $0x00 // CMPQ CX, $test_calls_tail+159(SB)    // cmp	rcx, 607
-	JNE  LBB5_9                                // <--                                  // jne	.LBB5_9
-	NOP                                        // (skipped)                            // add	rsp, 4808
-	RET                                        // <--                                  // ret
+	ADDQ -32(SP)(CX*8), AX // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 56]
+	ADDQ -24(SP)(CX*8), AX // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 48]
+	ADDQ -16(SP)(CX*8), AX // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 40]
+	ADDQ -8(SP)(CX*8), AX  // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 32]
+	ADDQ 0(SP)(CX*8), AX   // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 24]
+	ADDQ 8(SP)(CX*8), AX   // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 16]
+	ADDQ 16(SP)(CX*8), AX  // <--                                  // add	rax, qword ptr [rsp + 8*rcx - 8]
+	ADDQ 24(SP)(CX*8), AX  // <--                                  // add	rax, qword ptr [rsp + 8*rcx]
+	ADDQ $0x8, CX          // <--                                  // add	rcx, 8
+	CMPQ CX, $0x25f        // <--                                  // cmp	rcx, 607
+	JNE  LBB5_9            // <--                                  // jne	.LBB5_9
+	NOP                    // (skipped)                            // add	rsp, 4808
+	RET                    // <--                                  // ret
 
 DATA LCPI7_0<>+0x00(SB)/8, $0x3ff3c083126e978d
 DATA LCPI7_0<>+0x08(SB)/8, $0x4002c3c9eecbfb16
@@ -527,70 +527,70 @@ LBB7_10:
 
 // internal function, its stack space has been flattened into its caller's frame
 TEXT fill_squares<>(SB), NOSPLIT|NOFRAME, $0-0
-	MOVQ SI, 0(DI)                             // <--                                  // mov	qword ptr [rdi], rsi
-	LEAQ 0x1(SI), AX                           // <--                                  // lea	rax, [rsi + 1]
-	MOVQ AX, 0x8(DI)                           // <--                                  // mov	qword ptr [rdi + 8], rax
-	LEAQ 0x4(SI), AX                           // <--                                  // lea	rax, [rsi + 4]
-	MOVQ AX, 0x10(DI)                          // <--                                  // mov	qword ptr [rdi + 16], rax
-	LEAQ 0x9(SI), AX                           // <--                                  // lea	rax, [rsi + 9]
-	MOVQ AX, 0x18(DI)                          // <--                                  // mov	qword ptr [rdi + 24], rax
-	LEAQ 0x10(SI), AX                          // <--                                  // lea	rax, [rsi + 16]
-	MOVQ AX, 0x20(DI)                          // <--                                  // mov	qword ptr [rdi + 32], rax
-	LEAQ 0x19(SI), AX                          // <--                                  // lea	rax, [rsi + 25]
-	MOVQ AX, 0x28(DI)                          // <--                                  // mov	qword ptr [rdi + 40], rax
-	LEAQ 0x24(SI), AX                          // <--                                  // lea	rax, [rsi + 36]
-	MOVQ AX, 0x30(DI)                          // <--                                  // mov	qword ptr [rdi + 48], rax
-	LEAQ 0x31(SI), AX                          // <--                                  // lea	rax, [rsi + 49]
-	MOVQ AX, 0x38(DI)                          // <--                                  // mov	qword ptr [rdi + 56], rax
-	LEAQ 0x40(SI), AX                          // <--                                  // lea	rax, [rsi + 64]
-	MOVQ AX, 0x40(DI)                          // <--                                  // mov	qword ptr [rdi + 64], rax
-	LEAQ 0x51(SI), AX                          // <--                                  // lea	rax, [rsi + 81]
-	MOVQ AX, 0x48(DI)                          // <--                                  // mov	qword ptr [rdi + 72], rax
-	LEAQ 0x64(SI), AX                          // <--                                  // lea	rax, [rsi + 100]
-	MOVQ AX, 0x50(DI)                          // <--                                  // mov	qword ptr [rdi + 80], rax
-	LEAQ 0x79(SI), AX                          // <--                                  // lea	rax, [rsi + 121]
-	MOVQ AX, 0x58(DI)                          // <--                                  // mov	qword ptr [rdi + 88], rax
-	LEAQ 0x90(SI), AX                          // <--                                  // lea	rax, [rsi + 144]
-	MOVQ AX, 0x60(DI)                          // <--                                  // mov	qword ptr [rdi + 96], rax
-	LEAQ 0xa9(SI), AX                          // <--                                  // lea	rax, [rsi + 169]
-	MOVQ AX, 0x68(DI)                          // <--                                  // mov	qword ptr [rdi + 104], rax
-	LEAQ 0xc4(SI), AX                          // <--                                  // lea	rax, [rsi + 196]
-	MOVQ AX, 0x70(DI)                          // <--                                  // mov	qword ptr [rdi + 112], rax
-	LEAQ 0xe1(SI), AX                          // <--                                  // lea	rax, [rsi + 225]
-	MOVQ AX, 0x78(DI)                          // <--                                  // mov	qword ptr [rdi + 120], rax
-	LEAQ 0x100(SI), AX                         // <--                                  // lea	rax, [rsi + 256]
-	MOVQ AX, 0x80(DI)                          // <--                                  // mov	qword ptr [rdi + 128], rax
-	LEAQ 0x121(SI), AX                         // <--                                  // lea	rax, [rsi + 289]
-	MOVQ AX, 0x88(DI)                          // <--                                  // mov	qword ptr [rdi + 136], rax
-	LEAQ 0x144(SI), AX                         // <--                                  // lea	rax, [rsi + 324]
-	MOVQ AX, 0x90(DI)                          // <--                                  // mov	qword ptr [rdi + 144], rax
-	LEAQ 0x169(SI), AX                         // <--                                  // lea	rax, [rsi + 361]
-	MOVQ AX, 0x98(DI)                          // <--                                  // mov	qword ptr [rdi + 152], rax
-	LEAQ 0x190(SI), AX                         // <--                                  // lea	rax, [rsi + 400]
-	MOVQ AX, 0xa0(DI)                          // <--                                  // mov	qword ptr [rdi + 160], rax
-	LEAQ 0x1b9(SI), AX                         // <--                                  // lea	rax, [rsi + 441]
-	MOVQ AX, 0xa8(DI)                          // <--                                  // mov	qword ptr [rdi + 168], rax
-	LEAQ 0x1e4(SI), AX                         // <--                                  // lea	rax, [rsi + 484]
-	MOVQ AX, 0xb0(DI)                          // <--                                  // mov	qword ptr [rdi + 176], rax
-	LEAQ 0x211(SI), AX                         // <--                                  // lea	rax, [rsi + 529]
-	MOVQ AX, 0xb8(DI)                          // <--                                  // mov	qword ptr [rdi + 184], rax
-	LEAQ 0x240(SI), AX                         // <--                                  // lea	rax, [rsi + 576]
-	MOVQ AX, 0xc0(DI)                          // <--                                  // mov	qword ptr [rdi + 192], rax
-	LEAQ 0x271(SI), AX                         // <--                                  // lea	rax, [rsi + 625]
-	MOVQ AX, 0xc8(DI)                          // <--                                  // mov	qword ptr [rdi + 200], rax
-	LEAQ 0x2a4(SI), AX                         // <--                                  // lea	rax, [rsi + 676]
-	MOVQ AX, 0xd0(DI)                          // <--                                  // mov	qword ptr [rdi + 208], rax
-	LEAQ 0x2d9(SI), AX                         // <--                                  // lea	rax, [rsi + 729]
-	MOVQ AX, 0xd8(DI)                          // <--                                  // mov	qword ptr [rdi + 216], rax
-	LEAQ 0x310(SI), AX                         // <--                                  // lea	rax, [rsi + 784]
-	MOVQ AX, 0xe0(DI)                          // <--                                  // mov	qword ptr [rdi + 224], rax
-	LEAQ 0x349(SI), AX                         // <--                                  // lea	rax, [rsi + 841]
-	MOVQ AX, 0xe8(DI)                          // <--                                  // mov	qword ptr [rdi + 232], rax
-	LEAQ 0x384(SI), AX                         // <--                                  // lea	rax, [rsi + 900]
-	MOVQ AX, 0xf0(DI)                          // <--                                  // mov	qword ptr [rdi + 240], rax
-	LONG $0xc1c68148; WORD $0x0003; BYTE $0x00 // ADDQ $big_frame_helper+145(SB), SI   // add	rsi, 961
-	MOVQ SI, 0xf8(DI)                          // <--                                  // mov	qword ptr [rdi + 248], rsi
-	RET                                        // <--                                  // ret
+	MOVQ SI, 0(DI)     // <--                                  // mov	qword ptr [rdi], rsi
+	LEAQ 0x1(SI), AX   // <--                                  // lea	rax, [rsi + 1]
+	MOVQ AX, 0x8(DI)   // <--                                  // mov	qword ptr [rdi + 8], rax
+	LEAQ 0x4(SI), AX   // <--                                  // lea	rax, [rsi + 4]
+	MOVQ AX, 0x10(DI)  // <--                                  // mov	qword ptr [rdi + 16], rax
+	LEAQ 0x9(SI), AX   // <--                                  // lea	rax, [rsi + 9]
+	MOVQ AX, 0x18(DI)  // <--                                  // mov	qword ptr [rdi + 24], rax
+	LEAQ 0x10(SI), AX  // <--                                  // lea	rax, [rsi + 16]
+	MOVQ AX, 0x20(DI)  // <--                                  // mov	qword ptr [rdi + 32], rax
+	LEAQ 0x19(SI), AX  // <--                                  // lea	rax, [rsi + 25]
+	MOVQ AX, 0x28(DI)  // <--                                  // mov	qword ptr [rdi + 40], rax
+	LEAQ 0x24(SI), AX  // <--                                  // lea	rax, [rsi + 36]
+	MOVQ AX, 0x30(DI)  // <--                                  // mov	qword ptr [rdi + 48], rax
+	LEAQ 0x31(SI), AX  // <--                                  // lea	rax, [rsi + 49]
+	MOVQ AX, 0x38(DI)  // <--                                  // mov	qword ptr [rdi + 56], rax
+	LEAQ 0x40(SI), AX  // <--                                  // lea	rax, [rsi + 64]
+	MOVQ AX, 0x40(DI)  // <--                                  // mov	qword ptr [rdi + 64], rax
+	LEAQ 0x51(SI), AX  // <--                                  // lea	rax, [rsi + 81]
+	MOVQ AX, 0x48(DI)  // <--                                  // mov	qword ptr [rdi + 72], rax
+	LEAQ 0x64(SI), AX  // <--                                  // lea	rax, [rsi + 100]
+	MOVQ AX, 0x50(DI)  // <--                                  // mov	qword ptr [rdi + 80], rax
+	LEAQ 0x79(SI), AX  // <--                                  // lea	rax, [rsi + 121]
+	MOVQ AX, 0x58(DI)  // <--                                  // mov	qword ptr [rdi + 88], rax
+	LEAQ 0x90(SI), AX  // <--                                  // lea	rax, [rsi + 144]
+	MOVQ AX, 0x60(DI)  // <--                                  // mov	qword ptr [rdi + 96], rax
+	LEAQ 0xa9(SI), AX  // <--                                  // lea	rax, [rsi + 169]
+	MOVQ AX, 0x68(DI)  // <--                                  // mov	qword ptr [rdi + 104], rax
+	LEAQ 0xc4(SI), AX  // <--                                  // lea	rax, [rsi + 196]
+	MOVQ AX, 0x70(DI)  // <--                                  // mov	qword ptr [rdi + 112], rax
+	LEAQ 0xe1(SI), AX  // <--                                  // lea	rax, [rsi + 225]
+	MOVQ AX, 0x78(DI)  // <--                                  // mov	qword ptr [rdi + 120], rax
+	LEAQ 0x100(SI), AX // <--                                  // lea	rax, [rsi + 256]
+	MOVQ AX, 0x80(DI)  // <--                                  // mov	qword ptr [rdi + 128], rax
+	LEAQ 0x121(SI), AX // <--                                  // lea	rax, [rsi + 289]
+	MOVQ AX, 0x88(DI)  // <--                                  // mov	qword ptr [rdi + 136], rax
+	LEAQ 0x144(SI), AX // <--                                  // lea	rax, [rsi + 324]
+	MOVQ AX, 0x90(DI)  // <--                                  // mov	qword ptr [rdi + 144], rax
+	LEAQ 0x169(SI), AX // <--                                  // lea	rax, [rsi + 361]
+	MOVQ AX, 0x98(DI)  // <--                                  // mov	qword ptr [rdi + 152], rax
+	LEAQ 0x190(SI), AX // <--                                  // lea	rax, [rsi + 400]
+	MOVQ AX, 0xa0(DI)  // <--                                  // mov	qword ptr [rdi + 160], rax
+	LEAQ 0x1b9(SI), AX // <--                                  // lea	rax, [rsi + 441]
+	MOVQ AX, 0xa8(DI)  // <--                                  // mov	qword ptr [rdi + 168], rax
+	LEAQ 0x1e4(SI), AX // <--                                  // lea	rax, [rsi + 484]
+	MOVQ AX, 0xb0(DI)  // <--                                  // mov	qword ptr [rdi + 176], rax
+	LEAQ 0x211(SI), AX // <--                                  // lea	rax, [rsi + 529]
+	MOVQ AX, 0xb8(DI)  // <--                                  // mov	qword ptr [rdi + 184], rax
+	LEAQ 0x240(SI), AX // <--                                  // lea	rax, [rsi + 576]
+	MOVQ AX, 0xc0(DI)  // <--                                  // mov	qword ptr [rdi + 192], rax
+	LEAQ 0x271(SI), AX // <--                                  // lea	rax, [rsi + 625]
+	MOVQ AX, 0xc8(DI)  // <--                                  // mov	qword ptr [rdi + 200], rax
+	LEAQ 0x2a4(SI), AX // <--                                  // lea	rax, [rsi + 676]
+	MOVQ AX, 0xd0(DI)  // <--                                  // mov	qword ptr [rdi + 208], rax
+	LEAQ 0x2d9(SI), AX // <--                                  // lea	rax, [rsi + 729]
+	MOVQ AX, 0xd8(DI)  // <--                                  // mov	qword ptr [rdi + 216], rax
+	LEAQ 0x310(SI), AX // <--                                  // lea	rax, [rsi + 784]
+	MOVQ AX, 0xe0(DI)  // <--                                  // mov	qword ptr [rdi + 224], rax
+	LEAQ 0x349(SI), AX // <--                                  // lea	rax, [rsi + 841]
+	MOVQ AX, 0xe8(DI)  // <--                                  // mov	qword ptr [rdi + 232], rax
+	LEAQ 0x384(SI), AX // <--                                  // lea	rax, [rsi + 900]
+	MOVQ AX, 0xf0(DI)  // <--                                  // mov	qword ptr [rdi + 240], rax
+	ADDQ $0x3c1, SI    // <--                                  // add	rsi, 961
+	MOVQ SI, 0xf8(DI)  // <--                                  // mov	qword ptr [rdi + 248], rsi
+	RET                // <--                                  // ret
 
 DATA LCPI10_0<>+0x00(SB)/8, $0x0000000000000000
 DATA LCPI10_0<>+0x08(SB)/8, $0x0000000000000001
@@ -669,7 +669,7 @@ LBB10_6:
 	CMPQ CX, AX                    // <--                                  // cmp	rcx, rax
 	JNE  LBB10_6                   // <--                                  // jne	.LBB10_6
 	LONG $0xd8d40f66               // PADDQ X0, X3                         // paddq	xmm3, xmm0
-	LONG $0xc3700f66; BYTE $0xee   // PSHUFD $mix_with_locals+46(SB), X3, X0 // pshufd	xmm0, xmm3, 238
+	LONG $0xc3700f66; BYTE $0xee   // PSHUFD $0xee, X3, X0                 // pshufd	xmm0, xmm3, 238
 	LONG $0xc3d40f66               // PADDQ X3, X0                         // paddq	xmm0, xmm3
 	LONG $0x7e0f4866; BYTE $0xc0   // MOVQ X0, AX                          // movq	rax, xmm0
 	CMPQ CX, SI                    // <--                                  // cmp	rcx, rsi
