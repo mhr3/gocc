@@ -26,10 +26,6 @@ import (
 	"github.com/mhr3/gocc/internal/config"
 )
 
-type Plan9Decoder interface {
-	DecodeInstruction(symName string, binary []string) (string, error)
-}
-
 // ParseAssembly parses the assembly file and returns a list of functions
 func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 	file, err := os.Open(path)

@@ -3,7 +3,6 @@ package cc
 import (
 	"github.com/mhr3/gocc/internal/asm"
 	"github.com/mhr3/gocc/internal/config"
-	"github.com/mhr3/gocc/internal/golang/objfile"
 )
 
 type Disassembler struct {
@@ -38,11 +37,7 @@ func (d *Disassembler) Disassemble(assemblyPath, objectPath string) ([]asm.Funct
 		return nil, err
 	}
 
-	objF, err := objfile.Open(objectPath)
-	if err != nil {
-		return nil, err
-	}
-	disasm, err := objF.Disasm()
+	disasm, err := asm.NewObjectDecoder(d.arch, objectPath)
 	if err != nil {
 		return nil, err
 	}
