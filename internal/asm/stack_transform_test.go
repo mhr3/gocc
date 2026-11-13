@@ -1204,9 +1204,11 @@ func TestPatchAmd64RSPDisplacement(t *testing.T) {
 	// Register-only operands have nothing to rebase.
 	_, ok := patchAmd64RSPDisplacement(Line{Binary: binaryFromHex("49 89 e0")}, 16)
 	assert.False(t, ok)
-	// EVEX encodings are not understood by x86asm and must be left alone.
-	_, ok = patchAmd64RSPDisplacement(Line{Binary: binaryFromHex("62 f1 fe 48 6f 44 24 02")}, 16)
-	assert.False(t, ok)
+	// EVEX disp8 is scaled by the operand size (here 2*64); the rebased
+	// displacement is written uncompressed as disp32.
+	got, ok := patchAmd64RSPDisplacement(Line{Binary: binaryFromHex("62 f1 fe 48 6f 44 24 02")}, 16)
+	require.True(t, ok)
+	assert.Equal(t, binaryFromHex("62 f1 fe 48 6f 84 24 90 00 00 00"), got)
 }
 
 func TestArm64ShiftedStackImmediate(t *testing.T) {

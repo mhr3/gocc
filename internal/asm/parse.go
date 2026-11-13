@@ -326,7 +326,8 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 					}
 					lineNumber++
 					continue
-				case strings.HasPrefix(assembly, "blr") || strings.HasPrefix(assembly, "br"):
+				case strings.HasPrefix(assembly, "blr ") || strings.HasPrefix(assembly, "blr\t") ||
+					strings.HasPrefix(assembly, "br ") || strings.HasPrefix(assembly, "br\t"):
 					return fmt.Errorf("unsupported indirect CALL instruction: %q", assembly)
 				case strings.HasPrefix(assembly, "b") && strings.TrimSpace(assembly[1:2]) == "" &&
 					isDirectBranchToFunction(sourceAssembly, "b", functionNames):

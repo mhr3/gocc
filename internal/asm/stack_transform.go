@@ -238,7 +238,7 @@ func (a *amd64StackInfo) ParseStackOp(idx int, line Line) *StackOp {
 
 	inst, ok := tryDecodeAmd64Line(line)
 	if !ok {
-		// x86asm has no EVEX support; AVX-512 instructions never write RSP.
+		// Undecodable encodings never write RSP in compiler output.
 		return nil
 	}
 	unsupported := &StackOp{Kind: StackOpUnsupported, LineIndex: idx}
@@ -1521,7 +1521,15 @@ func patchAmd64RSPDisplacement(line Line, bias int64) ([]string, bool) {
 			uint32(code[dispOffset+2])<<16 | uint32(code[dispOffset+3])<<24))
 	}
 	if encodedDisp != disp {
-		return nil, false
+		// EVEX compresses disp8 by the operand tuple size (disp8*N). Accept
+		// the encoding when the decoded displacement is such a multiple; the
+		// rebased value is always written as an uncompressed disp32 below.
+		if !evex || mod != 1 || encodedDisp == 0 || disp%encodedDisp != 0 {
+			return nil, false
+		}
+		if n := disp / encodedDisp; n < 1 || n > 64 || n&(n-1) != 0 {
+			return nil, false
+		}
 	}
 
 	newDisp := disp + bias
@@ -1920,7 +1928,7 @@ func decodeAmd64Line(line Line) x86asm.Inst {
 }
 
 // tryDecodeAmd64Line decodes the machine code of a line; it reports false for
-// encodings x86asm does not understand (notably EVEX/AVX-512).
+// encodings x86asm does not understand.
 func tryDecodeAmd64Line(line Line) (x86asm.Inst, bool) {
 	code, err := hex.DecodeString(strings.Join(line.Binary, ""))
 	if err != nil {
