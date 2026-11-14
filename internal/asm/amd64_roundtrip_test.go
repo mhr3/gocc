@@ -858,17 +858,17 @@ func assembleAmd64Corpus(t *testing.T, dir string) []amd64Instruction {
 }
 
 // goAssemble runs cmd/asm on a Plan 9 instruction and returns its encoding.
-func goAssemble(t *testing.T, dir, goroot, plan9 string) ([]byte, error) {
+func goAssemble(t *testing.T, dir, goroot, goarch, plan9 string) ([]byte, error) {
 	t.Helper()
 	src := filepath.Join(dir, "g.s")
 	obj := filepath.Join(dir, "g.o")
 	require.NoError(t, os.WriteFile(src, []byte("#include \"textflag.h\"\nTEXT ·f(SB), NOSPLIT|NOFRAME, $0-0\n\t"+plan9+"\n"), 0o644))
 	cmd := exec.Command("go", "tool", "asm", "-S", "-I", filepath.Join(goroot, "pkg", "include"), "-o", obj, src)
-	cmd.Env = append(os.Environ(), "GOARCH=amd64", "GOOS=linux")
+	cmd.Env = append(os.Environ(), "GOARCH="+goarch, "GOOS=linux")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		for _, l := range strings.Split(string(out), "\n") {
-			if strings.Contains(l, "g.s:3") || strings.Contains(l, "invalid instruction") {
+			if strings.Contains(l, "g.s:3") || strings.Contains(l, "invalid instruction") || strings.Contains(l, "illegal combination") {
 				return nil, fmt.Errorf("%s", strings.TrimSpace(l))
 			}
 		}
@@ -911,7 +911,7 @@ func TestAmd64DenylistRoundTrips(t *testing.T) {
 		inst := inst
 		t.Run(inst.intel, func(t *testing.T) {
 			trusted := amd64TrustDecoder(Line{Assembly: inst.intel, Disassembled: inst.plan9, Binary: hexBytes(inst.code)})
-			got, err := goAssemble(t, dir, strings.TrimSpace(string(goroot)), inst.plan9)
+			got, err := goAssemble(t, dir, strings.TrimSpace(string(goroot)), "amd64", inst.plan9)
 			same := err == nil && sameAmd64Instruction(inst.code, got)
 			mnemonic, _, _ := strings.Cut(inst.plan9, " ")
 			switch {

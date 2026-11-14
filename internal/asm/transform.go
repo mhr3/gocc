@@ -337,12 +337,7 @@ func transformFunction(arch *config.Arch, function Function) (Function, error) {
 	}
 	function = storeReturnValue(arch, function)
 
-	// weird type of transform, but we'll keep it here for now
-	if !(arch != nil && arch.Name == "arm64" && function.Internal) {
-		// Internal ARM64 helpers retain raw encodings where Plan 9 assembly lacks
-		// an exact spelling. Their stack references were already rebased above.
-		function = removeBinaryInstructions(arch, function)
-	}
+	function = removeBinaryInstructions(arch, function)
 
 	return function, nil
 }
