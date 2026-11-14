@@ -57,9 +57,15 @@ func NewRemote(target string, source, outputDir, packageName string, options ...
 	}, nil
 }
 
+// remoteBackendEnabled gates the hosted compile service, which is currently
+// offline. The client code is kept so it can be re-enabled.
+const remoteBackendEnabled = false
+
 // Translate translates the source file to Go assembly
 func (t *Remote) Translate() error {
-	return errors.New("remote backend is not supported")
+	if !remoteBackendEnabled {
+		return errors.New("remote backend is not supported")
+	}
 	if _, err := cc.Parse(t.Source); err != nil {
 		return err
 	}
