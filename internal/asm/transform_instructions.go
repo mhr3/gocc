@@ -9,9 +9,13 @@ import (
 // amd64UnassemblableMnemonics lists Plan 9 mnemonics produced by x86asm's
 // GoSyntax that cmd/asm does not accept or encodes differently. For these
 // the compiler's machine code is kept and emitted as raw bytes. Everything
-// else round-trips through cmd/asm to the same instruction; see
-// TestAmd64DenylistRoundTrips, which checks both halves against the real
-// assembler.
+// else round-trips through cmd/asm to the same instruction.
+//
+// The list was established with Go 1.27 (cmd/asm) and golang.org/x/arch at
+// 3ddaabb; cmd/asm's mnemonic set changes between releases (it accepts
+// SETNE but not SETE, for instance), so TestAmd64DenylistRoundTrips checks
+// both halves of the split against the assembler of the Go toolchain that
+// builds gocc, which is what will assemble the generated code.
 var amd64UnassemblableMnemonics = map[string]string{
 	// x87: cmd/asm names loads/stores and arithmetic with operand widths
 	// (FMOVD, FMULD, FADDDP, ...), which GoSyntax does not emit.

@@ -40,8 +40,9 @@ int64_t simd_fn(char *input1, uint64_t input1_len) {
 
 ## Setting up locally
 
-Building gocc requires Go 1.26 or newer (for the AVX/AVX-512 decoder in
-`golang.org/x/arch`); the generated assembly has no such requirement.
+Building gocc requires Go 1.27 or newer: `golang.org/x/arch` needs 1.26 for its AVX/AVX-512
+decoder, and the set of instructions emitted as Plan 9 text rather than raw bytes was verified
+against the Go 1.27 assembler. The generated assembly itself has no such requirement.
 
 Before you use gocc, you need to install the LLVM toolchain. On Ubuntu, you can do it with the following commands (LLVM 15 was used the most during development of gocc):
 
