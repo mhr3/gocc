@@ -40,12 +40,18 @@ jobs:
 
       - run: go test ./...
 
-      # Regenerate the checked-in e2e assembly with this toolchain and make
-      # sure it still builds and passes; the committed files are produced on
-      # a developer machine and may lag behind the transforms.
+      # Regenerate the checked-in e2e assembly for this architecture with the
+      # runner's toolchain and make sure it still builds and passes; the
+      # committed files are produced on a developer machine and may lag
+      # behind the transforms. Only the native target is regenerated: the
+      # other one needs that architecture's libc headers.
       - name: Regenerate e2e assembly
         working-directory: internal/asm/generated
         run: |
-          go generate ./...
+          for src in testdata/*.c; do
+            flags=""
+            if grep -q "static" "$src"; then flags="--with-internal-functions"; fi
+            go run ../../../cmd/gocc "$src" -l --suffix _${{ matrix.arch }} --arch ${{ matrix.arch }} -O3 $flags
+          done
           git diff --stat
           go test ./...
