@@ -38,6 +38,7 @@ var constSizes = map[string]int{
 	"long":  4,
 	"int":   4,
 	"quad":  8,
+	"xword": 8,
 }
 
 type GoFunction struct {
@@ -48,14 +49,22 @@ type GoFunction struct {
 // ------------------------------------- Function -------------------------------------
 
 type Function struct {
-	Name       string  `json:"name"`
-	SourcePath string  `json:"sourcePath"`
-	Position   int     `json:"position"`
-	Params     []Param `json:"params"`
-	Consts     []Const `json:"consts,omitempty"`
-	Lines      []Line  `json:"lines"`
-	LocalsSize int     `json:"localsSize,omitempty"`
-	Ret        *Param  `json:"return,omitempty"`
+	Name            string  `json:"name"`
+	Internal        bool    `json:"internal,omitempty"`
+	PreserveCABI    bool    `json:"preserveCABI,omitempty"`
+	SourcePath      string  `json:"sourcePath"`
+	Position        int     `json:"position"`
+	Params          []Param `json:"params"`
+	Consts          []Const `json:"consts,omitempty"`
+	Lines           []Line  `json:"lines"`
+	LocalsSize      int     `json:"localsSize,omitempty"`
+	HiddenStackSize int     `json:"hiddenStackSize,omitempty"`
+	// StackAlign is the stack alignment the C code depends on, when its
+	// instructions require more than the 8 bytes Go guarantees on AMD64. A
+	// non-zero value makes the generated prologue realign SP within the frame
+	// and the epilogue restore it; zero leaves SP untouched.
+	StackAlign int    `json:"stackAlign,omitempty"`
+	Ret        *Param `json:"return,omitempty"`
 	GoFunc     GoFunction
 }
 
@@ -174,6 +183,7 @@ type Line struct {
 	Binary       []string `json:"binary"`                 // Binary representation of the line
 	Assembly     string   `json:"assembly"`               // Assembly representation of the line
 	Disassembled string   `json:"disassembled,omitempty"` // Disassembled representation of the line
+	Comment      string   `json:"comment,omitempty"`      // Optional generated-code comment replacing Assembly
 }
 
 // Compile returns the string representation of a line in PLAN9 assembly
@@ -192,7 +202,7 @@ func (line *Line) Compile(arch *config.Arch) string {
 		if line.Disassembled == "NOP" {
 			comment = "(skipped)"
 		}
-		addInstructionComment(&builder, &Line{Assembly: line.Assembly, Disassembled: comment})
+		addInstructionComment(&builder, &Line{Assembly: line.Assembly, Disassembled: comment, Comment: line.Comment})
 		builder.WriteString("\n")
 		return builder.String()
 	}
@@ -238,13 +248,17 @@ func (line *Line) Compile(arch *config.Arch) string {
 }
 
 func addInstructionComment(builder *strings.Builder, line *Line) {
-	if line.Disassembled != "" && line.Assembly != "" {
-		fmt.Fprintf(builder, "\t// %-36s // %s", line.Disassembled, line.Assembly)
+	comment := line.Assembly
+	if line.Comment != "" {
+		comment = line.Comment
+	}
+	if line.Disassembled != "" && comment != "" {
+		fmt.Fprintf(builder, "\t// %-36s // %s", line.Disassembled, comment)
 	} else if line.Disassembled != "" {
 		builder.WriteString("\t// ")
 		builder.WriteString(line.Disassembled)
-	} else if line.Assembly != "" {
-		fmt.Fprintf(builder, "\t// %-36s // %s", "?", line.Assembly)
+	} else if comment != "" {
+		fmt.Fprintf(builder, "\t// %-36s // %s", "?", comment)
 	}
 }
 
@@ -253,6 +267,19 @@ type Param struct {
 	Type      string `json:"type"`                // Type of the parameter (C type)
 	Name      string `json:"name"`                // Name of the parameter
 	IsPointer bool   `json:"isPointer,omitempty"` // Whether the parameter is a pointer
+	// GoName is the name of the argument slot in the Go frame as go vet's
+	// asmdecl expects it: the Go parameter name, with _len/_cap suffixes for
+	// the length and capacity words of strings and slices. Empty for
+	// internal helpers, which have no Go signature.
+	GoName string `json:"goName,omitempty"`
+}
+
+// FrameName returns the name to use in a name+offset(FP) reference.
+func (p *Param) FrameName() string {
+	if p.GoName != "" {
+		return p.GoName
+	}
+	return p.Name
 }
 
 func (p *Param) CTypeStr() string {
@@ -443,7 +470,7 @@ func (c *Const) Compile(arch *config.Arch) string {
 	return output.String()
 }
 
-var directiveParseRegex = regexp.MustCompile(`\.((zero|byte|short|hword|word|long|int|quad)\s+(-?\d+)(.*)|(ascii|asciz)\s+("(?:[\\].|[^\\"])+"))$`)
+var directiveParseRegex = regexp.MustCompile(`\.((zero|byte|short|hword|word|long|int|quad|xword)\s+(-?(?:0[xX][0-9a-fA-F]+|\d+))(.*)|(ascii|asciz)\s+("(?:[\\].|[^\\"])+"))$`)
 
 // parseConstLine parses a line in the constant section
 func parseConstLine(arch *config.Arch, constType string, line string) ConstLine {
@@ -486,9 +513,9 @@ func parseConstLine(arch *config.Arch, constType string, line string) ConstLine 
 		return NewConstLine(bytes.Repeat([]byte{fillVal}, zeroSz))
 	}
 
-	value, err := strconv.ParseUint(match[3], 10, 64)
+	value, err := strconv.ParseUint(match[3], 0, 64)
 	if errors.Is(err, strconv.ErrSyntax) {
-		val, parseErr := strconv.ParseInt(match[3], 10, 64)
+		val, parseErr := strconv.ParseInt(match[3], 0, 64)
 		if parseErr == nil {
 			value = uint64(val)
 			err = nil

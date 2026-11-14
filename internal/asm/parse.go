@@ -26,10 +26,6 @@ import (
 	"github.com/mhr3/gocc/internal/config"
 )
 
-type Plan9Decoder interface {
-	DecodeInstruction(symName string, binary []string) (string, error)
-}
-
 // ParseAssembly parses the assembly file and returns a list of functions
 func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 	file, err := os.Open(path)
@@ -49,12 +45,13 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 	}
 
 	var (
-		functions    = make([]Function, 0, 8)
-		current      *Function
-		consts       []Const
-		constant     *Const
-		functionName string
-		labelName    string
+		functions     = make([]Function, 0, 8)
+		current       *Function
+		consts        []Const
+		constant      *Const
+		functionName  string
+		labelName     string
+		pendingObject string // name declared by `.type name,@object`, awaiting its label
 	)
 
 	scanner := bufio.NewScanner(file)
@@ -62,8 +59,25 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 		line := scanner.Text()
 
 		switch {
+		// Named read-only data (static const tables). The label is announced
+		// by a .type directive; it would otherwise look like a function.
+		case pendingObject != "" && strings.HasPrefix(line, pendingObject+":"):
+			if constant != nil && len(constant.Lines) > 0 {
+				consts = append(consts, finalizeConstant(constant))
+			}
+			labelName = DataSymbolName(pendingObject)
+			constant = &Const{Label: labelName}
+			pendingObject = ""
+
 		case arch.Attribute.MatchString(line):
 			attr := arch.Attribute.FindStringSubmatch(line)[1]
+
+			if attr == "type" {
+				if name, _, ok := strings.Cut(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), ".type")), ","); ok &&
+					strings.Contains(line, "@object") {
+					pendingObject = strings.TrimSpace(name)
+				}
+			}
 
 			if _, ok := constAttrsMap[attr]; ok {
 				// Handle constant lines and attach them to the current label
@@ -162,11 +176,17 @@ func ParseAssembly(arch *config.Arch, path string) ([]Function, error) {
 		}
 	}
 
+	if constant != nil && len(constant.Lines) > 0 {
+		consts = append(consts, finalizeConstant(constant))
+		constant = nil
+	}
+	if current == nil && len(consts) > 0 && len(functions) > 0 {
+		// Named data emitted after the last function (static tables).
+		current = &functions[len(functions)-1]
+	}
 	if current != nil {
 		// add the last constant
-		if constant != nil && len(constant.Lines) > 0 {
-			consts = append(consts, finalizeConstant(constant))
-			constant = nil
+		if len(consts) > 0 {
 			current.Consts = append(current.Consts, consts...)
 			consts = nil
 		}
@@ -240,6 +260,10 @@ func finalizeConstant(constant *Const) Const {
 
 // ParseClangObjectDump parses the output of objdump file and returns a list of functions
 func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, dec Plan9Decoder) error {
+	functionNames := make(map[string]struct{}, len(functions))
+	for _, function := range functions {
+		functionNames[function.Name] = struct{}{}
+	}
 	var (
 		functionName string
 		functionIdx  int
@@ -289,11 +313,30 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 				}
 			}
 
+			sourceAssembly := ""
+			if lineNumber < len(current.Lines) {
+				sourceAssembly = current.Lines[lineNumber].Assembly
+			}
 			switch arch.Name {
 			case "arm64":
 				switch {
 				case strings.HasPrefix(assembly, "bl") && strings.TrimSpace(assembly[2:3]) == "":
-					return fmt.Errorf("unsupported CALL instruction: \"%s\"", assembly)
+					if err := resolveDirectBranch(&current.Lines[lineNumber], "bl", "CALL", functionNames); err != nil {
+						return err
+					}
+					lineNumber++
+					continue
+				case strings.HasPrefix(assembly, "blr ") || strings.HasPrefix(assembly, "blr\t") ||
+					strings.HasPrefix(assembly, "br ") || strings.HasPrefix(assembly, "br\t"):
+					return fmt.Errorf("unsupported indirect CALL instruction: %q", assembly)
+				case strings.HasPrefix(assembly, "b") && strings.TrimSpace(assembly[1:2]) == "" &&
+					isDirectBranchToFunction(sourceAssembly, "b", functionNames):
+					// Tail call: the compiler reused the caller's return address.
+					if err := resolveDirectBranch(&current.Lines[lineNumber], "b", "JMP", functionNames); err != nil {
+						return err
+					}
+					lineNumber++
+					continue
 				case strings.HasPrefix(assembly, "nop"):
 					continue
 				}
@@ -301,7 +344,25 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 				// alignment instructions, skip
 				switch {
 				case strings.HasPrefix(assembly, "call"):
-					return fmt.Errorf("unsupported CALL instruction: \"%s\"", assembly)
+					if err := resolveDirectBranch(&current.Lines[lineNumber], "call", "CALL", functionNames); err != nil {
+						return err
+					}
+					lineNumber++
+					continue
+				case strings.HasPrefix(assembly, "jmp") &&
+					isDirectBranchToFunction(sourceAssembly, "jmp", functionNames):
+					if err := resolveDirectBranch(&current.Lines[lineNumber], "jmp", "JMP", functionNames); err != nil {
+						return err
+					}
+					lineNumber++
+					continue
+				case strings.HasPrefix(assembly, "j"):
+					// Conditional tail calls (jcc function) have no Plan 9 spelling.
+					if fields := strings.Fields(sourceAssembly); len(fields) == 2 {
+						if _, ok := functionNames[branchTargetName(fields[1])]; ok {
+							return fmt.Errorf("unsupported conditional tail call: %q", current.Lines[lineNumber].Assembly)
+						}
+					}
 				case strings.HasPrefix(assembly, "nop"):
 					continue
 				case assembly == "xchg   %ax,%ax":
@@ -327,6 +388,48 @@ func ParseClangObjectDump(arch *config.Arch, dump string, functions []Function, 
 			lineNumber++
 		}
 	}
+	return nil
+}
+
+// DataSymbolName converts a compiler data label (for example `hc.tbl` for a
+// function-local static) into a name cmd/asm accepts.
+func DataSymbolName(label string) string {
+	return strings.ReplaceAll(strings.TrimLeft(label, "."), ".", "_")
+}
+
+// branchTargetName normalizes a compiler branch operand into the function
+// name used by the parsed assembly.
+func branchTargetName(operand string) string {
+	target := strings.TrimSuffix(operand, "@PLT")
+	return strings.TrimPrefix(target, "_")
+}
+
+// isDirectBranchToFunction reports whether the compiler assembly line is a
+// direct `mnemonic function` branch to one of the parsed functions, as
+// opposed to a branch to a local label.
+func isDirectBranchToFunction(assembly, mnemonic string, functionNames map[string]struct{}) bool {
+	fields := strings.Fields(assembly)
+	if len(fields) != 2 || fields[0] != mnemonic {
+		return false
+	}
+	_, ok := functionNames[branchTargetName(fields[1])]
+	return ok
+}
+
+// resolveDirectBranch replaces the machine encoding of a direct call or tail
+// call with a symbolic Plan 9 branch. The compiler encoding is relative to
+// the C object layout and would be meaningless in the generated Go text.
+func resolveDirectBranch(line *Line, mnemonic, plan9 string, functionNames map[string]struct{}) error {
+	fields := strings.Fields(line.Assembly)
+	if len(fields) != 2 || fields[0] != mnemonic {
+		return fmt.Errorf("unable to resolve %s instruction: %q", plan9, line.Assembly)
+	}
+	target := branchTargetName(fields[1])
+	if _, ok := functionNames[target]; !ok {
+		return fmt.Errorf("unsupported external %s target %q", plan9, target)
+	}
+	line.Binary = nil
+	line.Disassembled = fmt.Sprintf("%s %s<>(SB)", plan9, target)
 	return nil
 }
 

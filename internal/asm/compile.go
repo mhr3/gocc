@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/carlmjohnson/versioninfo"
@@ -71,7 +72,12 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 	fmt.Fprintf(&builder, "// Target architecture : %s\n", arch.Name)
 	fmt.Fprintf(&builder, "// Compiler options    : %s\n", collectFlags())
 
-	builder.WriteString("\n#include \"textflag.h\"\n\n")
+	builder.WriteString("\n#include \"textflag.h\"\n")
+	if hasNonZeroLocals := slices.ContainsFunc(functions, func(function Function) bool { return function.LocalsSize > 0 }); hasNonZeroLocals {
+		builder.WriteString("#include \"funcdata.h\"\n")
+	}
+	builder.WriteString("\n")
+
 	for _, function := range functions {
 		for i, c := range function.Consts {
 			if i != 0 {
@@ -98,9 +104,11 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 			}
 		}
 
-		name := function.Name
-		if function.GoFunc.Expr != nil {
-			name = function.GoFunc.Name
+		name := "·" + function.Name
+		if function.Internal {
+			name = function.Name + "<>"
+		} else if function.GoFunc.Expr != nil {
+			name = "·" + function.GoFunc.Name
 		}
 		paramsSize, offsets := function.ParamsSize(arch)
 		retSize := 0
@@ -108,10 +116,30 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 			retSize = function.Ret.Size()
 		}
 		textAttrs := "NOSPLIT"
-		if function.LocalsSize > 0 {
+		if function.Internal {
+			textAttrs = "NOSPLIT|NOFRAME"
+		}
+		// Only Go-visible roots own frames and perform stack growth. Internal C-ABI
+		// helpers use fixed slots reserved in their root's already-checked frame.
+		if function.LocalsSize > 0 && !function.Internal {
 			textAttrs = "0"
 		}
-		builder.WriteString(fmt.Sprintf("\nTEXT ·%s(SB),%s,$%d-%d\n", name, textAttrs, function.LocalsSize, paramsSize+retSize))
+		if function.Internal {
+			builder.WriteString("\n// internal function, its stack space has been flattened into its caller's frame")
+		}
+		frameSize := function.LocalsSize
+		if function.StackAlign > 0 && arch.Name == "amd64" && !function.Internal {
+			// Room to slide SP up to the next aligned address, plus a slot that
+			// keeps the original SP for the epilogue.
+			frameSize += function.StackAlign + 8
+		}
+		builder.WriteString(fmt.Sprintf("\nTEXT %s(SB),%s,$%d-%d\n", name, textAttrs, frameSize, paramsSize+retSize))
+		if function.LocalsSize > 0 {
+			// The translated C stack slots are either scalars or transient
+			// pointers whose lifetime is bounded by the assembly call. Tell the
+			// runtime not to scan them while the function is stopped at a CALL.
+			builder.WriteString("\tNO_LOCAL_POINTERS\n")
+		}
 		genRegIdx, floatRegIdx := 0, 0
 		for i, param := range function.Params {
 			pSz := int8(param.Size())
@@ -127,7 +155,17 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 			} else {
 				genRegIdx++
 			}
-			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", loadInstr, param.Name, offsets[i], targetRegister))
+			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", loadInstr, param.FrameName(), offsets[i], targetRegister))
+		}
+		if function.StackAlign > 0 && arch.Name == "amd64" && !function.Internal {
+			// Go only keeps SP 8-byte aligned on AMD64, while the C code relies on
+			// the alignment it had after its own prologue (legacy SSE memory
+			// operands fault otherwise). Realign within the reserved frame; the
+			// original SP is restored before every return (see
+			// realignAmd64Roots). R11 is a caller-saved scratch register here:
+			// the arguments have been loaded and no C instruction has run yet.
+			builder.WriteString(fmt.Sprintf("\tMOVQ SP, R11\n\tADDQ $%d, SP\n\tANDQ $-%d, SP\n\tMOVQ R11, %d(SP)\n",
+				function.StackAlign, function.StackAlign, function.LocalsSize))
 		}
 		for _, line := range function.Lines {
 			builder.WriteString(line.Compile(arch))
@@ -139,7 +177,10 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 
 // GenerateFile generates the Go PLAN9 assembly file
 func GenerateFile(arch *config.Arch, path string, srcPath string, functions []Function, meta GeneratorMeta) error {
-	functions = ApplyTransforms(arch, functions)
+	functions, err := ApplyTransforms(arch, functions)
+	if err != nil {
+		return err
+	}
 	bytes, err := Generate(arch, srcPath, functions, meta)
 	if err != nil {
 		return err

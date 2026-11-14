@@ -27,6 +27,7 @@ import (
 func init() {
 	command.PersistentFlags().StringP("output", "o", "", "output directory of generated files")
 	command.PersistentFlags().StringSliceP("machine-option", "m", nil, "machine option for clang")
+	command.PersistentFlags().StringSlice("compiler-option", nil, "raw compiler option for clang")
 	command.PersistentFlags().IntP("optimize-level", "O", 0, "optimization level for clang")
 	command.PersistentFlags().StringP("arch", "a", "amd64", "target architecture to use")
 	command.PersistentFlags().StringP("package", "p", "", "go package name to use for the stubs")
@@ -34,6 +35,7 @@ func init() {
 	command.PersistentFlags().String("function-suffix", "", "suffix to add to the generated functions")
 	command.PersistentFlags().BoolP("local", "l", false, "use local machine for compilation")
 	command.PersistentFlags().Bool("with-os-tag", false, "generate OS-specific build tags")
+	command.PersistentFlags().Bool("with-internal-functions", false, "enable compiler-emitted internal helper functions")
 }
 
 func main() {
@@ -60,6 +62,8 @@ var command = &cobra.Command{
 		for _, m := range machineOptions {
 			options = append(options, "-m"+m)
 		}
+		compilerOptions, _ := cmd.PersistentFlags().GetStringSlice("compiler-option")
+		options = append(options, compilerOptions...)
 
 		// Load the architecture
 		target, _ := cmd.PersistentFlags().GetString("arch")
@@ -69,32 +73,34 @@ var command = &cobra.Command{
 		suffix, _ := cmd.PersistentFlags().GetString("suffix")
 		functionSuffix, _ := cmd.PersistentFlags().GetString("function-suffix")
 		withOsTag, _ := cmd.PersistentFlags().GetBool("with-os-tag")
+		withInternalFunctions, _ := cmd.PersistentFlags().GetBool("with-internal-functions")
 
 		// Compile locally or remotely
 		local, _ := cmd.PersistentFlags().GetBool("local")
 		switch local {
 		case true:
-			if err := compileLocally(target, args[0], output, suffix, functionSuffix, packageName, withOsTag, options...); err != nil {
+			if err := compileLocally(target, args[0], output, suffix, functionSuffix, packageName, withOsTag, withInternalFunctions, options...); err != nil {
 				exit(err)
 			}
 		default:
-			if err := compileRemotely(target, args[0], output, packageName, options...); err != nil {
+			if err := compileRemotely(target, args[0], output, packageName, withInternalFunctions, options...); err != nil {
 				exit(err)
 			}
 		}
 	},
 }
 
-func compileRemotely(target, source, outputDir, packageName string, options ...string) error {
+func compileRemotely(target, source, outputDir, packageName string, withInternalFunctions bool, options ...string) error {
 	remote, err := gocc.NewRemote(target, source, outputDir, packageName, options...)
 	if err != nil {
 		return err
 	}
+	remote.WithInternalFunctions = withInternalFunctions
 
 	return remote.Translate()
 }
 
-func compileLocally(target, source, outputDir, suffix, functionSuffix, packageName string, withOsTag bool, options ...string) error {
+func compileLocally(target, source, outputDir, suffix, functionSuffix, packageName string, withOsTag, withInternalFunctions bool, options ...string) error {
 	arch, err := config.For(target)
 	if err != nil {
 		exit(err)
@@ -108,6 +114,7 @@ func compileLocally(target, source, outputDir, suffix, functionSuffix, packageNa
 	if err != nil {
 		return err
 	}
+	local.WithInternalFunctions = withInternalFunctions
 
 	return local.Translate()
 }

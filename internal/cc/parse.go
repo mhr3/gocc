@@ -164,7 +164,7 @@ func Parse(path string) ([]asm.Function, error) {
 			if err != nil {
 				return nil, err
 			}
-			if err := checkFunction(function); err != nil {
+			if err := checkFunction(&function); err != nil {
 				return nil, err
 			}
 
@@ -352,13 +352,16 @@ func extractGoSignature(comment string) (asm.GoFunction, error) {
 	return asm.GoFunction{}, errNoSignature
 }
 
-func checkFunction(function asm.Function) error {
-	checkParam := func(idx int, expectedParam asm.Param) error {
+// checkFunction verifies that the C signature matches the annotated Go one
+// and records, for every C parameter, the name of its Go argument slot.
+func checkFunction(function *asm.Function) error {
+	checkParam := func(idx int, expectedParam asm.Param, goName string) error {
 		if idx >= len(function.Params) {
 			return fmt.Errorf("%s: too few parameters, missing %s", function.Name, expectedParam.CTypeStr())
 		}
 
 		param := function.Params[idx]
+		function.Params[idx].GoName = goName
 		if expectedParam.IsPointer {
 			if !param.IsPointer {
 				return fmt.Errorf("%s: param %q: expected pointer, got %v", function.Name, param.Name, param.CTypeStr())
@@ -380,45 +383,46 @@ func checkFunction(function asm.Function) error {
 	j := 0
 	for _, goParam := range function.GoFunc.Expr.Params.List {
 		goParamTypeName := types.ExprString(goParam.Type)
-		for range goParam.Names {
+		for _, ident := range goParam.Names {
+			name := ident.Name
 			switch goParamTypeName {
 			case "int", "int8", "int16", "int32", "int64",
 				"uint", "uint8", "uint16", "uint32", "uint64",
 				"byte", "char", "bool",
 				"float32", "float64":
-				if err := checkParam(j, go2c[goParamTypeName]); err != nil {
+				if err := checkParam(j, go2c[goParamTypeName], name); err != nil {
 					return err
 				}
 				j++
 			case "string":
-				if err := checkParam(j, go2c[goParamTypeName]); err != nil {
+				if err := checkParam(j, go2c[goParamTypeName], name+"_base"); err != nil {
 					return err
 				}
-				if err := checkParam(j+1, go2c["int"]); err != nil {
+				if err := checkParam(j+1, go2c["int"], name+"_len"); err != nil {
 					return err
 				}
 				j += 2
 			case "unsafe.Pointer":
-				if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
+				if err := checkParam(j, asm.Param{IsPointer: true}, name); err != nil {
 					return err
 				}
 				j++
 			default:
 				if strings.HasPrefix(goParamTypeName, "[]") {
-					if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
+					if err := checkParam(j, asm.Param{IsPointer: true}, name+"_base"); err != nil {
 						return err
 					}
-					if err := checkParam(j+1, go2c["int"]); err != nil {
+					if err := checkParam(j+1, go2c["int"], name+"_len"); err != nil {
 						return err
 					}
-					if err := checkParam(j+2, go2c["int"]); err != nil {
+					if err := checkParam(j+2, go2c["int"], name+"_cap"); err != nil {
 						return err
 					}
 					j += 3
 					continue
 				}
 				if strings.HasPrefix(goParamTypeName, "*") {
-					if err := checkParam(j, asm.Param{IsPointer: true}); err != nil {
+					if err := checkParam(j, asm.Param{IsPointer: true}, name); err != nil {
 						return err
 					}
 					j++

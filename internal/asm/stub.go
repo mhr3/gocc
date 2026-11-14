@@ -32,6 +32,9 @@ func GenerateGoStubs(arch *config.Arch, pkg, output string, functions []Function
 	}
 
 	for _, function := range functions {
+		if function.Internal {
+			continue
+		}
 		builder.WriteString(function.String())
 	}
 

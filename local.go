@@ -40,6 +40,57 @@ type Local struct {
 	GoStub     string
 	Package    string
 	Options    []string
+	// WithInternalFunctions enables the compiler and ABI conventions required
+	// for C functions that call compiler-emitted helper functions.
+	WithInternalFunctions bool
+}
+
+func appendCompilerOption(options []string, option string) []string {
+	if slices.Contains(options, option) {
+		return options
+	}
+	return append(options, option)
+}
+
+func (t *Local) compilerOptions() []string {
+	options := slices.Clone(t.Options)
+	if !t.WithInternalFunctions {
+		return options
+	}
+
+	if t.Arch.Name == "arm64" {
+		// The ARM64 assembly rewrite moves Clang's X29 and X20 allocations to
+		// these registers, so keep them unavailable during register allocation.
+		options = appendCompilerOption(options, "-ffixed-x25")
+		options = appendCompilerOption(options, "-ffixed-x26")
+	}
+	options = appendCompilerOption(options, "-mno-stackrealign")
+	options = appendCompilerOption(options, "-fomit-frame-pointer")
+	return options
+}
+
+func validateInternalFunctionOptIn(functions []asm.Function, enabled bool) error {
+	if enabled {
+		return nil
+	}
+
+	for _, function := range functions {
+		if function.Internal {
+			continue
+		}
+		for _, line := range function.Lines {
+			target, ok := asm.BranchTarget(line)
+			if !ok {
+				continue
+			}
+			return fmt.Errorf(
+				"C function %q calls %q; pass --with-internal-functions to enable C helper calls",
+				function.Name, target,
+			)
+		}
+	}
+
+	return nil
 }
 
 // NewLocal creates a new translator that uses locally installed toolchain
@@ -83,9 +134,10 @@ func (t *Local) Translate() error {
 	if err != nil {
 		return err
 	}
+	compilerOptions := t.compilerOptions()
 
 	// Compile the source file to assembly
-	if err := t.Clang.Compile(t.Source, t.Assembly, t.Object, t.Options...); err != nil {
+	if err := t.Clang.Compile(t.Source, t.Assembly, t.Object, compilerOptions...); err != nil {
 		return err
 	}
 
@@ -96,6 +148,11 @@ func (t *Local) Translate() error {
 	}
 
 	foundMapping := false
+	preserveCABI := t.WithInternalFunctions || slices.Contains(compilerOptions, "-fomit-frame-pointer")
+	annotatedNames := make(map[string]struct{}, len(functions))
+	for _, function := range functions {
+		annotatedNames[function.Name] = struct{}{}
+	}
 	// Map the machine code to the assembly one
 	for _, v := range assembly {
 		assemblyName := v.Name
@@ -110,12 +167,20 @@ func (t *Local) Translate() error {
 			})
 		}
 		if idx == -1 {
+			// Keep compiler-emitted helper functions only when explicitly enabled.
+			// They use the C register ABI internally and are intentionally omitted
+			// from the generated Go stub.
+			if _, annotated := annotatedNames[assemblyName]; !annotated && t.WithInternalFunctions {
+				v.Internal = true
+				functions = append(functions, v)
+			}
 			continue
 		}
 		foundMapping = true
 
 		functions[idx].Consts = v.Consts
 		functions[idx].Lines = v.Lines
+		functions[idx].PreserveCABI = preserveCABI
 	}
 
 	_ = t.Close()
@@ -123,23 +188,28 @@ func (t *Local) Translate() error {
 	if !foundMapping {
 		return errors.New("cannot find mapping to machine code")
 	}
+	if err := validateInternalFunctionOptIn(functions, t.WithInternalFunctions); err != nil {
+		return err
+	}
 
 	// apply the function suffix, this needs to be done after the mapping
 	for i := range functions {
 		functions[i].GoFunc.Name += t.FuncSuffix
 	}
 
-	// Generate the Go stubs for the functions
-	if err := asm.GenerateGoStubs(t.Arch, t.Package, t.GoStub, functions); err != nil {
+	meta := asm.GeneratorMeta{
+		ClangVersion: t.Clang.Version(),
+		Options:      compilerOptions,
+	}
+
+	// Generate the assembly first: it performs the final validation, and a
+	// rejected translation must not leave a stub without an implementation.
+	if err := asm.GenerateFile(t.Arch, t.GoAssembly, t.Source, functions, meta); err != nil {
 		return err
 	}
 
-	meta := asm.GeneratorMeta{
-		ClangVersion: t.Clang.Version(),
-		Options:      t.Options,
-	}
-
-	return asm.GenerateFile(t.Arch, t.GoAssembly, t.Source, functions, meta)
+	// Generate the Go stubs for the functions
+	return asm.GenerateGoStubs(t.Arch, t.Package, t.GoStub, functions)
 }
 
 // Output returns the output files as a web result

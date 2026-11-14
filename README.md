@@ -8,10 +8,11 @@
 ## GOCC: Compile C to Go Assembly
 
 This utility transpiles C code to Go assembly. It uses the LLVM toolchain to compile C code to assembly and machine code and generates Go assembly from it, as well as the corresponding Go stubs. This is useful for certain features such as using intrinsics, which are not supported by the Go ecosystem.
-Generated Go assembly will try to use at little binary codes as possible, making the output more suitable
-for tuning, or to give you a starting point, but do note that not everything can be expressed in Plan9
-assembly plus the disassembly process is sometimes buggy (which is the reason why some instructions will
-still use binary).
+Generated Go assembly uses Plan 9 mnemonics wherever `cmd/asm` reassembles them to the same machine
+code, making the output more suitable for tuning or as a starting point. Instructions `cmd/asm` cannot
+express (x87, `SETcc`/`CMOVcc`, `MOVZX`/`MOVSX`, some legacy SSE names, ...) are emitted as raw bytes
+with the decoded instruction in a comment; the list is verified against the real assembler by
+`TestAmd64DenylistRoundTrips`.
 
 ## Features
 
@@ -19,6 +20,7 @@ still use binary).
 - Auto-detects the appropriate version of `clang` and `objdump` to use.
 - Supports cross-compilation.
 - Annotated C functions will have their Go stubs auto-generated.
+- Compiler-emitted helper functions are supported with `--with-internal-functions`.
 - Automatically formats go assembly using `asmfmt`.
 
 ## Annotating C functions
@@ -37,6 +39,10 @@ int64_t simd_fn(char *input1, uint64_t input1_len) {
 ```
 
 ## Setting up locally
+
+Building gocc requires Go 1.27 or newer: `golang.org/x/arch` needs 1.26 for its AVX/AVX-512
+decoder, and the set of instructions emitted as Plan 9 text rather than raw bytes was verified
+against the Go 1.27 assembler. The generated assembly itself has no such requirement.
 
 Before you use gocc, you need to install the LLVM toolchain. On Ubuntu, you can do it with the following commands (LLVM 15 was used the most during development of gocc):
 
@@ -67,9 +73,22 @@ This tool does not support most of the C features, it's not a replacement for C/
 
 - Only supports C code that can be compiled by `clang`.
 - Does not support C++ code or templates for now.
-- Does not support call statements, thus requires you to inline your C functions.
+- Calls to external C libraries are not supported. Internal helper calls (including
+  tail calls) require `--with-internal-functions`; recursive helpers and helpers
+  reachable from multiple exported functions are rejected, as are helpers that
+  take arguments on the stack (more than 8 integer arguments on arm64, 6 on amd64).
+- No dynamic stack allocation: VLAs and `alloca` are rejected. Go only keeps the
+  amd64 stack 8-byte aligned; aligned vector moves are rewritten to unaligned ones,
+  and a function whose code still depends on stack alignment (legacy SSE
+  instructions with stack operands, 512-bit aligned moves) realigns SP inside its
+  frame, which makes it SPWRITE for the Go toolchain (no asynchronous preemption
+  inside it). Compile with AVX to avoid this. Over-aligned locals are only 16-byte
+  aligned on arm64.
 - No dynamic memory allocation.
 - Currently limited to 6 arguments per function.
+- Function-local `static const` tables are supported on arm64; on amd64 clang's
+  Intel-syntax assembler cannot re-assemble the dotted `fn.table` symbol it emits,
+  so use file-scope `static const` tables instead.
 
 ## Resources
 

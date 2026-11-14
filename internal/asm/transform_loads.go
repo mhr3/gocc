@@ -2,6 +2,7 @@ package asm
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mhr3/gocc/internal/config"
@@ -14,7 +15,7 @@ func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string,
 	op := arch.MovInstr[8]
 	register := reParams["register"]
 	register2 := reParams["register2"]
-	symbol := reParams["var"]
+	symbol := DataSymbolName(reParams["var"])
 
 	// sigh, why oh why do we have to do this?
 	switch instr := reParams["instr"]; {
@@ -22,6 +23,9 @@ func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string,
 		op = "MOVO"
 	case instr == "MOVDQU":
 		op = "MOVOU"
+	case instr == "MOVSD_XMM":
+		// x86asm distinguishes the SSE move from the string instruction.
+		op = "MOVSD"
 	default:
 		op = instr
 	}
@@ -39,10 +43,22 @@ func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string,
 	}
 
 	var rewritten string
+	immediate := ""
+	// x86asm's GoSyntax omits the immediate operand from a few AVX table-load
+	// instructions. Recover it from Clang's Intel syntax and put it first, as
+	// required by cmd/asm.
+	if instr := strings.ToUpper(reParams["instr"]); instr == "VPBLENDD" || instr == "VPBLENDW" {
+		if comma := strings.LastIndexByte(line.Assembly, ','); comma >= 0 {
+			value := strings.TrimSpace(line.Assembly[comma+1:])
+			if parsed, err := strconv.ParseUint(value, 0, 8); err == nil {
+				immediate = fmt.Sprintf("$%#x, ", parsed)
+			}
+		}
+	}
 	if register2 == "" {
-		rewritten = fmt.Sprintf("%s %s<>(SB), %s", op, symbol, register)
+		rewritten = fmt.Sprintf("%s %s%s<>(SB), %s", op, immediate, symbol, register)
 	} else {
-		rewritten = fmt.Sprintf("%s %s<>(SB), %s, %s", op, symbol, register2, register)
+		rewritten = fmt.Sprintf("%s %s%s<>(SB), %s, %s", op, immediate, symbol, register2, register)
 	}
 	lines[0].Disassembled = rewritten
 	lines[0].Binary = nil
@@ -54,7 +70,7 @@ func rewriteLoadArm64(arch *config.Arch, _ Function, _ Line, combined string, li
 
 	op := arch.MovInstr[8]
 	register := reParams["register"]
-	symbol := reParams["var"]
+	symbol := DataSymbolName(reParams["var"])
 
 	// addrMode := "$" // absolute addressing
 	rewritten := fmt.Sprintf("%s $%s<>(SB), %s", op, symbol, register)
