@@ -8,10 +8,11 @@
 ## GOCC: Compile C to Go Assembly
 
 This utility transpiles C code to Go assembly. It uses the LLVM toolchain to compile C code to assembly and machine code and generates Go assembly from it, as well as the corresponding Go stubs. This is useful for certain features such as using intrinsics, which are not supported by the Go ecosystem.
-Generated Go assembly will try to use at little binary codes as possible, making the output more suitable
-for tuning, or to give you a starting point, but do note that not everything can be expressed in Plan9
-assembly plus the disassembly process is sometimes buggy (which is the reason why some instructions will
-still use binary).
+Generated Go assembly uses Plan 9 mnemonics wherever `cmd/asm` reassembles them to the same machine
+code, making the output more suitable for tuning or as a starting point. Instructions `cmd/asm` cannot
+express (x87, `SETcc`/`CMOVcc`, `MOVZX`/`MOVSX`, some legacy SSE names, ...) are emitted as raw bytes
+with the decoded instruction in a comment; the list is verified against the real assembler by
+`TestAmd64DenylistRoundTrips`.
 
 ## Features
 

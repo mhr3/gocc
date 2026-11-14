@@ -179,15 +179,45 @@ func TestTransformInstructions(t *testing.T) {
 		ExpectedLines []Line
 	}{
 		{
-			Name: "amd64-cmpl-cl",
+			Name: "amd64-trusts-decoder-by-default",
 			Cfg:  config.AMD64(),
 			Func: Function{
 				Lines: []Line{
-					{Assembly: "cmp	cl, 8", Disassembled: "CMPL CL, $0x8", Binary: binaryFromHex("80f908")},
+					{Assembly: "cmp	cl, 8", Disassembled: "CMPB CL, $0x8", Binary: binaryFromHex("80f908")},
+					{Assembly: "test	eax, eax", Disassembled: "TESTL AX, AX", Binary: binaryFromHex("85c0")},
+					{Assembly: "vpaddq	ymm0, ymm1, ymm2", Disassembled: "VPADDQ Y2, Y1, Y0", Binary: binaryFromHex("c5f5d4c2")},
+					{Assembly: "shlx	rax, rcx, rdx", Disassembled: "SHLXQ DX, CX, AX", Binary: binaryFromHex("c4e2e9f7c1")},
 				},
 			},
 			ExpectedLines: []Line{
-				{Disassembled: "CMPL CL, $0x8", Binary: binaryIsSet}, // doesn't compile, must use binary
+				{Disassembled: "CMPB CL, $0x8"},
+				{Disassembled: "TESTL AX, AX"},
+				{Disassembled: "VPADDQ Y2, Y1, Y0"},
+				{Disassembled: "SHLXQ DX, CX, AX"},
+			},
+		},
+		{
+			Name: "amd64-keeps-unassemblable-encodings",
+			Cfg:  config.AMD64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "sete	al", Disassembled: "SETE AL", Binary: binaryFromHex("0f94c0")},
+					{Assembly: "cmove	rax, rcx", Disassembled: "CMOVE CX, AX", Binary: binaryFromHex("480f44c1")},
+					{Assembly: "movd	xmm0, eax", Disassembled: "MOVD AX, X0", Binary: binaryFromHex("660f6ec0")},
+					{Assembly: "imul	rax, rcx, 12", Disassembled: "IMULQ $0xc, CX, AX", Binary: binaryFromHex("486bc10c")},
+					{Assembly: "lea	rax, [rip + 16]", Disassembled: "LEAQ 0x10(IP), AX", Binary: binaryFromHex("488d0510000000")},
+					{Assembly: "vpand	ymm0, ymm1, ymmword ptr [rip + .LCPI0_0]", Disassembled: "VPAND LCPI0_0<>(SB), Y1, Y0", Binary: binaryFromHex("c5f5db05")},
+					{Assembly: "movdqa	xmm0, xmm1", Disassembled: "MOVDQA X1, X0", Binary: binaryFromHex("660f6fc1")},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "SETE AL", Binary: binaryIsSet},
+				{Disassembled: "CMOVE CX, AX", Binary: binaryIsSet},
+				{Disassembled: "MOVD AX, X0", Binary: binaryIsSet},
+				{Disassembled: "IMULQ $0xc, CX, AX", Binary: binaryIsSet},
+				{Disassembled: "LEAQ 0x10(IP), AX", Binary: binaryIsSet},
+				{Disassembled: "VPAND LCPI0_0<>(SB), Y1, Y0", Binary: binaryIsSet},
+				{Disassembled: "MOVDQA X1, X0", Binary: binaryIsSet},
 			},
 		},
 	}
