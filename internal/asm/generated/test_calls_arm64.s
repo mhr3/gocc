@@ -11,9 +11,9 @@
 
 TEXT ·Test_calls_nested(SB), 0, $208-40
 	NO_LOCAL_POINTERS
-	MOVD p+0(FP), R0
-	MOVD n+8(FP), R1
-	MOVD cap+16(FP), R2
+	MOVD p_base+0(FP), R0
+	MOVD p_len+8(FP), R1
+	MOVD p_cap+16(FP), R2
 	MOVD k+24(FP), R3
 	NOP                       // (skipped)                            // sub	sp, sp, #112
 	LSL  $1, R3, R8           // <--                                  // lsl	x8, x3, #1
@@ -71,9 +71,9 @@ LBB0_4:
 
 TEXT ·Test_calls_tail(SB), 0, $192-40
 	NO_LOCAL_POINTERS
-	MOVD p+0(FP), R0
-	MOVD n+8(FP), R1
-	MOVD cap+16(FP), R2
+	MOVD p_base+0(FP), R0
+	MOVD p_len+8(FP), R1
+	MOVD p_cap+16(FP), R2
 	MOVD mode+24(FP), R3
 	NOP                       // (skipped)                            // sub	sp, sp, #192
 	MOVD R30, 144(RSP)        // <--                                  // str	x30, [sp, #128]
@@ -209,9 +209,9 @@ LBB2_21:
 
 TEXT ·Test_calls_big_frame(SB), 0, $4832-32
 	NO_LOCAL_POINTERS
-	MOVD p+0(FP), R0
-	MOVD n+8(FP), R1
-	MOVD cap+16(FP), R2
+	MOVD p_base+0(FP), R0
+	MOVD p_len+8(FP), R1
+	MOVD p_cap+16(FP), R2
 	MOVD R30, 16(RSP)           // <--                                  // str	x30, [sp, #-16]!
 	CALL big_frame_helper<>(SB) // <--                                  // bl	big_frame_helper
 	ADD  $1, R0, R0             // <--                                  // add	x0, x0, #1

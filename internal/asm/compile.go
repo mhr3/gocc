@@ -155,7 +155,7 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 			} else {
 				genRegIdx++
 			}
-			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", loadInstr, param.Name, offsets[i], targetRegister))
+			builder.WriteString(fmt.Sprintf("\t%s %s+%d(FP), %s\n", loadInstr, param.FrameName(), offsets[i], targetRegister))
 		}
 		if function.StackAlign > 0 && arch.Name == "amd64" && !function.Internal {
 			// Go only keeps SP 8-byte aligned on AMD64, while the C code relies on

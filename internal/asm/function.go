@@ -267,6 +267,19 @@ type Param struct {
 	Type      string `json:"type"`                // Type of the parameter (C type)
 	Name      string `json:"name"`                // Name of the parameter
 	IsPointer bool   `json:"isPointer,omitempty"` // Whether the parameter is a pointer
+	// GoName is the name of the argument slot in the Go frame as go vet's
+	// asmdecl expects it: the Go parameter name, with _len/_cap suffixes for
+	// the length and capacity words of strings and slices. Empty for
+	// internal helpers, which have no Go signature.
+	GoName string `json:"goName,omitempty"`
+}
+
+// FrameName returns the name to use in a name+offset(FP) reference.
+func (p *Param) FrameName() string {
+	if p.GoName != "" {
+		return p.GoName
+	}
+	return p.Name
 }
 
 func (p *Param) CTypeStr() string {
