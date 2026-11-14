@@ -1,0 +1,57 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Go test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # The decoder round-trip tests and the example regeneration need clang
+      # and llvm-objdump; Ubuntu 24.04 ships LLVM 18.
+      - name: Install LLVM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18 llvm-18
+          clang-18 --version
+
+      - run: go vet ./...
+
+      - run: go test ./...
+
+      # Regenerate the checked-in e2e assembly for this architecture with the
+      # runner's toolchain and make sure it still builds and passes; the
+      # committed files are produced on a developer machine and may lag
+      # behind the transforms. Only the native target is regenerated: the
+      # other one needs that architecture's libc headers.
+      - name: Regenerate e2e assembly
+        working-directory: internal/asm/generated
+        run: |
+          for src in testdata/*.c; do
+            flags=""
+            if grep -q "static" "$src"; then flags="--with-internal-functions"; fi
+            go run ../../../cmd/gocc "$src" -l --suffix _${{ matrix.arch }} --arch ${{ matrix.arch }} -O3 $flags
+          done
+          git diff --stat
+          go test ./...
