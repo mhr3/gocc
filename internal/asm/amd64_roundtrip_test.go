@@ -529,7 +529,7 @@ vphaddd ymm0, ymm1, ymm2
 vphaddw ymm0, ymm1, ymm2
 vpavgb ymm0, ymm1, ymm2
 vpsignb ymm0, ymm1, ymm2
-vpgatherdd ymm0, dword ptr [rdi + 4*ymm1], ymm2
+vpgatherdd ymm0, [rdi + ymm1*4], ymm2
 vpmaskmovd ymm0, ymm1, ymmword ptr [rdi]
 vmaskmovps ymmword ptr [rdi], ymm1, ymm0
 vmulsd xmm3, xmm0, xmm1
@@ -766,8 +766,8 @@ vshuff32x4 zmm0, zmm1, zmm2, 0x4e
 vshufi64x2 zmm0, zmm1, zmm2, 0x4e
 vunpcklps zmm0, zmm1, zmm2
 vmovshdup zmm0, zmm1
-vpgatherdd zmm0 {k1}, dword ptr [rdi + 4*zmm1]
-vpscatterdd dword ptr [rdi + 4*zmm1] {k1}, zmm0
+vpgatherdd zmm0 {k1}, [rdi + zmm1*4]
+vpscatterdd [rdi + zmm1*4] {k1}, zmm0
 vpaddd ymm0 {k1}, ymm1, ymm2
 vpaddq xmm0 {k1}{z}, xmm1, xmm2
 vmovdqu8 ymm0 {k1}, ymmword ptr [rdi]
