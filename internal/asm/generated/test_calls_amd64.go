@@ -18,3 +18,18 @@ func Test_calls_consts(x float64, n int64) float64
 
 //go:noescape
 func Test_calls_local_pointer(seed int64) int64
+
+//go:noescape
+func Test_calls_big_frame_bytes(p []byte) int64
+
+// Test_calls_big_frame_string is Test_calls_big_frame_bytes for string arguments.
+func Test_calls_big_frame_string(p string) int64 {
+	return test_calls_big_frame_stringInternal(p, len(p))
+}
+
+// test_calls_big_frame_stringInternal jumps to Test_calls_big_frame_bytes.
+// The int after a string takes the place of the capacity of the []byte it
+// stands for, which gives both functions the same frame.
+//
+//go:noescape
+func test_calls_big_frame_stringInternal(p string, _ int) int64

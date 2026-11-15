@@ -23,6 +23,7 @@ import (
 	"go/types"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -31,7 +32,10 @@ import (
 	"modernc.org/cc/v4"
 )
 
-const goccComment = "gocc:"
+const (
+	goccComment      = "gocc:"
+	goccAliasComment = "gocc-alias:"
+)
 
 var supportedTypes = mapset.NewSet(
 	"int64_t", "uint64_t",
@@ -137,6 +141,10 @@ func Parse(path string) ([]asm.Function, error) {
 		} else if err != nil {
 			return nil, err
 		}
+		aliases, err := extractGoAliases(funcComment)
+		if err != nil {
+			return nil, err
+		}
 
 		declarator := funcDef.Declarator
 		if declarator != nil {
@@ -166,6 +174,13 @@ func Parse(path string) ([]asm.Function, error) {
 			}
 			if err := checkFunction(&function); err != nil {
 				return nil, err
+			}
+			for _, alias := range aliases {
+				checked, err := checkAlias(&function, alias)
+				if err != nil {
+					return nil, err
+				}
+				function.Aliases = append(function.Aliases, checked)
 			}
 
 			functions = append(functions, function)
@@ -215,6 +230,21 @@ func extractAnnotatedSignatures(path string) (string, error) {
 
 	var clauseCount int
 	var isAnnotated bool
+	// aliasLine is the line of a gocc-alias directive waiting for the function
+	// it belongs to. An alias on a function without a gocc signature must be
+	// rejected here: the function is dropped below while its comments are
+	// kept, so the directive would attach itself to the next annotated one.
+	var aliasLine int
+	claimAlias := func() error {
+		if clauseCount != 0 {
+			return nil
+		}
+		if aliasLine != 0 && !isAnnotated {
+			return fmt.Errorf("line %d: gocc-alias on a function without a gocc signature", aliasLine)
+		}
+		aliasLine = 0
+		return nil
+	}
 
 	lines := strings.Split(string(src), "\n")
 	for i, l := range lines {
@@ -224,17 +254,26 @@ func extractAnnotatedSignatures(path string) (string, error) {
 			continue
 		case strings.HasPrefix(line, "//") && clauseCount == 0:
 			// keep comments
-			if clauseCount == 0 && strings.Contains(line, goccComment) {
+			if strings.Contains(line, goccComment) {
 				isAnnotated = true
-			} else if clauseCount == 0 && isAnnotated {
+			} else if strings.Contains(line, goccAliasComment) {
+				// part of the annotation, on either side of the gocc line
+				aliasLine = i + 1
+			} else if isAnnotated {
 				isAnnotated = false
 			}
 
 			redacted.WriteString(line)
 			redacted.WriteRune('\n')
 		case strings.Contains(line, "{") && strings.Contains(line, "}"):
+			if err := claimAlias(); err != nil {
+				return "", err
+			}
 			clauseCount += strings.Count(line, "{") - strings.Count(line, "}")
 		case strings.Contains(line, "{"):
+			if err := claimAlias(); err != nil {
+				return "", err
+			}
 			if clauseCount == 0 && isAnnotated {
 				startLine := i
 				bracketIdx := strings.Index(line, "(")
@@ -327,6 +366,22 @@ func convertFunction(declarator *cc.DirectDeclarator, returnType string, goFunc 
 	}, nil
 }
 
+// parseGoSignature parses "Name(params) results" as written in a directive.
+func parseGoSignature(signature string) (asm.GoFunction, error) {
+	goExpr, err := parser.ParseExpr("interface {" + signature + "}")
+	if err != nil {
+		return asm.GoFunction{}, err
+	}
+	if interfaceType, ok := goExpr.(*ast.InterfaceType); !ok {
+		return asm.GoFunction{}, errors.New("gocc: invalid signature")
+	} else if len(interfaceType.Methods.List) != 1 {
+		return asm.GoFunction{}, errors.New("gocc: invalid signature")
+	} else {
+		method := interfaceType.Methods.List[0]
+		return asm.GoFunction{Name: method.Names[0].String(), Expr: method.Type.(*ast.FuncType)}, nil
+	}
+}
+
 func extractGoSignature(comment string) (asm.GoFunction, error) {
 	lines := strings.Split(comment, "\n")
 	for _, line := range lines {
@@ -334,22 +389,76 @@ func extractGoSignature(comment string) (asm.GoFunction, error) {
 			continue
 		}
 		parts := strings.SplitN(line, goccComment, 2)
-
-		goExpr, err := parser.ParseExpr("interface {" + parts[1] + "}")
-		if err != nil {
-			return asm.GoFunction{}, err
-		}
-		if interfaceType, ok := goExpr.(*ast.InterfaceType); !ok {
-			return asm.GoFunction{}, errors.New("gocc: invalid signature")
-		} else if len(interfaceType.Methods.List) != 1 {
-			return asm.GoFunction{}, errors.New("gocc: invalid signature")
-		} else {
-			method := interfaceType.Methods.List[0]
-			return asm.GoFunction{Name: method.Names[0].String(), Expr: method.Type.(*ast.FuncType)}, nil
-		}
+		return parseGoSignature(parts[1])
 	}
 
 	return asm.GoFunction{}, errNoSignature
+}
+
+// extractGoAliases returns the signatures of the gocc-alias directives.
+func extractGoAliases(comment string) ([]asm.GoFunction, error) {
+	var aliases []asm.GoFunction
+	for _, line := range strings.Split(comment, "\n") {
+		_, signature, found := strings.Cut(line, goccAliasComment)
+		if !found {
+			continue
+		}
+		alias, err := parseGoSignature(signature)
+		if err != nil {
+			return nil, err
+		}
+		aliases = append(aliases, alias)
+	}
+	return aliases, nil
+}
+
+// checkAlias verifies that an alias has the Go signature of the function,
+// except for taking a string where the function takes a []byte, and records
+// which parameters those are. Anything else would give the alias a frame the
+// function cannot be entered with (see asm.GoAlias).
+func checkAlias(function *asm.Function, alias asm.GoFunction) (asm.GoAlias, error) {
+	fail := func(format string, args ...any) (asm.GoAlias, error) {
+		return asm.GoAlias{}, fmt.Errorf("%s: alias %s: %s", function.Name, alias.Name, fmt.Sprintf(format, args...))
+	}
+
+	var want, wantResults, gotResults []string
+	function.GoFunc.ForEachParam(func(_, typ string) { want = append(want, typ) })
+	function.GoFunc.ForEachResult(func(_, typ string) { wantResults = append(wantResults, typ) })
+	alias.ForEachResult(func(_, typ string) { gotResults = append(gotResults, typ) })
+
+	var padded []bool
+	var paramErr error
+	alias.ForEachParam(func(name, typ string) {
+		idx := len(padded)
+		padded = append(padded, false)
+		if paramErr != nil || idx >= len(want) {
+			return
+		}
+		isBytes := want[idx] == "[]byte" || want[idx] == "[]uint8"
+		switch {
+		case name == "" || name == "_":
+			_, paramErr = fail("parameter %d has to be named", idx+1)
+		case typ == want[idx]:
+		case typ == "string" && isBytes:
+			padded[idx] = true
+		case isBytes:
+			_, paramErr = fail("param %q: expected %s or string, got %s", name, want[idx], typ)
+		default:
+			_, paramErr = fail("param %q: expected %s, got %s", name, want[idx], typ)
+		}
+	})
+	switch {
+	case len(padded) != len(want):
+		return fail("expected %d parameters, got %d", len(want), len(padded))
+	case paramErr != nil:
+		return asm.GoAlias{}, paramErr
+	case !slices.Equal(gotResults, wantResults):
+		return fail("results differ from those of %s", function.GoFunc.Name)
+	case !slices.Contains(padded, true):
+		return fail("no []byte parameter of %s is taken as a string", function.GoFunc.Name)
+	}
+
+	return asm.GoAlias{GoFunction: alias, Padded: padded}, nil
 }
 
 // checkFunction verifies that the C signature matches the annotated Go one

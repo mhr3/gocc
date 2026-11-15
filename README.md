@@ -38,6 +38,45 @@ int64_t simd_fn(char *input1, uint64_t input1_len) {
 }
 ```
 
+### String variants of `[]byte` functions
+
+Go code often needs the same routine for byte slices and for strings. A function taking `[]byte`
+can get a string variant with a `gocc-alias` directive, without compiling the C code twice:
+
+```c
+// gocc: Valid(data []byte) bool
+// gocc-alias: ValidString(data string) bool
+bool ascii_valid(const unsigned char *data, uint64_t len, uint64_t cap) {
+  ...
+}
+```
+
+The alias must have the signature of the function with one or more `[]byte` parameters replaced
+by `string`; a function can have several aliases. For the example above gocc generates (comments
+omitted):
+
+```go
+//go:noescape
+func Valid(data []byte) bool
+
+func ValidString(data string) bool {
+	return validStringInternal(data, len(data))
+}
+
+//go:noescape
+func validStringInternal(data string, _ int) bool
+```
+
+```
+TEXT ·validStringInternal(SB), NOSPLIT|NOFRAME, $0-25
+	JMP ·Valid(SB)
+```
+
+The blank `int` gives the string the size of a slice, so both entry points have the same frame
+and the alias is a single jump. The C function receives the length of the string as its
+capacity. The direction is fixed: the C function has to implement the `[]byte` version,
+because a slice cannot be passed in the frame of a function taking a string.
+
 ## Setting up locally
 
 Building gocc requires Go 1.27 or newer: `golang.org/x/arch` needs 1.26 for its AVX/AVX-512
