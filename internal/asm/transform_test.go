@@ -121,7 +121,8 @@ func TestDataLoadRewrite(t *testing.T) {
 			Cfg:  config.AMD64(),
 			Func: Function{
 				Lines: []Line{
-					{Assembly: "vpand\tymm3, ymm7, ymmword ptr [rip + .LCPI0_0]", Disassembled: "VPAND 0(IP), Y7, Y3"},
+					// VEX encodings: x86asm prints the RIP operand as a bare displacement.
+					{Assembly: "vpand\tymm3, ymm7, ymmword ptr [rip + .LCPI0_0]", Disassembled: "VPAND 0x8, Y7, Y3"},
 				},
 			},
 			ExpectedLines: []Line{
@@ -133,7 +134,7 @@ func TestDataLoadRewrite(t *testing.T) {
 			Cfg:  config.AMD64(),
 			Func: Function{
 				Lines: []Line{
-					{Assembly: "vpsubusb\tymm4, ymm4, ymmword ptr [rip + .LCPI0_3]", Disassembled: "VPSUBUSB 0(IP), Y4, Y4"},
+					{Assembly: "vpsubusb\tymm4, ymm4, ymmword ptr [rip + .LCPI0_3]", Disassembled: "VPSUBUSB 0x10, Y4, Y4"},
 				},
 			},
 			ExpectedLines: []Line{
@@ -145,11 +146,38 @@ func TestDataLoadRewrite(t *testing.T) {
 			Cfg:  config.AMD64(),
 			Func: Function{
 				Lines: []Line{
-					{Assembly: "vpblendd\tymm0, ymm0, ymmword ptr [rip + .LCPI0_27], 252", Disassembled: "VPBLENDD 0(IP), Y0, Y0"},
+					{Assembly: "vpblendd\tymm0, ymm0, ymmword ptr [rip + .LCPI0_27], 252", Disassembled: "VPBLENDD $0xfc, 0x20, Y0, Y0"},
 				},
 			},
 			ExpectedLines: []Line{
 				{Disassembled: "VPBLENDD $0xfc, LCPI0_27<>(SB), Y0, Y0", Binary: nil},
+			},
+		},
+		{
+			// The implicit X0 mask operand must survive the rewrite.
+			Name: "amd64-pblendvb-implicit-mask",
+			Cfg:  config.AMD64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "pblendvb\txmm4, xmmword ptr [rip + .LCPI2_5], xmm0", Disassembled: "PBLENDVB X0, 0xc(IP), X4"},
+					{Assembly: "blendvps\txmm4, xmmword ptr [rip + .LCPI2_6], xmm0", Disassembled: "BLENDVPS X0, 0x1c(IP), X4"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "PBLENDVB X0, LCPI2_5<>(SB), X4", Binary: nil},
+				{Disassembled: "BLENDVPS X0, LCPI2_6<>(SB), X4", Binary: nil},
+			},
+		},
+		{
+			Name: "amd64-vinserti128-mixed-width",
+			Cfg:  config.AMD64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "vinserti128\tymm0, ymm1, xmmword ptr [rip + .LCPI0_1], 1", Disassembled: "VINSERTI128 $0x1, 0x10, Y1, Y0"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "VINSERTI128 $0x1, LCPI0_1<>(SB), Y1, Y0", Binary: nil},
 			},
 		},
 	}

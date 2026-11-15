@@ -2,65 +2,46 @@ package asm
 
 import (
 	"fmt"
-	"strconv"
+	"regexp"
 	"strings"
 
 	"github.com/mhr3/gocc/internal/config"
 	"golang.org/x/arch/arm64/arm64asm"
 )
 
+// amd64RIPOperand matches the RIP-relative memory operand in x86asm's Plan 9
+// text. Legacy encodings print as N(IP); for VEX/EVEX encodings x86asm drops
+// the RIP base and prints the displacement alone (golang/go#83116), so a bare
+// number operand is accepted as well.
+var amd64RIPOperand = regexp.MustCompile(`(?:^|, )(-?(?:0x[0-9a-fA-F]+|[0-9]+)(?:\(IP\))?)(?:, |$)`)
+
+// rewriteLoadAmd64 replaces a RIP-relative memory operand with a reference
+// to the constant the compiler placed there. Only that operand is touched:
+// the decoder's Plan 9 text keeps every other operand, including implicit
+// ones such as the X0 mask of PBLENDVB and immediates.
 func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string, lines []Line) {
 	reParams := getRegexpParams(arch.DataLoad, combined)
-	// FIXME: this is extremely fragile
-	op := arch.MovInstr[8]
-	register := reParams["register"]
-	register2 := reParams["register2"]
 	symbol := DataSymbolName(reParams["var"])
 
-	// sigh, why oh why do we have to do this?
-	switch instr := reParams["instr"]; {
-	case instr == "MOVDQA":
+	op, operands, _ := strings.Cut(line.Disassembled, " ")
+	switch op {
+	case "MOVDQA":
 		op = "MOVO"
-	case instr == "MOVDQU":
+	case "MOVDQU":
 		op = "MOVOU"
-	case instr == "MOVSD_XMM":
+	case "MOVSD_XMM":
 		// x86asm distinguishes the SSE move from the string instruction.
 		op = "MOVSD"
-	default:
-		op = instr
 	}
+	match := amd64RIPOperand.FindStringSubmatchIndex(operands)
+	if match == nil {
+		// Leave the line alone; amd64TrustDecoder keeps its encoding and the
+		// decoded text stays in the comment for inspection.
+		return
+	}
+	operands = operands[:match[2]] + symbol + "<>(SB)" + operands[match[3]:]
 
-	if strings.HasPrefix(register, "X") {
-		// the disassembler gets this wrong sometimes
-		switch {
-		case strings.Contains(line.Assembly, "xmm"):
-			// all good
-		case strings.Contains(line.Assembly, "ymm"):
-			register = "Y" + register[1:]
-		case strings.Contains(line.Assembly, "zmm"):
-			register = "Z" + register[1:] // does go even support this?
-		}
-	}
-
-	var rewritten string
-	immediate := ""
-	// x86asm's GoSyntax omits the immediate operand from a few AVX table-load
-	// instructions. Recover it from Clang's Intel syntax and put it first, as
-	// required by cmd/asm.
-	if instr := strings.ToUpper(reParams["instr"]); instr == "VPBLENDD" || instr == "VPBLENDW" {
-		if comma := strings.LastIndexByte(line.Assembly, ','); comma >= 0 {
-			value := strings.TrimSpace(line.Assembly[comma+1:])
-			if parsed, err := strconv.ParseUint(value, 0, 8); err == nil {
-				immediate = fmt.Sprintf("$%#x, ", parsed)
-			}
-		}
-	}
-	if register2 == "" {
-		rewritten = fmt.Sprintf("%s %s%s<>(SB), %s", op, immediate, symbol, register)
-	} else {
-		rewritten = fmt.Sprintf("%s %s%s<>(SB), %s, %s", op, immediate, symbol, register2, register)
-	}
-	lines[0].Disassembled = rewritten
+	lines[0].Disassembled = op + " " + operands
 	lines[0].Binary = nil
 }
 
