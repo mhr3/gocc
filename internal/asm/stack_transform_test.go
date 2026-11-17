@@ -1497,3 +1497,103 @@ func TestInternalHelpersNeverRealign(t *testing.T) {
 	assert.Contains(t, string(asm), "TEXT ·root(SB), 0, $"+fmt.Sprint(modified[0].LocalsSize)+"-0")
 	assert.NotContains(t, string(asm), "ANDQ")
 }
+
+func TestAmd64StackAlignments(t *testing.T) {
+	call := func(target string) Line {
+		return Line{Assembly: "call\t" + target, Disassembled: "CALL " + target + "<>(SB)"}
+	}
+	// instructions as the translation leaves them: Plan 9 text for the ones
+	// it rewrote, the compiler's encoding for the rest
+	kept := func(assembly string) Line { return Line{Assembly: assembly, Binary: []string{"90"}} }
+	rewritten := func(assembly, plan9 string) Line { return Line{Assembly: assembly, Disassembled: plan9} }
+
+	takeAddress := rewritten("lea\trdi, [rsp + 16]", "LEAQ 0x10(SP), DI")
+	alignedLoad := kept("movdqa\txmm1, xmmword ptr [rdi]")
+
+	for _, tc := range []struct {
+		name      string
+		functions []Function
+		want      []int
+	}{
+		{
+			// the helper only knows the type of what it is handed, which
+			// says the vectors are aligned
+			name: "pointer to a local handed to a helper",
+			functions: []Function{
+				{Name: "root", Lines: []Line{takeAddress, call("mix")}},
+				{Name: "mix", Internal: true, Lines: []Line{alignedLoad}},
+			},
+			want: []int{16, 0},
+		},
+		{
+			name: "frame the compiler aligned further",
+			functions: []Function{
+				{Name: "root", Lines: []Line{rewritten("and\trsp, -32", "NOP"), takeAddress, call("mix")}},
+				{Name: "mix", Internal: true, Lines: []Line{kept("vmovdqa\tymm0, ymmword ptr [rdi]")}},
+			},
+			want: []int{32, 0},
+		},
+		{
+			name: "frame of a helper",
+			functions: []Function{
+				{Name: "root", Lines: []Line{call("mid")}},
+				{Name: "mid", Internal: true, Lines: []Line{takeAddress, call("mix")}},
+				{Name: "mix", Internal: true, Lines: []Line{alignedLoad}},
+			},
+			want: []int{0, 16, 0},
+		},
+		{
+			name:      "address used within the function",
+			functions: []Function{{Name: "root", Lines: []Line{takeAddress, kept("paddq\txmm0, xmmword ptr [rdi + 8*rcx]")}}},
+			want:      []int{16},
+		},
+		{
+			name: "helper reads the pointer at any alignment",
+			functions: []Function{
+				{Name: "root", Lines: []Line{takeAddress, call("mix")}},
+				{Name: "mix", Internal: true, Lines: []Line{kept("movdqu\txmm1, xmmword ptr [rdi]"), kept("vpaddq\tymm0, ymm0, ymmword ptr [rdi]")}},
+			},
+			want: []int{0, 0},
+		},
+		{
+			// the pointer is the caller's, there is nothing of the frame to align
+			name:      "no address taken",
+			functions: []Function{{Name: "root", Lines: []Line{alignedLoad, rewritten("mov\tqword ptr [rsp + 8], rdi", "MOVQ DI, 0x8(SP)")}}},
+			want:      []int{0},
+		},
+		{
+			name: "another function's helper",
+			functions: []Function{
+				{Name: "root", Lines: []Line{takeAddress, call("plain")}},
+				{Name: "plain", Internal: true, Lines: []Line{kept("mov\trax, qword ptr [rdi]")}},
+				{Name: "other", Lines: []Line{call("mix")}},
+				{Name: "mix", Internal: true, Lines: []Line{alignedLoad}},
+			},
+			want: []int{0, 0, 0, 0},
+		},
+		{
+			name: "frame pointer",
+			functions: []Function{
+				{Name: "dropped", Lines: []Line{rewritten("mov\trbp, rsp", "NOP"), alignedLoad}},
+				{Name: "kept", Lines: []Line{rewritten("mov\trbp, rsp", "LEAQ 0(SP), BP"), kept("movaps\txmm0, xmmword ptr [rbp - 32]")}},
+			},
+			want: []int{0, 16},
+		},
+		{
+			name: "stack operands",
+			functions: []Function{
+				{Name: "rewrittenMove", Lines: []Line{rewritten("vmovdqa64\tzmmword ptr [rsp], zmm0", "VMOVDQU64 Z0, 0(SP)")}},
+				{Name: "keptMove", Lines: []Line{kept("vmovdqa64\tzmmword ptr [rsp], zmm0")}},
+				{Name: "unalignedMove", Lines: []Line{kept("movdqu\txmmword ptr [rsp + 3], xmm0")}},
+				{Name: "operand", Lines: []Line{rewritten("pshufb\txmm0, xmmword ptr [rsp + 16]", "PSHUFB 0x10(SP), X0")}},
+				{Name: "vexOperand", Lines: []Line{rewritten("vpshufb\tymm0, ymm0, ymmword ptr [rsp + 32]", "VPSHUFB 0x20(SP), Y0, Y0")}},
+				{Name: "nonTemporal", Lines: []Line{rewritten("vmovntdq\tymmword ptr [rsp + 32], ymm0", "VMOVNTDQ Y0, 0x20(SP)")}},
+			},
+			want: []int{0, 64, 0, 16, 0, 32},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, amd64StackAlignments(tc.functions))
+		})
+	}
+}

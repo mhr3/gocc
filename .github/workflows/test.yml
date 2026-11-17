@@ -48,10 +48,6 @@ jobs:
       - name: Regenerate e2e assembly
         working-directory: internal/asm/generated
         run: |
-          for src in testdata/*.c; do
-            flags=""
-            if grep -q "static" "$src"; then flags="--with-internal-functions"; fi
-            go run ../../../cmd/gocc "$src" -l --suffix _${{ matrix.arch }} --arch ${{ matrix.arch }} -O3 $flags
-          done
+          ./gen.sh ${{ matrix.arch }}
           git diff --stat
           go test ./...

@@ -180,11 +180,60 @@ func TestDataLoadRewrite(t *testing.T) {
 				{Disassembled: "VINSERTI128 $0x1, LCPI0_1<>(SB), Y1, Y0", Binary: nil},
 			},
 		},
+		{
+			// AVX-512 destinations and operands other than a register.
+			Name: "amd64-any-destination",
+			Cfg:  config.AMD64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "vpbroadcastq\tzmm1, qword ptr [rip + .LCPI2_1]", Disassembled: "VPBROADCASTQ 0x10, Z1"},
+					{Assembly: "kmovq\tk1, qword ptr [rip + .LCPI2_2]", Disassembled: "KMOVQ 0x18, K1"},
+					{Assembly: "cmp\tbyte ptr [rip + enabled], 0", Disassembled: "CMPB 0x1(IP), $0x0"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "VPBROADCASTQ LCPI2_1<>(SB), Z1", Binary: nil},
+				{Disassembled: "KMOVQ LCPI2_2<>(SB), K1", Binary: nil},
+				{Disassembled: "CMPB enabled<>(SB), $0x0", Binary: nil},
+			},
+		},
+		{
+			Name: "amd64-symbol-offset",
+			Cfg:  config.AMD64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "movdqa\txmm0, xmmword ptr [rip + table+16]", Disassembled: "MOVDQA 0x10(IP), X0"},
+					{Assembly: "vpaddq\tymm0, ymm1, ymmword ptr [rip + table - 32]", Disassembled: "VPADDQ 0x8, Y1, Y0"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "MOVO table<>+16(SB), X0", Binary: nil},
+				{Disassembled: "VPADDQ table<>-32(SB), Y1, Y0", Binary: nil},
+			},
+		},
+		{
+			// Go's linker aligns data to 32 bytes at most.
+			Name: "amd64-zmm-aligned-load",
+			Cfg:  config.AMD64(),
+			Func: Function{
+				Lines: []Line{
+					{Assembly: "vmovdqa64\tzmm1, zmmword ptr [rip + .LCPI2_0]", Disassembled: "VMOVDQA64 0x20, Z1"},
+					{Assembly: "vmovaps\tzmm0, zmmword ptr [rip + .LCPI4_0]", Disassembled: "VMOVAPS 0x40, Z0"},
+					{Assembly: "vmovdqa\tymm1, ymmword ptr [rip + .LCPI2_3]", Disassembled: "VMOVDQA 0x60, Y1"},
+				},
+			},
+			ExpectedLines: []Line{
+				{Disassembled: "VMOVDQU64 LCPI2_0<>(SB), Z1", Binary: nil},
+				{Disassembled: "VMOVUPS LCPI4_0<>(SB), Z0", Binary: nil},
+				{Disassembled: "VMOVDQA LCPI2_3<>(SB), Y1", Binary: nil},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
-			fn := rewriteJumpsAndLoads(tc.Cfg, tc.Func)
+			fn, err := rewriteJumpsAndLoads(tc.Cfg, tc.Func)
+			require.NoError(t, err)
 
 			require.Len(t, fn.Lines, len(tc.ExpectedLines))
 			for i, l := range tc.ExpectedLines {
@@ -197,6 +246,15 @@ func TestDataLoadRewrite(t *testing.T) {
 			}
 		})
 	}
+
+	// The displacement of such an instruction is a relocation, so its bytes
+	// cannot stand in for a Plan 9 form the decoder does not have.
+	t.Run("amd64-undecodable", func(t *testing.T) {
+		_, err := rewriteJumpsAndLoads(config.AMD64(), Function{Lines: []Line{
+			{Assembly: "vfancy\tzmm1, zmmword ptr [rip + .LCPI2_0]", Binary: binaryFromHex("62 f1 fd 48 6f 0d 00 00 00 00")},
+		}})
+		assert.ErrorContains(t, err, "LCPI2_0")
+	})
 }
 
 func TestTransformInstructions(t *testing.T) {

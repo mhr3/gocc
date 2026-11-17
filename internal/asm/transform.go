@@ -46,20 +46,21 @@ func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error
 
 // realignAmd64Roots makes a Go-visible AMD64 function realign SP when its
 // code, or the code of a helper it owns, depends on stack alignment that Go
-// does not provide (see amd64RequiredStackAlign). Writing SP marks the
-// function SPWRITE for the Go toolchain, which disables asynchronous
-// preemption inside it, so functions that do not need it are left alone.
+// does not provide (see amd64StackAlignments). Writing SP marks the
+// function SPWRITE for the Go toolchain, which ends tracebacks at it, so
+// functions that do not need it are left alone.
 // The prologue is emitted by Generate (after the argument loads); the
 // original SP is restored here before each return so the result store and
 // Go's own epilogue see the frame the assembler laid out.
 func realignAmd64Roots(functions []Function) []Function {
+	aligns := amd64StackAlignments(functions)
 	for i := range functions {
 		function := &functions[i]
 		if function.Internal {
 			continue
 		}
-		if required := amd64RequiredStackAlign(function); required > function.StackAlign {
-			function.StackAlign = required
+		if aligns[i] > function.StackAlign {
+			function.StackAlign = aligns[i]
 		}
 		if function.StackAlign == 0 {
 			continue
@@ -330,8 +331,11 @@ func transformFunction(arch *config.Arch, function Function) (Function, error) {
 	// Apply the transforms
 	function = expandTailCalls(function)
 	function = transformReturns(arch, function)
-	function = rewriteJumpsAndLoads(arch, function)
-	function, err := checkStackManipulation(arch, function)
+	function, err := rewriteJumpsAndLoads(arch, function)
+	if err != nil {
+		return function, fmt.Errorf("%s: %w", function.Name, err)
+	}
+	function, err = checkStackManipulation(arch, function)
 	if err != nil {
 		return function, fmt.Errorf("%s: %w", function.Name, err)
 	}
@@ -380,9 +384,9 @@ func transformReturns(_ *config.Arch, function Function) Function {
 	return function
 }
 
-func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
+func rewriteJumpsAndLoads(arch *config.Arch, function Function) (Function, error) {
 	if arch == nil {
-		return function
+		return function, nil
 	}
 
 	for i, line := range function.Lines {
@@ -405,7 +409,9 @@ func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
 		switch arch.Name {
 		case "amd64":
 			if arch.DataLoad.MatchString(combined) {
-				rewriteLoadAmd64(arch, function, line, combined, function.Lines[i:])
+				if err := rewriteLoadAmd64(arch, line, combined, function.Lines[i:]); err != nil {
+					return function, err
+				}
 			}
 		case "arm64":
 			if arch.DataLoad.MatchString(combined) {
@@ -414,7 +420,7 @@ func rewriteJumpsAndLoads(arch *config.Arch, function Function) Function {
 		}
 	}
 
-	return function
+	return function, nil
 }
 
 func checkStackManipulation(arch *config.Arch, function Function) (Function, error) {

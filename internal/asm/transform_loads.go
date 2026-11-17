@@ -19,11 +19,24 @@ var amd64RIPOperand = regexp.MustCompile(`(?:^|, )(-?(?:0x[0-9a-fA-F]+|[0-9]+)(?
 // to the constant the compiler placed there. Only that operand is touched:
 // the decoder's Plan 9 text keeps every other operand, including implicit
 // ones such as the X0 mask of PBLENDVB and immediates.
-func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string, lines []Line) {
+//
+// The compiler's encoding cannot be kept for such an instruction, because
+// its displacement is filled in by a relocation. One that has no Plan 9 form
+// is therefore an error.
+func rewriteLoadAmd64(arch *config.Arch, line Line, combined string, lines []Line) error {
 	reParams := getRegexpParams(arch.DataLoad, combined)
-	symbol := DataSymbolName(reParams["var"])
+	symbol := DataSymbolName(reParams["var"]) + "<>"
+	if offset := strings.ReplaceAll(reParams["offset"], " ", ""); offset != "" {
+		symbol += offset
+	}
 
 	op, operands, _ := strings.Cut(line.Disassembled, " ")
+	match := amd64RIPOperand.FindStringSubmatchIndex(operands)
+	if match == nil {
+		return fmt.Errorf("cannot translate %q: it refers to %s and has no Plan 9 form to carry the relocation", line.Assembly, reParams["var"])
+	}
+	operands = operands[:match[2]] + symbol + "(SB)" + operands[match[3]:]
+
 	switch op {
 	case "MOVDQA":
 		op = "MOVO"
@@ -33,16 +46,18 @@ func rewriteLoadAmd64(arch *config.Arch, _ Function, line Line, combined string,
 		// x86asm distinguishes the SSE move from the string instruction.
 		op = "MOVSD"
 	}
-	match := amd64RIPOperand.FindStringSubmatchIndex(operands)
-	if match == nil {
-		// Leave the line alone; amd64TrustDecoder keeps its encoding and the
-		// decoded text stays in the comment for inspection.
-		return
+	// The compiler aligns a 64-byte constant to 64 bytes and reads it with an
+	// aligned move. Go's linker aligns data symbols to 32 bytes at most
+	// (maxAlign in cmd/link), so that move has to be the unaligned one.
+	if strings.Contains(line.Assembly, "zmmword ptr") {
+		if unaligned, ok := amd64AlignedToUnaligned[op]; ok {
+			op = unaligned
+		}
 	}
-	operands = operands[:match[2]] + symbol + "<>(SB)" + operands[match[3]:]
 
 	lines[0].Disassembled = op + " " + operands
 	lines[0].Binary = nil
+	return nil
 }
 
 func rewriteLoadArm64(arch *config.Arch, _ Function, _ Line, combined string, lines []Line) {

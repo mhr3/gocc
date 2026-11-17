@@ -1760,33 +1760,158 @@ func helperCallDepths(functions []Function, rootIdx int, owners []int) (minDepth
 	return minDepth, maxDepth
 }
 
-// amd64EVEXAlignedStackMove matches 512-bit aligned moves with a stack
-// operand. They cannot be rewritten to unaligned forms (x86asm has no EVEX
-// support), so the stack must really be 64-byte aligned for them.
-var amd64EVEXAlignedStackMove = regexp.MustCompile(`^vmov(?:aps|apd|dqa(?:32|64)?)\s.*\bzmmword ptr \[rsp\b`)
+// amd64AlignedMoves are the vector moves that fault on a misaligned memory
+// operand whatever their encoding.
+var amd64AlignedMoves = map[string]bool{
+	"vmovaps": true, "vmovapd": true, "vmovdqa": true, "vmovdqa32": true, "vmovdqa64": true,
+	"vmovntdq": true, "vmovntdqa": true, "vmovntps": true, "vmovntpd": true,
+}
 
-// amd64RequiredStackAlign returns the stack alignment a function's code
-// depends on, or 0 when none of its instructions care. Aligned moves are
-// rewritten to their unaligned forms and do not count; legacy SSE
-// instructions with 128-bit stack operands fault on a misaligned stack and
-// do. Go only guarantees 8-byte alignment, so a non-zero result makes the
-// owning Go-visible function realign SP (see realignAmd64Roots).
-func amd64RequiredStackAlign(function *Function) int {
-	required := 0
-	archInfo := newAmd64StackInfo()
+// amd64UnalignedLegacy are the instructions without a VEX prefix that take
+// a 128-bit memory operand at any address. Every other one faults unless it
+// is 16-byte aligned.
+var amd64UnalignedLegacy = map[string]bool{
+	"movdqu": true, "movups": true, "movupd": true, "lddqu": true,
+	"pcmpestri": true, "pcmpestrm": true, "pcmpistri": true, "pcmpistrm": true,
+}
+
+var (
+	amd64VectorMemOperand = regexp.MustCompile(`\b([xyz])mmword ptr \[(\w+)`)
+	amd64MemOperand       = regexp.MustCompile(`\[[^\]]*\]`)
+	amd64CFrameAlign      = regexp.MustCompile(`^and\s+rsp, -(\d+)$`)
+)
+
+// amd64AlignedOperand returns the base register and the size of the memory
+// operand of an instruction, as the compiler wrote it, that faults unless
+// the operand is aligned to its size. The size is 0 for every other
+// instruction.
+func amd64AlignedOperand(assembly string) (base string, size int) {
+	fields := strings.Fields(assembly)
+	match := amd64VectorMemOperand.FindStringSubmatch(assembly)
+	if len(fields) == 0 || match == nil {
+		return "", 0
+	}
+	if mnemonic := fields[0]; strings.HasPrefix(mnemonic, "v") {
+		if !amd64AlignedMoves[mnemonic] {
+			return "", 0
+		}
+	} else if amd64UnalignedLegacy[mnemonic] {
+		return "", 0
+	}
+	return match[2], map[string]int{"x": 16, "y": 32, "z": 64}[match[1]]
+}
+
+// amd64StackUse is what a function's code assumes about its frame.
+type amd64StackUse struct {
+	// direct is the alignment its own stack operands need: the largest
+	// operand that has to be aligned and that the translation left so.
+	// Aligned moves rewritten to their unaligned forms do not count.
+	direct int
+	// indirect: it has an operand that must be aligned behind a pointer,
+	// which may point into a frame.
+	indirect bool
+	// takesAddress: it puts an address within its frame into a register.
+	takesAddress bool
+	// frameAlign is the alignment the C compiler gave the frame: 16 bytes
+	// by the ABI, more when it realigned the stack pointer itself.
+	frameAlign int
+}
+
+func amd64AnalyzeStackUse(function *Function) amd64StackUse {
+	use := amd64StackUse{frameAlign: 16}
+	unalignedMoves := make(map[string]bool, len(amd64AlignedToUnaligned))
+	for _, unaligned := range amd64AlignedToUnaligned {
+		unalignedMoves[unaligned] = true
+	}
+	sp := newAmd64StackInfo().SPRegex()
+
 	for _, line := range function.Lines {
-		switch {
-		case amd64EVEXAlignedStackMove.MatchString(line.Assembly):
-			if required < 64 {
-				required = 64
+		if match := amd64CFrameAlign.FindStringSubmatch(line.Assembly); match != nil {
+			if align, err := strconv.Atoi(match[1]); err == nil && align > use.frameAlign {
+				use.frameAlign = align
 			}
-		case amd64LegacySSEStackOperand.MatchString(line.Assembly):
-			if archInfo.ToUnalignedInsn(strings.ToUpper(strings.Fields(line.Assembly)[0])) == nil && required < 16 {
-				required = 16
+		}
+
+		switch base, size := amd64AlignedOperand(line.Assembly); {
+		case size == 0 || base == "rip":
+			// constants are aligned by the linker
+		case base != "rsp":
+			use.indirect = true
+		default:
+			emitted, _, _ := strings.Cut(line.Disassembled, " ")
+			if rewritten := len(line.Binary) == 0 && unalignedMoves[emitted]; !rewritten && size > use.direct {
+				use.direct = size
+			}
+		}
+
+		// A frame address in a register: RSP used as a value, or as part of
+		// the address LEA computes. Lines the translation dropped, and the
+		// ones that move the stack pointer itself, do not create one.
+		fields := strings.Fields(line.Assembly)
+		if len(fields) < 2 || line.Disassembled == "NOP" {
+			continue
+		}
+		operands := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line.Assembly), fields[0]))
+		if fields[0] != "lea" {
+			operands = amd64MemOperand.ReplaceAllString(operands, "")
+		}
+		if dest, _, _ := strings.Cut(operands, ","); strings.TrimSpace(dest) != "rsp" && sp.MatchString(operands) {
+			use.takesAddress = true
+		}
+	}
+	return use
+}
+
+// amd64StackAlignments returns, for every function, the alignment its frame
+// has to have, or 0 when the 8 bytes Go guarantees are enough. A non-zero
+// result makes the Go-visible function that owns the frame realign SP (see
+// realignAmd64Roots).
+//
+// A frame needs alignment for two reasons. Its function may have a stack
+// operand that must be aligned, which is the case for every instruction
+// without a VEX prefix that reads 128 bits. Or the address of something in
+// it may reach an instruction that assumes the alignment the C compiler gave
+// the frame: a helper handed a pointer to a local vector loads it with an
+// aligned move. That cannot be traced through the registers, so a frame
+// whose address is taken gets the compiler's alignment whenever the function
+// or anything it shares a call graph with has an aligned operand behind a
+// pointer.
+func amd64StackAlignments(functions []Function) []int {
+	uses := make([]amd64StackUse, len(functions))
+	byName := make(map[string]int, len(functions))
+	for i := range functions {
+		uses[i] = amd64AnalyzeStackUse(&functions[i])
+		byName[functions[i].Name] = i
+	}
+
+	aligns := make([]int, len(functions))
+	for root := range functions {
+		if functions[root].Internal {
+			continue
+		}
+		graph := []int{root}
+		seen := map[int]bool{root: true}
+		indirect := false
+		for next := 0; next < len(graph); next++ {
+			idx := graph[next]
+			indirect = indirect || uses[idx].indirect
+			for _, line := range functions[idx].Lines {
+				if target, ok := BranchTarget(line); ok {
+					if callee, exists := byName[target]; exists && functions[callee].Internal && !seen[callee] {
+						seen[callee] = true
+						graph = append(graph, callee)
+					}
+				}
+			}
+		}
+		for _, idx := range graph {
+			aligns[idx] = max(aligns[idx], uses[idx].direct)
+			if indirect && uses[idx].takesAddress {
+				aligns[idx] = max(aligns[idx], uses[idx].frameAlign)
 			}
 		}
 	}
-	return required
+	return aligns
 }
 
 func reserveInternalStackFrames(arch *config.Arch, functions []Function) ([]Function, error) {
@@ -1795,6 +1920,10 @@ func reserveInternalStackFrames(arch *config.Arch, functions []Function) ([]Func
 		return nil, err
 	}
 
+	var aligns []int
+	if arch.Name == "amd64" {
+		aligns = amd64StackAlignments(functions)
+	}
 	for rootIdx := range functions {
 		if functions[rootIdx].Internal {
 			continue
@@ -1841,7 +1970,7 @@ func reserveInternalStackFrames(arch *config.Arch, functions []Function) ([]Func
 				continue
 			}
 			helper := &functions[helperIdx]
-			required := amd64RequiredStackAlign(helper)
+			required := aligns[helperIdx]
 			if required > functions[rootIdx].StackAlign {
 				// The root's realigned SP is the base every helper slot is
 				// measured from, so it must satisfy the strictest helper.
@@ -1887,13 +2016,8 @@ func checkStackUnified(arch *config.Arch, function Function) (Function, error) {
 	return rewriteStackOps(arch, archInfo, layout, function), nil
 }
 
-// amd64LegacySSEStackOperand matches a non-VEX SSE instruction with a stack
-// memory operand. Unlike VEX/EVEX encodings, legacy SSE requires 16-byte
-// aligned memory operands, which a Go frame does not guarantee.
-var amd64LegacySSEStackOperand = regexp.MustCompile(`^[a-uw-z]\w*\s.*\bxmmword ptr \[rsp\b`)
-
 // warnStackAlignment reports stack alignment the fixed Go frame cannot
-// provide. AMD64 roots realign SP to whatever the compiler asked for (see
+// provide. AMD64 roots realign SP when their code depends on it (see
 // realignAmd64Roots); ARM64 RSP is 16-byte aligned and larger requests are
 // dropped, which is harmless for NEON/SVE but not for code that inspects
 // addresses.
