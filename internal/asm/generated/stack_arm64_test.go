@@ -5,8 +5,10 @@ import "github.com/mhr3/gocc/internal/asm/generated"
 // Go keeps the stack pointer 16-byte aligned.
 const stackPlacements = 4
 
+const variantNEON stackVariantID = iota
+
 var stackVariants = []stackVariant{
-	{name: "neon", width: 16, available: true},
+	{id: variantNEON, name: "neon", width: 16, available: true},
 }
 
 // stackKernel calls a fixture. The calls are direct ones so that the compiler
@@ -15,23 +17,23 @@ var stackVariants = []stackVariant{
 // moves between the caller and the fixture was moved by the fixture.
 //
 //go:nosplit
-func stackKernel(_, fixture int, data []byte) uint64 {
+func stackKernel(_ stackVariantID, fixture stackFixtureID, data []byte) uint64 {
 	switch fixture {
-	case 0:
+	case fixtureSpill:
 		return generated.Stack_spill_neon(data)
-	case 1:
+	case fixtureOperand:
 		return generated.Stack_operand_neon(data)
-	case 2:
+	case fixtureSelect:
 		return generated.Stack_select_neon(data)
-	case 3:
+	case fixtureConsts:
 		return generated.Stack_consts_neon(data)
-	case 4:
+	case fixturePointer:
 		return generated.Stack_pointer_neon(data)
-	case 5:
+	case fixtureWalk:
 		return generated.Stack_walk_neon(data)
-	case 6:
+	case fixtureOveraligned:
 		return generated.Stack_overaligned_neon(data)
-	case 7:
+	case fixtureFrame:
 		return generated.Stack_frame_neon(data)
 	}
 	panic("no such fixture")

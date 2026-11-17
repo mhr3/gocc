@@ -20,16 +20,35 @@ import (
 // runs the functions with the stack pointer at every alignment and next to
 // the end of the stack, where entering them makes the stack grow and move.
 
+// stackVariantID names a translation of test_stack.c, which is to say an
+// instruction set. The architecture files define the ones they have.
+type stackVariantID int
+
 // stackVariant is one translation of test_stack.c.
 type stackVariant struct {
+	id        stackVariantID
 	name      string
 	width     int  // bytes in a vector
 	available bool // whether this machine can run it
 }
 
-// stackFixture is one function of test_stack.c with its Go equivalent. The
-// position in stackFixtures is the index the architecture files dispatch on.
+// stackFixtureID names a function of test_stack.c.
+type stackFixtureID int
+
+const (
+	fixtureSpill stackFixtureID = iota
+	fixtureOperand
+	fixtureSelect
+	fixtureConsts
+	fixturePointer
+	fixtureWalk
+	fixtureOveraligned
+	fixtureFrame
+)
+
+// stackFixture is one function of test_stack.c with its Go equivalent.
 type stackFixture struct {
+	id   stackFixtureID
 	name string
 	ref  func(data []byte, width int) uint64
 	// grows: the function checks the stack on every instruction set, so
@@ -39,14 +58,14 @@ type stackFixture struct {
 }
 
 var stackFixtures = []stackFixture{
-	{"spill", refSpill, false},
-	{"operand", refOperand, false},
-	{"select", refSelect, false},
-	{"consts", refConsts, false},
-	{"pointer", refPointer, true},
-	{"walk", refWalk, true},
-	{"overaligned", refOveraligned, true},
-	{"frame", refFrame, true},
+	{fixtureSpill, "spill", refSpill, false},
+	{fixtureOperand, "operand", refOperand, false},
+	{fixtureSelect, "select", refSelect, false},
+	{fixtureConsts, "consts", refConsts, false},
+	{fixturePointer, "pointer", refPointer, true},
+	{fixtureWalk, "walk", refWalk, true},
+	{fixtureOveraligned, "overaligned", refOveraligned, true},
+	{fixtureFrame, "frame", refFrame, true},
 }
 
 var stackK = [8]uint64{
@@ -216,8 +235,9 @@ const stackInputMax = 320
 
 // stackCall is one call of a fixture at the bottom of a chain of frames.
 type stackCall struct {
-	variant, fixture int
-	data             []byte
+	variant stackVariantID
+	fixture stackFixtureID
+	data    []byte
 	// onStack has the input copied into the frame that calls the fixture,
 	// which leaves the runtime to relocate its argument when the stack moves.
 	onStack bool
@@ -341,14 +361,14 @@ func stackInputs(width int) [][]byte {
 }
 
 func TestStackFixtures(t *testing.T) {
-	for v, variant := range stackVariants {
+	for _, variant := range stackVariants {
 		t.Run(variant.name, func(t *testing.T) {
 			if !variant.available {
 				t.Skipf("this machine cannot run %s code", variant.name)
 			}
 			inputs := stackInputs(variant.width)
 
-			for f, fixture := range stackFixtures {
+			for _, fixture := range stackFixtures {
 				t.Run(fixture.name, func(t *testing.T) {
 					var calls, moves int
 					aligns := map[uintptr]bool{}
@@ -362,7 +382,7 @@ func TestStackFixtures(t *testing.T) {
 
 							for _, data := range inputs {
 								for _, onStack := range []bool{false, true} {
-									c := stackCall{variant: v, fixture: f, data: data, onStack: onStack}
+									c := stackCall{variant: variant.id, fixture: fixture.id, data: data, onStack: onStack}
 									c.run(layout)
 
 									where := fmt.Sprintf("%d bytes, on stack: %v, below %d frames of kind %d", len(data), onStack, depth, kind)
