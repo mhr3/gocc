@@ -195,6 +195,9 @@ func (t *Local) Translate() error {
 	// apply the function suffix, this needs to be done after the mapping
 	for i := range functions {
 		functions[i].GoFunc.Name += t.FuncSuffix
+		for j := range functions[i].Aliases {
+			functions[i].Aliases[j].Name += t.FuncSuffix
+		}
 	}
 
 	meta := asm.GeneratorMeta{

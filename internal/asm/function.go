@@ -26,6 +26,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/mhr3/gocc/internal/config"
 )
@@ -44,6 +46,30 @@ var constSizes = map[string]int{
 type GoFunction struct {
 	Name string
 	Expr *ast.FuncType
+}
+
+// GoAlias is a second Go entry point for a function, declared with a
+// gocc-alias directive. Its signature is the function's own with some []byte
+// parameters taken as strings instead.
+//
+// A string is one word shorter than a slice, so the alias cannot share the
+// function's frame as it is. Its assembly entry point is therefore declared
+// with a blank int after each such string, which makes the two frames
+// identical and lets the entry point simply jump to the function. A Go
+// wrapper with the signature the user asked for fills that word with the
+// length of the string, so the C code sees a slice whose capacity equals its
+// length.
+type GoAlias struct {
+	GoFunction
+	// Padded reports, for each parameter, whether it is a string standing in
+	// for a []byte of the function.
+	Padded []bool
+}
+
+// InternalName is the name of the padded assembly entry point.
+func (a *GoAlias) InternalName() string {
+	first, size := utf8.DecodeRuneInString(a.Name)
+	return string(unicode.ToLower(first)) + a.Name[size:] + "Internal"
 }
 
 // ------------------------------------- Function -------------------------------------
@@ -66,6 +92,7 @@ type Function struct {
 	StackAlign int    `json:"stackAlign,omitempty"`
 	Ret        *Param `json:"return,omitempty"`
 	GoFunc     GoFunction
+	Aliases    []GoAlias
 }
 
 func (f *GoFunction) NumResults() int {
@@ -128,39 +155,35 @@ func (f *Function) ParamsSize(arch *config.Arch) (int, []int) {
 	return offset, offsets
 }
 
-// String returns the function signature for a Go stub
-func (f *Function) String() string {
-	if f.GoFunc.Expr == nil {
-		// should probably panic
-		return "/* no Go function */"
-	}
-
-	var builder strings.Builder
-
-	builder.WriteString("\n//go:noescape\n")
-	builder.WriteString(fmt.Sprintf("func %s(", f.GoFunc.Name))
+// writeSignature writes "func name(params) results". A parameter flagged in
+// padded is followed by a blank int.
+func (f *GoFunction) writeSignature(builder *strings.Builder, name string, padded []bool) {
+	fmt.Fprintf(builder, "func %s(", name)
 	paramIdx := 0
-	f.GoFunc.ForEachParam(func(name, typ string) {
+	f.ForEachParam(func(name, typ string) {
 		if paramIdx > 0 {
 			builder.WriteString(", ")
 		}
 		builder.WriteString(name)
 		builder.WriteByte(' ')
 		builder.WriteString(typ)
+		if paramIdx < len(padded) && padded[paramIdx] {
+			builder.WriteString(", _ int")
+		}
 		paramIdx++
 	})
 	builder.WriteString(")")
-	switch f.GoFunc.NumResults() {
+	switch f.NumResults() {
 	case 0:
 	case 1:
 		builder.WriteByte(' ')
-		f.GoFunc.ForEachResult(func(_, typ string) {
+		f.ForEachResult(func(_, typ string) {
 			builder.WriteString(typ)
 		})
 	default:
 		builder.WriteString(" (")
 		resultIdx := 0
-		f.GoFunc.ForEachResult(func(name, typ string) {
+		f.ForEachResult(func(name, typ string) {
 			if resultIdx > 0 {
 				builder.WriteString(", ")
 			}
@@ -171,7 +194,56 @@ func (f *Function) String() string {
 		})
 		builder.WriteString(")")
 	}
+}
+
+// writeStub writes the Go wrapper of an alias of target and the declaration
+// of the assembly entry point it calls.
+func (a *GoAlias) writeStub(builder *strings.Builder, target string) {
+	internal := a.InternalName()
+
+	fmt.Fprintf(builder, "\n// %s is %s for string arguments.\n", a.Name, target)
+	a.writeSignature(builder, a.Name, nil)
+	builder.WriteString(" {\n\t")
+	if a.NumResults() > 0 {
+		builder.WriteString("return ")
+	}
+	builder.WriteString(internal)
+	builder.WriteByte('(')
+	paramIdx := 0
+	a.ForEachParam(func(name, _ string) {
+		if paramIdx > 0 {
+			builder.WriteString(", ")
+		}
+		builder.WriteString(name)
+		if a.Padded[paramIdx] {
+			fmt.Fprintf(builder, ", len(%s)", name)
+		}
+		paramIdx++
+	})
+	builder.WriteString(")\n}\n")
+
+	fmt.Fprintf(builder, "\n// %s jumps to %s.\n", internal, target)
+	builder.WriteString("// The int after a string takes the place of the capacity of the []byte it\n")
+	builder.WriteString("// stands for, which gives both functions the same frame.\n//\n//go:noescape\n")
+	a.writeSignature(builder, internal, a.Padded)
 	builder.WriteByte('\n')
+}
+
+// String returns the Go stub of the function and of its aliases.
+func (f *Function) String() string {
+	if f.GoFunc.Expr == nil {
+		// should probably panic
+		return "/* no Go function */"
+	}
+
+	var builder strings.Builder
+
+	builder.WriteString("\n//go:noescape\n")
+	f.GoFunc.writeSignature(&builder, f.GoFunc.Name, nil)
+	builder.WriteByte('\n')
+	for i := range f.Aliases {
+		f.Aliases[i].writeStub(&builder, f.GoFunc.Name)
+	}
 	return builder.String()
 }
 

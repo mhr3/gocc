@@ -36,3 +36,60 @@ func Test_fn_888888_8(a int, b int, c int, d int, e int, f int) int
 
 //go:noescape
 func Test_fn_sq_floats(input []float32, output []float32)
+
+//go:noescape
+func Test_fn_sum_bytes(data []byte, bias int) int
+
+// Test_fn_sum_string is Test_fn_sum_bytes for string arguments.
+func Test_fn_sum_string(data string, bias int) int {
+	return test_fn_sum_stringInternal(data, len(data), bias)
+}
+
+// test_fn_sum_stringInternal jumps to Test_fn_sum_bytes.
+// The int after a string takes the place of the capacity of the []byte it
+// stands for, which gives both functions the same frame.
+//
+//go:noescape
+func test_fn_sum_stringInternal(data string, _ int, bias int) int
+
+//go:noescape
+func Test_fn_mismatch_bytes(a []byte, b []byte) int
+
+// Test_fn_mismatch_strings is Test_fn_mismatch_bytes for string arguments.
+func Test_fn_mismatch_strings(a string, b string) int {
+	return test_fn_mismatch_stringsInternal(a, len(a), b, len(b))
+}
+
+// test_fn_mismatch_stringsInternal jumps to Test_fn_mismatch_bytes.
+// The int after a string takes the place of the capacity of the []byte it
+// stands for, which gives both functions the same frame.
+//
+//go:noescape
+func test_fn_mismatch_stringsInternal(a string, _ int, b string, _ int) int
+
+// Test_fn_mismatch_bytes_string is Test_fn_mismatch_bytes for string arguments.
+func Test_fn_mismatch_bytes_string(a []byte, b string) int {
+	return test_fn_mismatch_bytes_stringInternal(a, b, len(b))
+}
+
+// test_fn_mismatch_bytes_stringInternal jumps to Test_fn_mismatch_bytes.
+// The int after a string takes the place of the capacity of the []byte it
+// stands for, which gives both functions the same frame.
+//
+//go:noescape
+func test_fn_mismatch_bytes_stringInternal(a []byte, b string, _ int) int
+
+//go:noescape
+func Test_fn_shift_bytes(dst []byte, src []byte)
+
+// Test_fn_shift_string is Test_fn_shift_bytes for string arguments.
+func Test_fn_shift_string(dst []byte, src string) {
+	test_fn_shift_stringInternal(dst, src, len(src))
+}
+
+// test_fn_shift_stringInternal jumps to Test_fn_shift_bytes.
+// The int after a string takes the place of the capacity of the []byte it
+// stands for, which gives both functions the same frame.
+//
+//go:noescape
+func test_fn_shift_stringInternal(dst []byte, src string, _ int)

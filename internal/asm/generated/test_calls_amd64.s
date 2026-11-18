@@ -271,6 +271,23 @@ TEXT ·Test_calls_local_pointer(SB), 0, $296-16
 	MOVQ   AX, ret+8(FP)      // <--
 	RET                       // <--                                  // ret
 
+TEXT ·Test_calls_big_frame_bytes(SB), 0, $32800-32
+	NO_LOCAL_POINTERS
+	MOVQ p_base+0(FP), DI
+	MOVQ p_len+8(FP), SI
+	MOVQ p_cap+16(FP), DX
+	MOVQ BX, 0(SP)                             // <--                                  // push	rbx
+	MOVQ DX, BX                                // <--                                  // mov	rbx, rdx
+	CALL big_frame_bytes_helper<>(SB)          // <--                                  // call	big_frame_bytes_helper
+	LONG $0x43cb6948; WORD $0x0f42; BYTE $0x00 // IMULQ $0xf4243, BX, CX               // imul	rcx, rbx, 1000003
+	ADDQ CX, AX                                // <--                                  // add	rax, rcx
+	MOVQ 0(SP), BX                             // <--                                  // pop	rbx
+	MOVQ AX, ret+24(FP)                        // <--
+	RET                                        // <--                                  // ret
+
+TEXT ·test_calls_big_frame_stringInternal(SB), NOSPLIT|NOFRAME, $0-32
+	JMP ·Test_calls_big_frame_bytes(SB)
+
 // internal function, its stack space has been flattened into its caller's frame
 TEXT mix_with_locals<>(SB), NOSPLIT|NOFRAME, $0-0
 	MOVQ  R15, 216(SP)  // <--                                  // push	r15
@@ -592,17 +609,81 @@ TEXT fill_squares<>(SB), NOSPLIT|NOFRAME, $0-0
 	MOVQ SI, 0xf8(DI)  // <--                                  // mov	qword ptr [rdi + 248], rsi
 	RET                // <--                                  // ret
 
-DATA LCPI10_0<>+0x00(SB)/8, $0x0000000000000000
-DATA LCPI10_0<>+0x08(SB)/8, $0x0000000000000001
-GLOBL LCPI10_0<>(SB), (RODATA|NOPTR), $16
+// internal function, its stack space has been flattened into its caller's frame
+TEXT big_frame_bytes_helper<>(SB), NOSPLIT|NOFRAME, $0-0
+	NOP          // (skipped)                            // sub	rsp, 32776
+	XORL AX, AX  // <--                                  // xor	eax, eax
+	JMP  LBB11_1 // <--                                  // jmp	.LBB11_1
 
-DATA LCPI10_1<>+0x00(SB)/8, $0x0000000000000003
-DATA LCPI10_1<>+0x08(SB)/8, $0x0000000000000003
-GLOBL LCPI10_1<>(SB), (RODATA|NOPTR), $16
+LBB11_6:
+	LONG $0x0754b60f; BYTE $0x01 // MOVZX 0x1(DI)(AX*1), DX              // movzx	edx, byte ptr [rdi + rax + 1]
 
-DATA LCPI10_2<>+0x00(SB)/8, $0x0000000000000004
-DATA LCPI10_2<>+0x08(SB)/8, $0x0000000000000004
-GLOBL LCPI10_2<>(SB), (RODATA|NOPTR), $16
+LBB11_7:
+	MOVB DL, 25(SP)(AX*1) // <--                                  // mov	byte ptr [rsp + rax + 1], dl
+	INCQ CX               // <--                                  // inc	rcx
+	MOVQ CX, AX           // <--                                  // mov	rax, rcx
+	CMPQ CX, $0x8000      // <--                                  // cmp	rcx, 32768
+	JE   LBB11_8          // <--                                  // je	.LBB11_8
+
+LBB11_1:
+	CMPQ AX, SI           // <--                                  // cmp	rax, rsi
+	JGE  LBB11_3          // <--                                  // jge	.LBB11_3
+	LONG $0x070cb60f      // MOVZX 0(DI)(AX*1), CX                // movzx	ecx, byte ptr [rdi + rax]
+	MOVB CL, 24(SP)(AX*1) // <--                                  // mov	byte ptr [rsp + rax], cl
+	LEAQ 0x1(AX), CX      // <--                                  // lea	rcx, [rax + 1]
+	CMPQ CX, SI           // <--                                  // cmp	rcx, rsi
+	JL   LBB11_6          // <--                                  // jl	.LBB11_6
+	JMP  LBB11_5          // <--                                  // jmp	.LBB11_5
+
+LBB11_3:
+	MOVL AX, CX           // <--                                  // mov	ecx, eax
+	MOVB CL, 24(SP)(AX*1) // <--                                  // mov	byte ptr [rsp + rax], cl
+	LEAQ 0x1(AX), CX      // <--                                  // lea	rcx, [rax + 1]
+	CMPQ CX, SI           // <--                                  // cmp	rcx, rsi
+	JL   LBB11_6          // <--                                  // jl	.LBB11_6
+
+LBB11_5:
+	LEAL 0x1(AX), DX // <--                                  // lea	edx, [rax + 1]
+	JMP  LBB11_7     // <--                                  // jmp	.LBB11_7
+
+LBB11_8:
+	MOVL $0x7, CX // <--                                  // mov	ecx, 7
+	XORL AX, AX   // <--                                  // xor	eax, eax
+
+LBB11_9:
+	LONG $0x0c54b60f; BYTE $0x11 // MOVZX 17(SP)(CX*1), DX               // movzx	edx, byte ptr [rsp + rcx - 7]
+	ADDQ AX, DX                  // <--                                  // add	rdx, rax
+	LONG $0x0c44b60f; BYTE $0x12 // MOVZX 18(SP)(CX*1), AX               // movzx	eax, byte ptr [rsp + rcx - 6]
+	LONG $0x0c74b60f; BYTE $0x13 // MOVZX 19(SP)(CX*1), SI               // movzx	esi, byte ptr [rsp + rcx - 5]
+	ADDQ AX, SI                  // <--                                  // add	rsi, rax
+	ADDQ DX, SI                  // <--                                  // add	rsi, rdx
+	LONG $0x0c44b60f; BYTE $0x14 // MOVZX 20(SP)(CX*1), AX               // movzx	eax, byte ptr [rsp + rcx - 4]
+	LONG $0x0c54b60f; BYTE $0x15 // MOVZX 21(SP)(CX*1), DX               // movzx	edx, byte ptr [rsp + rcx - 3]
+	ADDQ AX, DX                  // <--                                  // add	rdx, rax
+	LONG $0x0c7cb60f; BYTE $0x16 // MOVZX 22(SP)(CX*1), DI               // movzx	edi, byte ptr [rsp + rcx - 2]
+	ADDQ DX, DI                  // <--                                  // add	rdi, rdx
+	ADDQ SI, DI                  // <--                                  // add	rdi, rsi
+	LONG $0x0c54b60f; BYTE $0x17 // MOVZX 23(SP)(CX*1), DX               // movzx	edx, byte ptr [rsp + rcx - 1]
+	LONG $0x0c44b60f; BYTE $0x18 // MOVZX 24(SP)(CX*1), AX               // movzx	eax, byte ptr [rsp + rcx]
+	ADDQ DX, AX                  // <--                                  // add	rax, rdx
+	ADDQ DI, AX                  // <--                                  // add	rax, rdi
+	ADDQ $0x8, CX                // <--                                  // add	rcx, 8
+	CMPQ CX, $0x8007             // <--                                  // cmp	rcx, 32775
+	JNE  LBB11_9                 // <--                                  // jne	.LBB11_9
+	NOP                          // (skipped)                            // add	rsp, 32776
+	RET                          // <--                                  // ret
+
+DATA LCPI12_0<>+0x00(SB)/8, $0x0000000000000000
+DATA LCPI12_0<>+0x08(SB)/8, $0x0000000000000001
+GLOBL LCPI12_0<>(SB), (RODATA|NOPTR), $16
+
+DATA LCPI12_1<>+0x00(SB)/8, $0x0000000000000003
+DATA LCPI12_1<>+0x08(SB)/8, $0x0000000000000003
+GLOBL LCPI12_1<>(SB), (RODATA|NOPTR), $16
+
+DATA LCPI12_2<>+0x00(SB)/8, $0x0000000000000004
+DATA LCPI12_2<>+0x08(SB)/8, $0x0000000000000004
+GLOBL LCPI12_2<>(SB), (RODATA|NOPTR), $16
 
 DATA scale_table_tbl<>+0x00(SB)/8, $0x3ff3c083126e978d
 DATA scale_table_tbl<>+0x08(SB)/8, $0x4002c3c9eecbfb16
@@ -613,29 +694,29 @@ GLOBL scale_table_tbl<>(SB), (RODATA|NOPTR), $32
 // internal function, its stack space has been flattened into its caller's frame
 TEXT weighted_sum<>(SB), NOSPLIT|NOFRAME, $0-0
 	TESTQ SI, SI   // <--                                  // test	rsi, rsi
-	JLE   LBB10_1  // <--                                  // jle	.LBB10_1
+	JLE   LBB12_1  // <--                                  // jle	.LBB12_1
 	CMPQ  SI, $0x4 // <--                                  // cmp	rsi, 4
-	JAE   LBB10_5  // <--                                  // jae	.LBB10_5
+	JAE   LBB12_5  // <--                                  // jae	.LBB12_5
 	XORL  CX, CX   // <--                                  // xor	ecx, ecx
 	XORL  AX, AX   // <--                                  // xor	eax, eax
-	JMP   LBB10_8  // <--                                  // jmp	.LBB10_8
+	JMP   LBB12_8  // <--                                  // jmp	.LBB12_8
 
-LBB10_1:
+LBB12_1:
 	XORL AX, AX // <--                                  // xor	eax, eax
 	RET         // <--                                  // ret
 
-LBB10_5:
+LBB12_5:
 	MOVQ SI, CX             // <--                                  // mov	rcx, rsi
 	ANDQ $-0x4, CX          // <--                                  // and	rcx, -4
 	PXOR X0, X0             // <--                                  // pxor	xmm0, xmm0
-	MOVO LCPI10_0<>(SB), X1 // <--                                  // movdqa	xmm1, xmmword ptr [rip + .LCPI10_0]
+	MOVO LCPI12_0<>(SB), X1 // <--                                  // movdqa	xmm1, xmmword ptr [rip + .LCPI12_0]
 	XORL AX, AX             // <--                                  // xor	eax, eax
 	LONG $0xd2760f66        // PCMPEQD X2, X2                       // pcmpeqd	xmm2, xmm2
-	MOVO LCPI10_1<>(SB), X4 // <--                                  // movdqa	xmm4, xmmword ptr [rip + .LCPI10_1]
-	MOVO LCPI10_2<>(SB), X5 // <--                                  // movdqa	xmm5, xmmword ptr [rip + .LCPI10_2]
+	MOVO LCPI12_1<>(SB), X4 // <--                                  // movdqa	xmm4, xmmword ptr [rip + .LCPI12_1]
+	MOVO LCPI12_2<>(SB), X5 // <--                                  // movdqa	xmm5, xmmword ptr [rip + .LCPI12_2]
 	PXOR X3, X3             // <--                                  // pxor	xmm3, xmm3
 
-LBB10_6:
+LBB12_6:
 	LONG   $0x6f0f44f3; WORD $0xc704 // MOVDQU 0(DI)(AX*8), X8               // movdqu	xmm8, xmmword ptr [rdi + 8*rax]
 	LONG   $0x746f0ff3; WORD $0x10c7 // MOVDQU 0x10(DI)(AX*8), X6            // movdqu	xmm6, xmmword ptr [rdi + 8*rax + 16]
 	LONG   $0x6f0f4466; BYTE $0xc9   // MOVDQA X1, X9                        // movdqa	xmm9, xmm1
@@ -667,19 +748,19 @@ LBB10_6:
 	ADDQ   $0x4, AX                  // <--                                  // add	rax, 4
 	PADDQ  X5, X1                    // <--                                  // paddq	xmm1, xmm5
 	CMPQ   CX, AX                    // <--                                  // cmp	rcx, rax
-	JNE    LBB10_6                   // <--                                  // jne	.LBB10_6
+	JNE    LBB12_6                   // <--                                  // jne	.LBB12_6
 	PADDQ  X0, X3                    // <--                                  // paddq	xmm3, xmm0
 	PSHUFD $0xee, X3, X0             // <--                                  // pshufd	xmm0, xmm3, 238
 	PADDQ  X3, X0                    // <--                                  // paddq	xmm0, xmm3
 	MOVQ   X0, AX                    // <--                                  // movq	rax, xmm0
 	CMPQ   CX, SI                    // <--                                  // cmp	rcx, rsi
-	JE     LBB10_2                   // <--                                  // je	.LBB10_2
+	JE     LBB12_2                   // <--                                  // je	.LBB12_2
 
-LBB10_8:
+LBB12_8:
 	NEGQ SI // <--                                  // neg	rsi
 	INCQ CX // <--                                  // inc	rcx
 
-LBB10_9:
+LBB12_9:
 	MOVQ  -0x8(DI)(CX*8), DX // <--                                  // mov	rdx, qword ptr [rdi + 8*rcx - 8]
 	IMULQ CX, DX             // <--                                  // imul	rdx, rcx
 	ADDQ  DX, AX             // <--                                  // add	rax, rdx
@@ -687,7 +768,7 @@ LBB10_9:
 	INCQ  DX                 // <--                                  // inc	rdx
 	INCQ  CX                 // <--                                  // inc	rcx
 	CMPQ  DX, $0x1           // <--                                  // cmp	rdx, 1
-	JNE   LBB10_9            // <--                                  // jne	.LBB10_9
+	JNE   LBB12_9            // <--                                  // jne	.LBB12_9
 
-LBB10_2:
+LBB12_2:
 	RET // <--                                  // ret

@@ -58,3 +58,35 @@ void test_fn_sq_floats(float *input, long input_len, long input_cap, float *outp
         output[i] = input[i] * input[i];
     }
 }
+
+// The aliases enter the same code with strings in place of byte slices; the
+// capacity word of such an argument then holds its length.
+// gocc: Test_fn_sum_bytes(data []byte, bias int) int
+// gocc-alias: Test_fn_sum_string(data string, bias int) int
+long test_fn_sum_bytes(unsigned char *data, long data_len, long data_cap, long bias) {
+    long sum = bias + data_cap * 1000003;
+    for (long i = 0; i < data_len; i++) {
+        sum += data[i];
+    }
+    return sum;
+}
+
+// gocc: Test_fn_mismatch_bytes(a, b []byte) int
+// gocc-alias: Test_fn_mismatch_strings(a, b string) int
+// gocc-alias: Test_fn_mismatch_bytes_string(a []byte, b string) int
+long test_fn_mismatch_bytes(unsigned char *a, long a_len, long a_cap, unsigned char *b, long b_len, long b_cap) {
+    long n = a_len < b_len ? a_len : b_len;
+    long i = 0;
+    while (i < n && a[i] == b[i]) {
+        i++;
+    }
+    return i + a_cap * 1000 + b_cap * 1000000;
+}
+
+// gocc: Test_fn_shift_bytes(dst []byte, src []byte)
+// gocc-alias: Test_fn_shift_string(dst []byte, src string)
+void test_fn_shift_bytes(unsigned char *dst, long dst_len, long dst_cap, unsigned char *src, long src_len, long src_cap) {
+    for (long i = 0; i < src_len && i < dst_len; i++) {
+        dst[i] = src[i] + (unsigned char)src_cap;
+    }
+}

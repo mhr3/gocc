@@ -161,3 +161,52 @@ func TestCallsLocalPointer(t *testing.T) {
 	}
 	assert.Equal(t, want, generated.Test_calls_local_pointer(7))
 }
+
+func TestAliasString(t *testing.T) {
+	data := append(make([]byte, 0, 64), "hello"...)
+	sum := 7
+	for _, c := range data {
+		sum += int(c)
+	}
+
+	// The function sees the capacity of a slice, and the length in its place
+	// when it is entered through the string alias.
+	assert.Equal(t, sum+64*1000003, generated.Test_fn_sum_bytes(data, 7))
+	assert.Equal(t, sum+5*1000003, generated.Test_fn_sum_string("hello", 7))
+}
+
+func TestAliasMixedParams(t *testing.T) {
+	a := append(make([]byte, 0, 32), "gopher"...)
+	b := append(make([]byte, 0, 16), "gophex!"...)
+
+	assert.Equal(t, 5+32*1000+16*1000000, generated.Test_fn_mismatch_bytes(a, b))
+	assert.Equal(t, 5+6*1000+7*1000000, generated.Test_fn_mismatch_strings("gopher", "gophex!"))
+	assert.Equal(t, 5+32*1000+7*1000000, generated.Test_fn_mismatch_bytes_string(a, "gophex!"))
+}
+
+func TestAliasVoidResult(t *testing.T) {
+	dst := make([]byte, 3)
+
+	generated.Test_fn_shift_bytes(dst, append(make([]byte, 0, 16), "abc"...))
+	assert.Equal(t, "qrs", string(dst))
+	generated.Test_fn_shift_string(dst, "abc")
+	assert.Equal(t, "def", string(dst))
+}
+
+func TestCallsAliasGrowsStack(t *testing.T) {
+	s := "stack"
+	want := int64(len(s)) * 1000003
+	for i := range 32768 {
+		if i < len(s) {
+			want += int64(s[i])
+		} else {
+			want += int64(uint8(i))
+		}
+	}
+
+	// A new goroutine starts with a stack smaller than the frame of the
+	// function the alias jumps to.
+	got := make(chan int64)
+	go func() { got <- generated.Test_calls_big_frame_string(s) }()
+	assert.Equal(t, want, <-got)
+}
