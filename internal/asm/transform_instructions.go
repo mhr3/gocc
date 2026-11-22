@@ -161,7 +161,7 @@ var arm64AssemblableMnemonics = map[string]bool{
 	// NEON
 	"VADD": true, "VSUB": true, "VMUL": true, "VMLA": true, "VMLS": true, "VNEG": true, "VABS": true,
 	"VAND": true, "VORR": true, "VORN": true, "VEOR": true, "VBIC": true, "VBSL": true, "VBIT": true, "VBIF": true,
-	"VMOV": true, "VDUP": true, "VEXT": true, "VTBL": true, "VTBX": true,
+	"VMOV": true, "VMOVI": true, "VDUP": true, "VEXT": true, "VTBL": true, "VTBX": true,
 	"VCNT": true, "VCLS": true, "VCLZ": true, "VRBIT": true, "VREV16": true, "VREV32": true, "VREV64": true,
 	"VSHL": true, "VUSHR": true, "VSSHR": true, "VUSHL": true, "VSSHL": true, "VSLI": true, "VSRI": true, "VUSRA": true, "VSRSHR": true,
 	"VUSHLL": true, "VUSHLL2": true, "VUXTL": true, "VUXTL2": true, "VSXTL": true, "VSXTL2": true,
@@ -221,11 +221,16 @@ func arm64TrustDecoder(line Line) bool {
 		return false
 	case strings.HasPrefix(mnemonic, "V") && strings.HasPrefix(operands, "$"):
 		// Immediate forms are assemblable for shifts and zero compares;
-		// MOVI, ORR/BIC with immediate and FCM* against zero are not.
+		// ORR/BIC with immediate and FCM* against zero are not.
 		switch mnemonic {
 		case "VSHL", "VUSHR", "VSSHR", "VSLI", "VSRI", "VUSRA", "VSRSHR", "VUSHLL", "VUSHLL2", "VSHRN", "VSHRN2", "VEXT",
 			"VCMEQ", "VCMGT", "VCMGE", "VCMLT", "VCMLE":
 			return true
+		case "VMOVI":
+			// cmd/asm only has the byte form (movi v0.16b, #imm8). It rejects
+			// the wider elements, their shifted immediates and the 64-bit
+			// byte mask, all of which GoSyntax spells the same way.
+			return strings.HasSuffix(operands, ".B8") || strings.HasSuffix(operands, ".B16")
 		}
 		return false
 	case (mnemonic == "VFCVTN" || mnemonic == "VFCVTN2" || mnemonic == "VFCVTL" || mnemonic == "VFCVTL2") && strings.Contains(operands, ".H"):
