@@ -432,6 +432,14 @@ frintx d0, d1
 frinti d0, d1
 movi v0.2d, #0
 movi v0.16b, #1
+movi v0.16b, #0
+movi v31.16b, #0xff
+movi v0.8b, #0x80
+movi v7.8b, #15
+movi v0.4h, #1
+movi v0.2s, #1, lsl #24
+movi v0.4s, #1, msl #8
+movi d0, #0xff00ff00ff00ff00
 movi v0.4s, #1
 movi v0.4s, #1, lsl #8
 movi v0.8h, #1
