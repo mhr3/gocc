@@ -75,16 +75,14 @@ long test_fn_sum(const unsigned char *data, long data_len, long bias) {
     return sum;
 }
 
-// gocc: Test_fn_mismatch_bytes(a, b []byte) int
-// gocc-variant: Test_fn_mismatch_strings(a, b string) int
-// gocc-variant: Test_fn_mismatch_bytes_string(a []byte, b string) int
-long test_fn_mismatch(const unsigned char *a, long a_len, const unsigned char *b, long b_len) {
-    long n = a_len < b_len ? a_len : b_len;
-    long i = 0;
-    while (i < n && a[i] == b[i]) {
-        i++;
-    }
-    return i;
+// Two strings and an integer, each of the five C arguments at its own weight
+// in the result: one that is loaded from the wrong word of the frame, or
+// swapped with another, changes it.
+// gocc: Test_fn_layout_strings(a, b string, k int) int
+// gocc-variant: Test_fn_layout_bytes(a, b []byte, k int) int
+// gocc-variant: Test_fn_layout_bytes_string(a []byte, b string, k int) int
+long test_fn_layout(const unsigned char *a, long a_len, const unsigned char *b, long b_len, long k) {
+    return a[a_len - 1] + 1000 * a_len + 1000000 * b[b_len - 1] + 1000000000 * b_len + 1000000000000 * k;
 }
 
 // A slice of another type, a floating-point argument and no result.

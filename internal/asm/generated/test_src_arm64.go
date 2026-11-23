@@ -53,31 +53,31 @@ func Test_fn_sum_string(data string, bias int) int {
 func test_fn_sum_stringInternal(data string, _ int, bias int) int
 
 //go:noescape
-func Test_fn_mismatch_bytes(a []byte, b []byte) int
+func Test_fn_layout_bytes(a []byte, b []byte, k int) int
 
-// Test_fn_mismatch_strings is Test_fn_mismatch_bytes with string arguments.
-func Test_fn_mismatch_strings(a string, b string) int {
-	return test_fn_mismatch_stringsInternal(a, 0, b, 0)
+// Test_fn_layout_strings is Test_fn_layout_bytes with string arguments.
+func Test_fn_layout_strings(a string, b string, k int) int {
+	return test_fn_layout_stringsInternal(a, 0, b, 0, k)
 }
 
-// test_fn_mismatch_stringsInternal jumps to Test_fn_mismatch_bytes.
+// test_fn_layout_stringsInternal jumps to Test_fn_layout_bytes.
 // The int after a string takes the place of the capacity of the []byte it
 // stands for, which gives both functions the same frame. It is not read.
 //
 //go:noescape
-func test_fn_mismatch_stringsInternal(a string, _ int, b string, _ int) int
+func test_fn_layout_stringsInternal(a string, _ int, b string, _ int, k int) int
 
-// Test_fn_mismatch_bytes_string is Test_fn_mismatch_bytes with string arguments.
-func Test_fn_mismatch_bytes_string(a []byte, b string) int {
-	return test_fn_mismatch_bytes_stringInternal(a, b, 0)
+// Test_fn_layout_bytes_string is Test_fn_layout_bytes with string arguments.
+func Test_fn_layout_bytes_string(a []byte, b string, k int) int {
+	return test_fn_layout_bytes_stringInternal(a, b, 0, k)
 }
 
-// test_fn_mismatch_bytes_stringInternal jumps to Test_fn_mismatch_bytes.
+// test_fn_layout_bytes_stringInternal jumps to Test_fn_layout_bytes.
 // The int after a string takes the place of the capacity of the []byte it
 // stands for, which gives both functions the same frame. It is not read.
 //
 //go:noescape
-func test_fn_mismatch_bytes_stringInternal(a []byte, b string, _ int) int
+func test_fn_layout_bytes_stringInternal(a []byte, b string, _ int, k int) int
 
 //go:noescape
 func Test_fn_scale_bytes(dst []float32, src []byte, factor float32)

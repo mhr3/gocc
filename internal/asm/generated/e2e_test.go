@@ -177,13 +177,17 @@ func TestVariantString(t *testing.T) {
 	assert.Equal(t, want, generated.Test_fn_sum_string("hello", 7))
 }
 
-func TestVariantMixedParams(t *testing.T) {
-	a := append(make([]byte, 0, 32), "gopher"...)
-	b := append(make([]byte, 0, 16), "gophex!"...)
+func TestVariantArgumentLayout(t *testing.T) {
+	const first, second, k = "gopher", "go!", 7
+	a := append(make([]byte, 0, 32), first...)
+	b := append(make([]byte, 0, 16), second...)
 
-	assert.Equal(t, 5, generated.Test_fn_mismatch_bytes(a, b))
-	assert.Equal(t, 5, generated.Test_fn_mismatch_strings("gopher", "gophex!"))
-	assert.Equal(t, 5, generated.Test_fn_mismatch_bytes_string(a, "gophex!"))
+	want := int(first[len(first)-1]) + 1000*len(first) +
+		1000000*int(second[len(second)-1]) + 1000000000*len(second) + 1000000000000*k
+
+	assert.Equal(t, want, generated.Test_fn_layout_strings(first, second, k))
+	assert.Equal(t, want, generated.Test_fn_layout_bytes(a, b, k))
+	assert.Equal(t, want, generated.Test_fn_layout_bytes_string(a, second, k))
 }
 
 func TestVariantOtherSliceAndFloat(t *testing.T) {

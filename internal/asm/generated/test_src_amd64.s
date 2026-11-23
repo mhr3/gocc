@@ -308,40 +308,36 @@ LBB11_6:
 TEXT ·test_fn_sum_stringInternal(SB), NOSPLIT|NOFRAME, $0-40
 	JMP ·Test_fn_sum_bytes(SB)
 
-TEXT ·Test_fn_mismatch_bytes(SB), NOSPLIT, $0-56
+TEXT ·Test_fn_layout_bytes(SB), NOSPLIT, $0-64
 	MOVQ  a_base+0(FP), DI
 	MOVQ  a_len+8(FP), SI
 	MOVQ  b_base+24(FP), DX
 	MOVQ  b_len+32(FP), CX
-	NOP                     // (skipped)                            // push	rbp
-	NOP                     // (skipped)                            // mov	rbp, rsp
-	NOP                     // (skipped)                            // and	rsp, -8
-	CMPQ  SI, CX            // <--                                  // cmp	rsi, rcx
-	LONG  $0xce4c0f48       // CMOVL SI, CX                         // cmovl	rcx, rsi
-	XORL  AX, AX            // <--                                  // xor	eax, eax
-	TESTQ CX, CX            // <--                                  // test	rcx, rcx
-	JLE   LBB12_4           // <--                                  // jle	.LBB12_4
+	MOVQ  k+48(FP), R8
+	NOP                                         // (skipped)                            // push	rbp
+	NOP                                         // (skipped)                            // mov	rbp, rsp
+	NOP                                         // (skipped)                            // and	rsp, -8
+	LONG  $0x3e7cb60f; BYTE $0xff               // MOVZX -0x1(SI)(DI*1), DI             // movzx	edi, byte ptr [rsi + rdi - 1]
+	LONG  $0xe8c66948; WORD $0x0003; BYTE $0x00 // IMULQ $0x3e8, SI, AX                 // imul	rax, rsi, 1000
+	LONG  $0x1154b60f; BYTE $0xff               // MOVZX -0x1(CX)(DX*1), DX             // movzx	edx, byte ptr [rcx + rdx - 1]
+	LONG  $0x40d26948; WORD $0x0f42; BYTE $0x00 // IMULQ $0xf4240, DX, DX               // imul	rdx, rdx, 1000000
+	LONG  $0x00c96948; WORD $0x9aca; BYTE $0x3b // IMULQ $0x3b9aca00, CX, CX            // imul	rcx, rcx, 1000000000
+	ADDQ  AX, CX                                // <--                                  // add	rcx, rax
+	MOVQ  $0xe8d4a51000, AX                     // <--                                  // movabs	rax, 1000000000000
+	IMULQ R8, AX                                // <--                                  // imul	rax, r8
+	ADDQ  CX, AX                                // <--                                  // add	rax, rcx
+	ADDQ  DI, AX                                // <--                                  // add	rax, rdi
+	ADDQ  DX, AX                                // <--                                  // add	rax, rdx
+	NOP                                         // (skipped)                            // mov	rsp, rbp
+	NOP                                         // (skipped)                            // pop	rbp
+	MOVQ  AX, ret+56(FP)                        // <--
+	RET                                         // <--                                  // ret
 
-LBB12_1:
-	LONG $0x0734b60f     // MOVZX 0(DI)(AX*1), SI                // movzx	esi, byte ptr [rdi + rax]
-	CMPB SI, 0(DX)(AX*1) // <--                                  // cmp	sil, byte ptr [rdx + rax]
-	JNE  LBB12_4         // <--                                  // jne	.LBB12_4
-	INCQ AX              // <--                                  // inc	rax
-	CMPQ CX, AX          // <--                                  // cmp	rcx, rax
-	JNE  LBB12_1         // <--                                  // jne	.LBB12_1
-	MOVQ CX, AX          // <--                                  // mov	rax, rcx
+TEXT ·test_fn_layout_stringsInternal(SB), NOSPLIT|NOFRAME, $0-64
+	JMP ·Test_fn_layout_bytes(SB)
 
-LBB12_4:
-	NOP                 // (skipped)                            // mov	rsp, rbp
-	NOP                 // (skipped)                            // pop	rbp
-	MOVQ AX, ret+48(FP) // <--
-	RET                 // <--                                  // ret
-
-TEXT ·test_fn_mismatch_stringsInternal(SB), NOSPLIT|NOFRAME, $0-56
-	JMP ·Test_fn_mismatch_bytes(SB)
-
-TEXT ·test_fn_mismatch_bytes_stringInternal(SB), NOSPLIT|NOFRAME, $0-56
-	JMP ·Test_fn_mismatch_bytes(SB)
+TEXT ·test_fn_layout_bytes_stringInternal(SB), NOSPLIT|NOFRAME, $0-64
+	JMP ·Test_fn_layout_bytes(SB)
 
 TEXT ·Test_fn_scale_bytes(SB), NOSPLIT, $0-52
 	MOVQ  dst_base+0(FP), DI

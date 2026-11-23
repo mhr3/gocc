@@ -364,47 +364,40 @@ LBB11_15:
 TEXT ·test_fn_sum_stringInternal(SB), NOSPLIT|NOFRAME, $0-40
 	JMP ·Test_fn_sum_bytes(SB)
 
-TEXT ·Test_fn_mismatch_bytes(SB), NOSPLIT, $0-56
-	MOVD a_base+0(FP), R0
-	MOVD a_len+8(FP), R1
-	MOVD b_base+24(FP), R2
-	MOVD b_len+32(FP), R3
-	NOP                    // (skipped)                            // stp	x29, x30, [sp, #-16]!
-	CMP  R3, R1            // <--                                  // cmp	x1, x3
-	NOP                    // (skipped)                            // mov	x29, sp
-	CSEL LT, R1, R3, R9    // <--                                  // csel	x9, x1, x3, lt
-	CMP  $1, R9            // <--                                  // cmp	x9, #1
-	BLT  LBB12_6           // <--                                  // b.lt	.LBB12_6
-	MOVD ZR, R8            // <--                                  // mov	x8, xzr
+TEXT ·Test_fn_layout_bytes(SB), NOSPLIT, $0-64
+	MOVD   a_base+0(FP), R0
+	MOVD   a_len+8(FP), R1
+	MOVD   b_base+24(FP), R2
+	MOVD   b_len+32(FP), R3
+	MOVD   k+48(FP), R4
+	NOP                      // (skipped)                            // stp	x29, x30, [sp, #-16]!
+	MOVW   $1000, R8         // <--                                  // mov	w8, #1000
+	MOVW   $51712, R10       // <--                                  // mov	w10, #51712
+	ADD    R0, R1, R9        // <--                                  // add	x9, x1, x0
+	MOVKW  $(15258<<16), R10 // <--                                  // movk	w10, #15258, lsl #16
+	MUL    R8, R1, R8        // <--                                  // mul	x8, x1, x8
+	MOVD   $4096, R12        // <--                                  // mov	x12, #4096
+	ADD    R2, R3, R11       // <--                                  // add	x11, x3, x2
+	MOVK   $(54437<<16), R12 // <--                                  // movk	x12, #54437, lsl #16
+	MOVK   $(232<<32), R12   // <--                                  // movk	x12, #232, lsl #32
+	MADD   R10, R8, R3, R8   // <--                                  // madd	x8, x3, x10, x8
+	WORD   $0x385ff129       // LDURBW -1(R9), R9                    // ldurb	w9, [x9, #-1]
+	NOP                      // (skipped)                            // mov	x29, sp
+	WORD   $0x385ff16a       // LDURBW -1(R11), R10                  // ldurb	w10, [x11, #-1]
+	MADD   R12, R8, R4, R8   // <--                                  // madd	x8, x4, x12, x8
+	MOVW   $16960, R11       // <--                                  // mov	w11, #16960
+	MOVKW  $(15<<16), R11    // <--                                  // movk	w11, #15, lsl #16
+	ADD    R9, R8, R8        // <--                                  // add	x8, x8, x9
+	UMADDL R11, R8, R10, R0  // <--                                  // umaddl	x0, w10, w11, x8
+	NOP                      // (skipped)                            // ldp	x29, x30, [sp], #16
+	MOVD   R0, ret+56(FP)    // <--
+	RET                      // <--                                  // ret
 
-LBB12_2:
-	MOVBU (R0)(R8), R10 // <--                                  // ldrb	w10, [x0, x8]
-	MOVBU (R2)(R8), R11 // <--                                  // ldrb	w11, [x2, x8]
-	CMPW  R11, R10      // <--                                  // cmp	w10, w11
-	BNE   LBB12_5       // <--                                  // b.ne	.LBB12_5
-	ADD   $1, R8, R8    // <--                                  // add	x8, x8, #1
-	CMP   R8, R9        // <--                                  // cmp	x9, x8
-	BNE   LBB12_2       // <--                                  // b.ne	.LBB12_2
-	MOVD  R9, R8        // <--                                  // mov	x8, x9
+TEXT ·test_fn_layout_stringsInternal(SB), NOSPLIT|NOFRAME, $0-64
+	JMP ·Test_fn_layout_bytes(SB)
 
-LBB12_5:
-	MOVD R8, R0         // <--                                  // mov	x0, x8
-	NOP                 // (skipped)                            // ldp	x29, x30, [sp], #16
-	MOVD R0, ret+48(FP) // <--
-	RET                 // <--                                  // ret
-
-LBB12_6:
-	MOVD ZR, R8         // <--                                  // mov	x8, xzr
-	MOVD R8, R0         // <--                                  // mov	x0, x8
-	NOP                 // (skipped)                            // ldp	x29, x30, [sp], #16
-	MOVD R0, ret+48(FP) // <--
-	RET                 // <--                                  // ret
-
-TEXT ·test_fn_mismatch_stringsInternal(SB), NOSPLIT|NOFRAME, $0-56
-	JMP ·Test_fn_mismatch_bytes(SB)
-
-TEXT ·test_fn_mismatch_bytes_stringInternal(SB), NOSPLIT|NOFRAME, $0-56
-	JMP ·Test_fn_mismatch_bytes(SB)
+TEXT ·test_fn_layout_bytes_stringInternal(SB), NOSPLIT|NOFRAME, $0-64
+	JMP ·Test_fn_layout_bytes(SB)
 
 DATA LCPI13_0<>+0x00(SB)/8, $0xffffff01ffffff00
 DATA LCPI13_0<>+0x08(SB)/8, $0xffffff03ffffff02
