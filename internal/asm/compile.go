@@ -170,6 +170,13 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 		for _, line := range function.Lines {
 			builder.WriteString(line.Compile(arch))
 		}
+		for i := range function.Variants {
+			// A variant is declared with padding that makes its frame identical
+			// to the function's (see GoVariant): arguments and result are
+			// already where the function expects them.
+			fmt.Fprintf(&builder, "\nTEXT ·%s(SB),NOSPLIT|NOFRAME,$0-%d\n\tJMP %s(SB)\n",
+				function.Variants[i].InternalName(), paramsSize+retSize, name)
+		}
 	}
 
 	return asmfmt.Format(strings.NewReader(builder.String()))

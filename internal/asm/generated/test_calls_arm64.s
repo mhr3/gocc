@@ -269,6 +269,20 @@ TEXT ·Test_calls_local_pointer(SB), 0, $272-16
 	MOVD  R0, ret+8(FP)          // <--
 	RET                          // <--                                  // ret
 
+TEXT ·Test_calls_big_frame_bytes(SB), 0, $32800-32
+	NO_LOCAL_POINTERS
+	MOVD p_base+0(FP), R0
+	MOVD p_len+8(FP), R1
+	MOVD R30, 16(RSP)                 // <--                                  // str	x30, [sp, #-16]!
+	CALL big_frame_bytes_helper<>(SB) // <--                                  // bl	big_frame_bytes_helper
+	ADD  $1, R0, R0                   // <--                                  // add	x0, x0, #1
+	MOVD 16(RSP), R30                 // <--                                  // ldr	x30, [sp], #16
+	MOVD R0, ret+24(FP)               // <--
+	RET                               // <--                                  // ret
+
+TEXT ·test_calls_big_frame_stringInternal(SB), NOSPLIT|NOFRAME, $0-32
+	JMP ·Test_calls_big_frame_bytes(SB)
+
 // internal function, its stack space has been flattened into its caller's frame
 TEXT mix_with_locals<>(SB), NOSPLIT|NOFRAME, $0-0
 	NOP                       // (skipped)                            // sub	sp, sp, #96
@@ -600,6 +614,45 @@ TEXT fill_squares<>(SB), NOSPLIT|NOFRAME, $0-0
 	FMOVQ F1, 232(R0)          // <--                                  // stur	q1, [x0, #232]
 	RET                        // <--                                  // ret
 
+// internal function, its stack space has been flattened into its caller's frame
+TEXT big_frame_bytes_helper<>(SB), NOSPLIT|NOFRAME, $0-0
+	MOVD R25, 32800(RSP) // <--                                  // str	x25, [sp, #-16]!
+	NOP                  // (skipped)                            // sub	sp, sp, #8, lsl #12
+	MOVD ZR, R8          // <--                                  // mov	x8, xzr
+	ADD  $32, RSP, R9    // <--                                  // mov	x9, sp
+	JMP  LBB11_2         // <--                                  // b	.LBB11_2
+
+LBB11_1:
+	WORD $0x2a0803ea  // MOVW R8, R10                         // mov	w10, w8
+	MOVB R8, (R9)(R8) // <--                                  // strb	w8, [x9, x8]
+	ADD  $1, R8, R8   // <--                                  // add	x8, x8, #1
+	CMP  $(8<<12), R8 // <--                                  // cmp	x8, #8, lsl #12
+	BEQ  LBB11_4      // <--                                  // b.eq	.LBB11_4
+
+LBB11_2:
+	CMP   R1, R8        // <--                                  // cmp	x8, x1
+	BGE   LBB11_1       // <--                                  // b.ge	.LBB11_1
+	MOVBU (R0)(R8), R10 // <--                                  // ldrb	w10, [x0, x8]
+	MOVB  R10, (R9)(R8) // <--                                  // strb	w10, [x9, x8]
+	ADD   $1, R8, R8    // <--                                  // add	x8, x8, #1
+	CMP   $(8<<12), R8  // <--                                  // cmp	x8, #8, lsl #12
+	BNE   LBB11_2       // <--                                  // b.ne	.LBB11_2
+
+LBB11_4:
+	MOVD ZR, R8       // <--                                  // mov	x8, xzr
+	MOVD ZR, R0       // <--                                  // mov	x0, xzr
+	ADD  $32, RSP, R9 // <--                                  // mov	x9, sp
+
+LBB11_5:
+	MOVBU (R9)(R8), R10   // <--                                  // ldrb	w10, [x9, x8]
+	ADD   $1, R8, R8      // <--                                  // add	x8, x8, #1
+	CMP   $(8<<12), R8    // <--                                  // cmp	x8, #8, lsl #12
+	ADD   R10, R0, R0     // <--                                  // add	x0, x0, x10
+	BNE   LBB11_5         // <--                                  // b.ne	.LBB11_5
+	NOP                   // (skipped)                            // add	sp, sp, #8, lsl #12
+	MOVD  32800(RSP), R25 // <--                                  // ldr	x25, [sp], #16
+	RET                   // <--                                  // ret
+
 DATA scale_table_tbl<>+0x00(SB)/8, $0x3ff3c083126e978d
 DATA scale_table_tbl<>+0x08(SB)/8, $0x4002c3c9eecbfb16
 DATA scale_table_tbl<>+0x10(SB)/8, $0x400ba7525460aa65
@@ -609,23 +662,23 @@ GLOBL scale_table_tbl<>(SB), (RODATA|NOPTR), $32
 // internal function, its stack space has been flattened into its caller's frame
 TEXT weighted_sum<>(SB), NOSPLIT|NOFRAME, $0-0
 	CMP  $1, R1  // <--                                  // cmp	x1, #1
-	BLT  LBB10_3 // <--                                  // b.lt	.LBB10_3
-	BNE  LBB10_4 // <--                                  // b.ne	.LBB10_4
+	BLT  LBB12_3 // <--                                  // b.lt	.LBB12_3
+	BNE  LBB12_4 // <--                                  // b.ne	.LBB12_4
 	MOVD ZR, R9  // <--                                  // mov	x9, xzr
 	MOVD ZR, R8  // <--                                  // mov	x8, xzr
-	JMP  LBB10_7 // <--                                  // b	.LBB10_7
+	JMP  LBB12_7 // <--                                  // b	.LBB12_7
 
-LBB10_3:
+LBB12_3:
 	MOVD ZR, R0 // <--                                  // mov	x0, xzr
 	RET         // <--                                  // ret
 
-LBB10_4:
+LBB12_4:
 	MOVD ZR, R11     // <--                                  // mov	x11, xzr
 	MOVD ZR, R8      // <--                                  // mov	x8, xzr
 	MOVD ZR, R10     // <--                                  // mov	x10, xzr
 	AND  $-2, R1, R9 // <--                                  // and	x9, x1, #0xfffffffffffffffe
 
-LBB10_5:
+LBB12_5:
 	ADD  R11<<3, R0, R12    // <--                                  // add	x12, x0, x11, lsl #3
 	ADD  $2, R11, R14       // <--                                  // add	x14, x11, #2
 	CMP  R14, R9            // <--                                  // cmp	x9, x14
@@ -634,18 +687,18 @@ LBB10_5:
 	MADD R14, R10, R12, R10 // <--                                  // madd	x10, x12, x14, x10
 	ADD  R8, R11, R8        // <--                                  // add	x8, x11, x8
 	MOVD R14, R11           // <--                                  // mov	x11, x14
-	BNE  LBB10_5            // <--                                  // b.ne	.LBB10_5
+	BNE  LBB12_5            // <--                                  // b.ne	.LBB12_5
 	ADD  R8, R10, R8        // <--                                  // add	x8, x10, x8
 	CMP  R1, R9             // <--                                  // cmp	x9, x1
-	BEQ  LBB10_8            // <--                                  // b.eq	.LBB10_8
+	BEQ  LBB12_8            // <--                                  // b.eq	.LBB12_8
 
-LBB10_7:
+LBB12_7:
 	MOVD (R0)(R9<<3), R10 // <--                                  // ldr	x10, [x0, x9, lsl #3]
 	ADD  $1, R9, R9       // <--                                  // add	x9, x9, #1
 	CMP  R9, R1           // <--                                  // cmp	x1, x9
 	MADD R9, R8, R10, R8  // <--                                  // madd	x8, x10, x9, x8
-	BNE  LBB10_7          // <--                                  // b.ne	.LBB10_7
+	BNE  LBB12_7          // <--                                  // b.ne	.LBB12_7
 
-LBB10_8:
+LBB12_8:
 	MOVD R8, R0 // <--                                  // mov	x0, x8
 	RET         // <--                                  // ret

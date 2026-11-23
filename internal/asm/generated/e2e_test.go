@@ -161,3 +161,58 @@ func TestCallsLocalPointer(t *testing.T) {
 	}
 	assert.Equal(t, want, generated.Test_calls_local_pointer(7))
 }
+
+// The variant tests pass slices whose capacity is neither their length nor
+// the value of any other argument: the C functions take a pointer and a
+// length, and the capacity in the frame must not reach them.
+
+func TestVariantString(t *testing.T) {
+	data := append(make([]byte, 0, 64), "hello"...)
+	want := 7
+	for _, c := range data {
+		want += int(c)
+	}
+
+	assert.Equal(t, want, generated.Test_fn_sum_bytes(data, 7))
+	assert.Equal(t, want, generated.Test_fn_sum_string("hello", 7))
+}
+
+func TestVariantMixedParams(t *testing.T) {
+	a := append(make([]byte, 0, 32), "gopher"...)
+	b := append(make([]byte, 0, 16), "gophex!"...)
+
+	assert.Equal(t, 5, generated.Test_fn_mismatch_bytes(a, b))
+	assert.Equal(t, 5, generated.Test_fn_mismatch_strings("gopher", "gophex!"))
+	assert.Equal(t, 5, generated.Test_fn_mismatch_bytes_string(a, "gophex!"))
+}
+
+func TestVariantOtherSliceAndFloat(t *testing.T) {
+	dst := make([]float32, 3, 9)
+
+	generated.Test_fn_scale_bytes(dst, append(make([]byte, 0, 16), "abc"...), 0.5)
+	assert.Equal(t, []float32{48.5, 49, 49.5}, dst)
+	generated.Test_fn_scale_string(dst, "xyz", 2)
+	assert.Equal(t, []float32{240, 242, 244}, dst)
+}
+
+func TestCallsVariantGrowsStack(t *testing.T) {
+	s := "stack"
+	var want int64 = 1
+	for i := range 32768 {
+		if i < len(s) {
+			want += int64(s[i])
+		} else {
+			want += int64(uint8(i))
+		}
+	}
+
+	// A new goroutine starts with a stack smaller than the frame of the
+	// function the variant jumps to.
+	got := make(chan int64)
+	go func() { got <- generated.Test_calls_big_frame_string(s) }()
+	assert.Equal(t, want, <-got)
+
+	p := append(make([]byte, 0, 4096), s...)
+	go func() { got <- generated.Test_calls_big_frame_bytes(p) }()
+	assert.Equal(t, want, <-got)
+}

@@ -38,6 +38,55 @@ int64_t simd_fn(char *input1, uint64_t input1_len) {
 }
 ```
 
+### String and `[]byte` variants of a function
+
+Go code often needs the same routine for strings and for byte slices. A `gocc-variant` directive
+adds a second Go signature to a function, without compiling the C code twice:
+
+```c
+// gocc: ValidString(data string) bool
+// gocc-variant: Valid(data []byte) bool
+bool ascii_valid(const unsigned char *data, uint64_t len) {
+  ...
+}
+```
+
+The signatures of a function may differ only in taking a parameter as a `string` or as a `[]byte`.
+Either form can be on the `gocc:` line, a function can have several variants, and they may mix the
+two, as in `IndexString(haystack string, needle []byte)`. One of the signatures has to take
+`[]byte` for every parameter that any of them takes as `[]byte`.
+
+The C function takes a pointer and a length for each string and each slice: a function with
+variants has no capacity parameters, for any of its slices. For the example above gocc generates
+(comments omitted):
+
+```go
+//go:noescape
+func Valid(data []byte) bool
+
+func ValidString(data string) bool {
+	return validStringInternal(data, 0)
+}
+
+//go:noescape
+func validStringInternal(data string, _ int) bool
+```
+
+```
+TEXT ·Valid(SB), NOSPLIT, $0-25
+	MOVD data_base+0(FP), R0
+	MOVD data_len+8(FP), R1
+	...
+
+TEXT ·validStringInternal(SB), NOSPLIT|NOFRAME, $0-25
+	JMP ·Valid(SB)
+```
+
+The assembly is declared with the `[]byte` form and loads the pointer and the length; the
+capacity word of the frame is skipped. The blank `int` gives a string the size of a slice, so
+both entry points have the same frame and the string one is a single jump. Calling through it
+costs one more stored word per string and that jump.
+
 ## Setting up locally
 
 Building gocc requires Go 1.27 or newer: `golang.org/x/arch` needs 1.26 for its AVX/AVX-512

@@ -86,3 +86,20 @@ int64_t test_calls_local_pointer(int64_t seed) {
     for (int i = 0; i < 32; i++) s += buf[i];
     return s;
 }
+
+__attribute__((noinline)) static int64_t big_frame_bytes_helper(const uint8_t *p, int64_t n) {
+    // 32 KiB of locals: more than the stack a goroutine starts with, so the
+    // function has to grow it on entry.
+    volatile uint8_t buf[32768];
+    for (int64_t i = 0; i < 32768; i++) buf[i] = i < n ? p[i] : (uint8_t)i;
+    int64_t s = 0;
+    for (int64_t i = 0; i < 32768; i++) s += buf[i];
+    return s;
+}
+
+// The variant jumps into a function whose prologue checks and grows the stack.
+// gocc: Test_calls_big_frame_bytes(p []byte) int64
+// gocc-variant: Test_calls_big_frame_string(p string) int64
+int64_t test_calls_big_frame_bytes(const uint8_t *p, uint64_t n) {
+    return big_frame_bytes_helper(p, (int64_t)n) + 1;
+}

@@ -243,3 +243,210 @@ LBB10_10:
 	NOP // (skipped)                            // mov	rsp, rbp
 	NOP // (skipped)                            // pop	rbp
 	RET // <--                                  // ret
+
+TEXT ·Test_fn_sum_bytes(SB), NOSPLIT, $0-40
+	MOVQ  data_base+0(FP), DI
+	MOVQ  data_len+8(FP), SI
+	MOVQ  bias+24(FP), DX
+	NOP                       // (skipped)                            // push	rbp
+	NOP                       // (skipped)                            // mov	rbp, rsp
+	NOP                       // (skipped)                            // and	rsp, -8
+	MOVQ  DX, AX              // <--                                  // mov	rax, rdx
+	TESTQ SI, SI              // <--                                  // test	rsi, rsi
+	JLE   LBB11_6             // <--                                  // jle	.LBB11_6
+	MOVL  SI, CX              // <--                                  // mov	ecx, esi
+	ANDL  $0x7, CX            // <--                                  // and	ecx, 7
+	CMPQ  SI, $0x8            // <--                                  // cmp	rsi, 8
+	JAE   LBB11_7             // <--                                  // jae	.LBB11_7
+	XORL  DX, DX              // <--                                  // xor	edx, edx
+	JMP   LBB11_3             // <--                                  // jmp	.LBB11_3
+
+LBB11_7:
+	ANDQ $-0x8, SI // <--                                  // and	rsi, -8
+	XORL DX, DX    // <--                                  // xor	edx, edx
+
+LBB11_8:
+	LONG $0x04b60f44; BYTE $0x17   // MOVZX 0(DI)(DX*1), R8                // movzx	r8d, byte ptr [rdi + rdx]
+	ADDQ AX, R8                    // <--                                  // add	r8, rax
+	LONG $0x1744b60f; BYTE $0x01   // MOVZX 0x1(DI)(DX*1), AX              // movzx	eax, byte ptr [rdi + rdx + 1]
+	LONG $0x4cb60f44; WORD $0x0217 // MOVZX 0x2(DI)(DX*1), R9              // movzx	r9d, byte ptr [rdi + rdx + 2]
+	ADDQ AX, R9                    // <--                                  // add	r9, rax
+	ADDQ R8, R9                    // <--                                  // add	r9, r8
+	LONG $0x1744b60f; BYTE $0x03   // MOVZX 0x3(DI)(DX*1), AX              // movzx	eax, byte ptr [rdi + rdx + 3]
+	LONG $0x44b60f44; WORD $0x0417 // MOVZX 0x4(DI)(DX*1), R8              // movzx	r8d, byte ptr [rdi + rdx + 4]
+	ADDQ AX, R8                    // <--                                  // add	r8, rax
+	LONG $0x54b60f44; WORD $0x0517 // MOVZX 0x5(DI)(DX*1), R10             // movzx	r10d, byte ptr [rdi + rdx + 5]
+	ADDQ R8, R10                   // <--                                  // add	r10, r8
+	ADDQ R9, R10                   // <--                                  // add	r10, r9
+	LONG $0x44b60f44; WORD $0x0617 // MOVZX 0x6(DI)(DX*1), R8              // movzx	r8d, byte ptr [rdi + rdx + 6]
+	LONG $0x1744b60f; BYTE $0x07   // MOVZX 0x7(DI)(DX*1), AX              // movzx	eax, byte ptr [rdi + rdx + 7]
+	ADDQ R8, AX                    // <--                                  // add	rax, r8
+	ADDQ R10, AX                   // <--                                  // add	rax, r10
+	ADDQ $0x8, DX                  // <--                                  // add	rdx, 8
+	CMPQ SI, DX                    // <--                                  // cmp	rsi, rdx
+	JNE  LBB11_8                   // <--                                  // jne	.LBB11_8
+
+LBB11_3:
+	TESTQ CX, CX  // <--                                  // test	rcx, rcx
+	JE    LBB11_6 // <--                                  // je	.LBB11_6
+	ADDQ  DX, DI  // <--                                  // add	rdi, rdx
+	XORL  DX, DX  // <--                                  // xor	edx, edx
+
+LBB11_5:
+	LONG $0x1734b60f // MOVZX 0(DI)(DX*1), SI                // movzx	esi, byte ptr [rdi + rdx]
+	ADDQ SI, AX      // <--                                  // add	rax, rsi
+	INCQ DX          // <--                                  // inc	rdx
+	CMPQ CX, DX      // <--                                  // cmp	rcx, rdx
+	JNE  LBB11_5     // <--                                  // jne	.LBB11_5
+
+LBB11_6:
+	NOP                 // (skipped)                            // mov	rsp, rbp
+	NOP                 // (skipped)                            // pop	rbp
+	MOVQ AX, ret+32(FP) // <--
+	RET                 // <--                                  // ret
+
+TEXT ·test_fn_sum_stringInternal(SB), NOSPLIT|NOFRAME, $0-40
+	JMP ·Test_fn_sum_bytes(SB)
+
+TEXT ·Test_fn_mismatch_bytes(SB), NOSPLIT, $0-56
+	MOVQ  a_base+0(FP), DI
+	MOVQ  a_len+8(FP), SI
+	MOVQ  b_base+24(FP), DX
+	MOVQ  b_len+32(FP), CX
+	NOP                     // (skipped)                            // push	rbp
+	NOP                     // (skipped)                            // mov	rbp, rsp
+	NOP                     // (skipped)                            // and	rsp, -8
+	CMPQ  SI, CX            // <--                                  // cmp	rsi, rcx
+	LONG  $0xce4c0f48       // CMOVL SI, CX                         // cmovl	rcx, rsi
+	XORL  AX, AX            // <--                                  // xor	eax, eax
+	TESTQ CX, CX            // <--                                  // test	rcx, rcx
+	JLE   LBB12_4           // <--                                  // jle	.LBB12_4
+
+LBB12_1:
+	LONG $0x0734b60f     // MOVZX 0(DI)(AX*1), SI                // movzx	esi, byte ptr [rdi + rax]
+	CMPB SI, 0(DX)(AX*1) // <--                                  // cmp	sil, byte ptr [rdx + rax]
+	JNE  LBB12_4         // <--                                  // jne	.LBB12_4
+	INCQ AX              // <--                                  // inc	rax
+	CMPQ CX, AX          // <--                                  // cmp	rcx, rax
+	JNE  LBB12_1         // <--                                  // jne	.LBB12_1
+	MOVQ CX, AX          // <--                                  // mov	rax, rcx
+
+LBB12_4:
+	NOP                 // (skipped)                            // mov	rsp, rbp
+	NOP                 // (skipped)                            // pop	rbp
+	MOVQ AX, ret+48(FP) // <--
+	RET                 // <--                                  // ret
+
+TEXT ·test_fn_mismatch_stringsInternal(SB), NOSPLIT|NOFRAME, $0-56
+	JMP ·Test_fn_mismatch_bytes(SB)
+
+TEXT ·test_fn_mismatch_bytes_stringInternal(SB), NOSPLIT|NOFRAME, $0-56
+	JMP ·Test_fn_mismatch_bytes(SB)
+
+TEXT ·Test_fn_scale_bytes(SB), NOSPLIT, $0-52
+	MOVQ  dst_base+0(FP), DI
+	MOVQ  dst_len+8(FP), SI
+	MOVQ  src_base+24(FP), DX
+	MOVQ  src_len+32(FP), CX
+	MOVSS factor+48(FP), X0
+	NOP                       // (skipped)                            // push	rbp
+	NOP                       // (skipped)                            // mov	rbp, rsp
+	NOP                       // (skipped)                            // and	rsp, -8
+	CMPQ  CX, SI              // <--                                  // cmp	rcx, rsi
+	LONG  $0xf14c0f48         // CMOVL CX, SI                         // cmovl	rsi, rcx
+	TESTQ SI, SI              // <--                                  // test	rsi, rsi
+	JLE   LBB13_13            // <--                                  // jle	.LBB13_13
+	CMPQ  SI, $0x8            // <--                                  // cmp	rsi, 8
+	JB    LBB13_2             // <--                                  // jb	.LBB13_2
+	LEAQ  0(DX)(SI*1), AX     // <--                                  // lea	rax, [rdx + rsi]
+	CMPQ  AX, DI              // <--                                  // cmp	rax, rdi
+	JBE   LBB13_6             // <--                                  // jbe	.LBB13_6
+	LEAQ  0(DI)(SI*4), AX     // <--                                  // lea	rax, [rdi + 4*rsi]
+	CMPQ  AX, DX              // <--                                  // cmp	rax, rdx
+	JBE   LBB13_6             // <--                                  // jbe	.LBB13_6
+
+LBB13_2:
+	XORL AX, AX // <--                                  // xor	eax, eax
+
+LBB13_9:
+	MOVQ AX, CX   // <--                                  // mov	rcx, rax
+	NOTQ CX       // <--                                  // not	rcx
+	ADDQ SI, CX   // <--                                  // add	rcx, rsi
+	MOVQ SI, R8   // <--                                  // mov	r8, rsi
+	ANDQ $0x3, R8 // <--                                  // and	r8, 3
+	JE   LBB13_11 // <--                                  // je	.LBB13_11
+
+LBB13_10:
+	LONG  $0x0cb60f44; BYTE $0x02 // MOVZX 0(DX)(AX*1), R9                // movzx	r9d, byte ptr [rdx + rax]
+	XORPS X1, X1                  // <--                                  // xorps	xmm1, xmm1
+	LONG  $0x2a0f41f3; BYTE $0xc9 // CVTSI2SSL R9, X1                     // cvtsi2ss	xmm1, r9d
+	MULSS X0, X1                  // <--                                  // mulss	xmm1, xmm0
+	MOVSS X1, 0(DI)(AX*4)         // <--                                  // movss	dword ptr [rdi + 4*rax], xmm1
+	INCQ  AX                      // <--                                  // inc	rax
+	DECQ  R8                      // <--                                  // dec	r8
+	JNE   LBB13_10                // <--                                  // jne	.LBB13_10
+
+LBB13_11:
+	CMPQ CX, $0x3 // <--                                  // cmp	rcx, 3
+	JB   LBB13_13 // <--                                  // jb	.LBB13_13
+
+LBB13_12:
+	LONG  $0x020cb60f             // MOVZX 0(DX)(AX*1), CX                // movzx	ecx, byte ptr [rdx + rax]
+	XORPS X1, X1                  // <--                                  // xorps	xmm1, xmm1
+	LONG  $0xc92a0ff3             // CVTSI2SSL CX, X1                     // cvtsi2ss	xmm1, ecx
+	MULSS X0, X1                  // <--                                  // mulss	xmm1, xmm0
+	MOVSS X1, 0(DI)(AX*4)         // <--                                  // movss	dword ptr [rdi + 4*rax], xmm1
+	LONG  $0x024cb60f; BYTE $0x01 // MOVZX 0x1(DX)(AX*1), CX              // movzx	ecx, byte ptr [rdx + rax + 1]
+	XORPS X1, X1                  // <--                                  // xorps	xmm1, xmm1
+	LONG  $0xc92a0ff3             // CVTSI2SSL CX, X1                     // cvtsi2ss	xmm1, ecx
+	MULSS X0, X1                  // <--                                  // mulss	xmm1, xmm0
+	MOVSS X1, 0x4(DI)(AX*4)       // <--                                  // movss	dword ptr [rdi + 4*rax + 4], xmm1
+	LONG  $0x024cb60f; BYTE $0x02 // MOVZX 0x2(DX)(AX*1), CX              // movzx	ecx, byte ptr [rdx + rax + 2]
+	XORPS X1, X1                  // <--                                  // xorps	xmm1, xmm1
+	LONG  $0xc92a0ff3             // CVTSI2SSL CX, X1                     // cvtsi2ss	xmm1, ecx
+	MULSS X0, X1                  // <--                                  // mulss	xmm1, xmm0
+	MOVSS X1, 0x8(DI)(AX*4)       // <--                                  // movss	dword ptr [rdi + 4*rax + 8], xmm1
+	LONG  $0x024cb60f; BYTE $0x03 // MOVZX 0x3(DX)(AX*1), CX              // movzx	ecx, byte ptr [rdx + rax + 3]
+	XORPS X1, X1                  // <--                                  // xorps	xmm1, xmm1
+	LONG  $0xc92a0ff3             // CVTSI2SSL CX, X1                     // cvtsi2ss	xmm1, ecx
+	MULSS X0, X1                  // <--                                  // mulss	xmm1, xmm0
+	MOVSS X1, 0xc(DI)(AX*4)       // <--                                  // movss	dword ptr [rdi + 4*rax + 12], xmm1
+	ADDQ  $0x4, AX                // <--                                  // add	rax, 4
+	CMPQ  SI, AX                  // <--                                  // cmp	rsi, rax
+	JNE   LBB13_12                // <--                                  // jne	.LBB13_12
+	JMP   LBB13_13                // <--                                  // jmp	.LBB13_13
+
+LBB13_6:
+	MOVQ   SI, AX       // <--                                  // mov	rax, rsi
+	ANDQ   $-0x8, AX    // <--                                  // and	rax, -8
+	MOVAPS X0, X1       // <--                                  // movaps	xmm1, xmm0
+	SHUFPS $0x0, X0, X1 // <--                                  // shufps	xmm1, xmm0, 0
+	XORL   CX, CX       // <--                                  // xor	ecx, ecx
+	PXOR   X2, X2       // <--                                  // pxor	xmm2, xmm2
+
+LBB13_7:
+	LONG      $0x1c6e0f66; BYTE $0x0a   // MOVD 0(DX)(CX*1), X3                 // movd	xmm3, dword ptr [rdx + rcx]
+	LONG      $0x646e0f66; WORD $0x040a // MOVD 0x4(DX)(CX*1), X4               // movd	xmm4, dword ptr [rdx + rcx + 4]
+	PUNPCKLBW X2, X3                    // <--                                  // punpcklbw	xmm3, xmm2
+	LONG      $0xda610f66               // PUNPCKLWD X2, X3                     // punpcklwd	xmm3, xmm2
+	WORD      $0x5b0f; BYTE $0xdb       // CVTDQ2PS X3, X3                      // cvtdq2ps	xmm3, xmm3
+	PUNPCKLBW X2, X4                    // <--                                  // punpcklbw	xmm4, xmm2
+	LONG      $0xe2610f66               // PUNPCKLWD X2, X4                     // punpcklwd	xmm4, xmm2
+	WORD      $0x5b0f; BYTE $0xe4       // CVTDQ2PS X4, X4                      // cvtdq2ps	xmm4, xmm4
+	MULPS     X1, X3                    // <--                                  // mulps	xmm3, xmm1
+	MULPS     X1, X4                    // <--                                  // mulps	xmm4, xmm1
+	MOVUPS    X3, 0(DI)(CX*4)           // <--                                  // movups	xmmword ptr [rdi + 4*rcx], xmm3
+	MOVUPS    X4, 0x10(DI)(CX*4)        // <--                                  // movups	xmmword ptr [rdi + 4*rcx + 16], xmm4
+	ADDQ      $0x8, CX                  // <--                                  // add	rcx, 8
+	CMPQ      AX, CX                    // <--                                  // cmp	rax, rcx
+	JNE       LBB13_7                   // <--                                  // jne	.LBB13_7
+	CMPQ      SI, AX                    // <--                                  // cmp	rsi, rax
+	JNE       LBB13_9                   // <--                                  // jne	.LBB13_9
+
+LBB13_13:
+	NOP // (skipped)                            // mov	rsp, rbp
+	NOP // (skipped)                            // pop	rbp
+	RET // <--                                  // ret
+
+TEXT ·test_fn_scale_stringInternal(SB), NOSPLIT|NOFRAME, $0-52
+	JMP ·Test_fn_scale_bytes(SB)

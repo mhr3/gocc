@@ -58,3 +58,40 @@ void test_fn_sq_floats(float *input, long input_len, long input_cap, float *outp
         output[i] = input[i] * input[i];
     }
 }
+
+// Functions with variants: the C code takes a pointer and a length for every
+// string and slice, and is entered with either. Each has a parameter after
+// the first of them, which is read from the wrong place if the capacity
+// word of the frame is not skipped.
+
+// The string form is the main signature here and the []byte one the variant.
+// gocc: Test_fn_sum_string(data string, bias int) int
+// gocc-variant: Test_fn_sum_bytes(data []byte, bias int) int
+long test_fn_sum(const unsigned char *data, long data_len, long bias) {
+    long sum = bias;
+    for (long i = 0; i < data_len; i++) {
+        sum += data[i];
+    }
+    return sum;
+}
+
+// gocc: Test_fn_mismatch_bytes(a, b []byte) int
+// gocc-variant: Test_fn_mismatch_strings(a, b string) int
+// gocc-variant: Test_fn_mismatch_bytes_string(a []byte, b string) int
+long test_fn_mismatch(const unsigned char *a, long a_len, const unsigned char *b, long b_len) {
+    long n = a_len < b_len ? a_len : b_len;
+    long i = 0;
+    while (i < n && a[i] == b[i]) {
+        i++;
+    }
+    return i;
+}
+
+// A slice of another type, a floating-point argument and no result.
+// gocc: Test_fn_scale_bytes(dst []float32, src []byte, factor float32)
+// gocc-variant: Test_fn_scale_string(dst []float32, src string, factor float32)
+void test_fn_scale(float *dst, long dst_len, const unsigned char *src, long src_len, float factor) {
+    for (long i = 0; i < src_len && i < dst_len; i++) {
+        dst[i] = src[i] * factor;
+    }
+}
