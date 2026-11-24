@@ -1,6 +1,8 @@
 package cc
 
 import (
+	"context"
+
 	"github.com/mhr3/gocc/internal/asm"
 	"github.com/mhr3/gocc/internal/config"
 )
@@ -29,8 +31,9 @@ func NewDisassembler(arch *config.Arch) (*Disassembler, error) {
 	}, nil
 }
 
-// Disassemble disassembles the object file
-func (d *Disassembler) Disassemble(assemblyPath, objectPath string) ([]asm.Function, error) {
+// Disassemble disassembles the object file. The disassembler is killed when
+// ctx ends.
+func (d *Disassembler) Disassemble(ctx context.Context, assemblyPath, objectPath string) ([]asm.Function, error) {
 	// Parse the assembly file
 	assembly, err := asm.ParseAssembly(d.arch, assemblyPath)
 	if err != nil {
@@ -49,7 +52,7 @@ func (d *Disassembler) Disassemble(assemblyPath, objectPath string) ([]asm.Funct
 	disassembler = append(disassembler, "-d", objectPath)
 
 	// Run the disassembler
-	dump, err := runCommandAndLog(disassembler[0], disassembler[1:]...)
+	dump, err := runCommandAndLog(ctx, disassembler[0], disassembler[1:]...)
 	if err != nil {
 		return nil, err
 	}

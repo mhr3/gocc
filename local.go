@@ -15,6 +15,7 @@
 package gocc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -108,9 +109,8 @@ func NewLocal(arch *config.Arch, source, outputDir, suffix, functionSuffix, pack
 		return nil, err
 	}
 
-	// If package name is not provided, use the directory name of the output
 	if packageName == "" {
-		packageName = filepath.Base(outputDir)
+		packageName = packageOf(outputDir)
 	}
 
 	return &Local{
@@ -128,8 +128,23 @@ func NewLocal(arch *config.Arch, source, outputDir, suffix, functionSuffix, pack
 	}, nil
 }
 
+// packageOf returns the package name to use for files written to a
+// directory when none is given: the name of the directory.
+func packageOf(outputDir string) string {
+	if abs, err := filepath.Abs(outputDir); err == nil {
+		outputDir = abs
+	}
+	return filepath.Base(outputDir)
+}
+
 // Translate translates the source file to Go assembly
 func (t *Local) Translate() error {
+	return t.TranslateContext(context.Background())
+}
+
+// TranslateContext translates the source file to Go assembly. The compiler
+// and the disassembler are killed when ctx ends.
+func (t *Local) TranslateContext(ctx context.Context) error {
 	functions, err := cc.Parse(t.Source)
 	if err != nil {
 		return err
@@ -137,12 +152,12 @@ func (t *Local) Translate() error {
 	compilerOptions := t.compilerOptions()
 
 	// Compile the source file to assembly
-	if err := t.Clang.Compile(t.Source, t.Assembly, t.Object, compilerOptions...); err != nil {
+	if err := t.Clang.Compile(ctx, t.Source, t.Assembly, t.Object, compilerOptions...); err != nil {
 		return err
 	}
 
 	// Disassemble the object file and extract machine code
-	assembly, err := t.ObjDump.Disassemble(t.Assembly, t.Object)
+	assembly, err := t.ObjDump.Disassemble(ctx, t.Assembly, t.Object)
 	if err != nil {
 		return err
 	}
@@ -212,8 +227,8 @@ func (t *Local) Translate() error {
 	return asm.GenerateGoStubs(t.Arch, t.Package, t.GoStub, functions)
 }
 
-// Output returns the output files as a web result
-func (t *Local) Output() (*WebResult, error) {
+// Output returns the generated files, named without their directory.
+func (t *Local) Output() (*CompileResult, error) {
 	goFile, err := os.ReadFile(t.GoStub)
 	if err != nil {
 		return nil, err
@@ -224,15 +239,9 @@ func (t *Local) Output() (*WebResult, error) {
 		return nil, err
 	}
 
-	return &WebResult{
-		Asm: File{
-			Name: t.GoAssembly,
-			Body: asmFile,
-		},
-		Go: File{
-			Name: t.GoStub,
-			Body: goFile,
-		},
+	return &CompileResult{
+		Asm: File{Name: filepath.Base(t.GoAssembly), Body: asmFile},
+		Go:  File{Name: filepath.Base(t.GoStub), Body: goFile},
 	}, nil
 }
 

@@ -67,6 +67,34 @@ The `example` folder includes matrix multiplication using intrinsics compiled fo
 as an example that only uses clang's auto-vectorization. See the `example/gen.sh` script to see how gocc
 can be invoked.
 
+## Compiling on another machine
+
+gocc compiles on the machine it runs on. To have every machine use the compiler of one of them, or
+to generate code on a machine without clang, run the web server on the machine that has the
+toolchain:
+
+```bash
+GOCC_TOKEN=some-secret go run github.com/mhr3/gocc/cmd/webserver@latest --listen :8080
+```
+
+and point gocc at it from the others, with the `--server` flag or the environment:
+
+```bash
+export GOCC_SERVER=http://that-machine:8080 GOCC_TOKEN=some-secret
+gocc csrc/ascii_neon.c -p ascii -o ./ -a arm64 -O3
+```
+
+The client sends the source together with the files it includes with quotes (`#include "x.h"`),
+as far as they exist next to the including file, and writes the generated files as a local run
+would. All options work the same; `--with-os-tag` uses the operating system of the client.
+`-l` compiles locally even when `GOCC_SERVER` is set.
+
+The server is for machines and networks you trust. A client picks the compiler options and the
+source, and with them can make the compiler read and write files as the user running the server.
+The token keeps strangers out, it does not make the server safe to offer to them. Without
+`--listen` it only accepts connections from its own machine, which is enough behind an SSH tunnel
+(`ssh -L 8080:localhost:8080 that-machine`). `GET /health` reports its compiler.
+
 ## Limitations
 
 This tool does not support most of the C features, it's not a replacement for C/Go. If you are using this for production code, make sure to test the generated code thoroughly. Also, this is not meant to be general-purpose tool, but rather a tool for solving my own problems of speeding up certain routines.
