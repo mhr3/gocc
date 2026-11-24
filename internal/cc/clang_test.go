@@ -15,6 +15,7 @@
 package cc
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,7 +41,7 @@ func TestCompiler(t *testing.T) {
 		arch:  arch,
 	}
 
-	assert.NoError(t, compiler.Compile(testSource, "temp.s", "temp.o"))
+	assert.NoError(t, compiler.Compile(context.Background(), testSource, "temp.s", "temp.o"))
 }
 
 func TestRemapArm64FrameRegisterRequiresReservedRegisters(t *testing.T) {

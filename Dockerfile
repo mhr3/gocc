@@ -25,4 +25,4 @@ COPY --from=builder /go/src/cmd/webserver/webserver .
 COPY --from=builder /go/src/example ./example
 RUN chmod +x webserver
 EXPOSE 8080
-CMD ["./webserver"]
+CMD ["./webserver", "--listen", ":8080"]

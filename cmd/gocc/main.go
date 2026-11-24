@@ -33,7 +33,8 @@ func init() {
 	command.PersistentFlags().StringP("package", "p", "", "go package name to use for the stubs")
 	command.PersistentFlags().StringP("suffix", "s", "", "suffix to add to the generated files")
 	command.PersistentFlags().String("function-suffix", "", "suffix to add to the generated functions")
-	command.PersistentFlags().BoolP("local", "l", false, "use local machine for compilation")
+	command.PersistentFlags().String("server", "", "address of a gocc webserver to compile on, instead of this machine (default: $GOCC_SERVER)")
+	command.PersistentFlags().BoolP("local", "l", false, "compile on this machine even when a server is given")
 	command.PersistentFlags().Bool("with-os-tag", false, "generate OS-specific build tags")
 	command.PersistentFlags().Bool("with-internal-functions", false, "enable compiler-emitted internal helper functions")
 }
@@ -75,29 +76,38 @@ var command = &cobra.Command{
 		withOsTag, _ := cmd.PersistentFlags().GetBool("with-os-tag")
 		withInternalFunctions, _ := cmd.PersistentFlags().GetBool("with-internal-functions")
 
-		// Compile locally or remotely
-		local, _ := cmd.PersistentFlags().GetBool("local")
-		switch local {
-		case true:
+		// Compile on this machine unless a server is given.
+		server, _ := cmd.PersistentFlags().GetString("server")
+		if server == "" {
+			server = os.Getenv("GOCC_SERVER")
+		}
+		if local, _ := cmd.PersistentFlags().GetBool("local"); local || server == "" {
 			if err := compileLocally(target, args[0], output, suffix, functionSuffix, packageName, withOsTag, withInternalFunctions, options...); err != nil {
 				exit(err)
 			}
-		default:
-			if err := compileRemotely(target, args[0], output, packageName, withInternalFunctions, options...); err != nil {
-				exit(err)
-			}
+			return
+		}
+
+		remote := gocc.Remote{
+			Server:                server,
+			Token:                 os.Getenv("GOCC_TOKEN"),
+			Arch:                  target,
+			Source:                args[0],
+			Output:                output,
+			Package:               packageName,
+			Suffix:                suffix,
+			FuncSuffix:            functionSuffix,
+			Options:               options,
+			WithInternalFunctions: withInternalFunctions,
+		}
+		if withOsTag {
+			// the tag of this machine, not of the one compiling
+			remote.OS = runtime.GOOS
+		}
+		if err := remote.Translate(); err != nil {
+			exit(err)
 		}
 	},
-}
-
-func compileRemotely(target, source, outputDir, packageName string, withInternalFunctions bool, options ...string) error {
-	remote, err := gocc.NewRemote(target, source, outputDir, packageName, options...)
-	if err != nil {
-		return err
-	}
-	remote.WithInternalFunctions = withInternalFunctions
-
-	return remote.Translate()
 }
 
 func compileLocally(target, source, outputDir, suffix, functionSuffix, packageName string, withOsTag, withInternalFunctions bool, options ...string) error {

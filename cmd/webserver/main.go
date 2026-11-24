@@ -1,102 +1,57 @@
+// The webserver translates C sources for gocc clients that have no C
+// toolchain of their own, or that should all use the compiler of one machine.
+//
+//	webserver --listen :8080
+//	gocc --server http://that-machine:8080 file.c -o . -a arm64 -O3
+//
+// See gocc.Server for who may be allowed to reach it.
 package main
 
 import (
+	"flag"
+	"log"
+	"net"
 	"net/http"
 	"os"
-	"path/filepath"
+	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/mhr3/gocc"
-	"github.com/mhr3/gocc/internal/config"
 )
 
-func main() {
-	r := gin.Default()
-	gin.SetMode(gin.ReleaseMode)
-
-	// Health endpoint
-	r.GET("/health", func(c *gin.Context) {
-		clang, _ := config.FindClang()
-		objdump, _ := config.FindClangObjdump()
-		c.JSON(http.StatusOK, gin.H{
-			"compiler":     clang,
-			"disassembler": objdump,
-		})
-	})
-
-	// Compile endpoint
-	r.POST("/compile/:arch/:name", func(c *gin.Context) {
-		body, err := c.GetRawData()
-		if err != nil {
-			c.JSON(http.StatusBadRequest, err.Error())
-			return
-		}
-
-		input := gocc.WebRequest{
-			File: gocc.File{Body: body},
-		}
-
-		if err := c.BindUri(&input); err != nil {
-			c.JSON(http.StatusBadRequest, err.Error())
-			return
-		}
-
-		if err := c.BindQuery(&input); err != nil {
-			c.JSON(http.StatusBadRequest, err.Error())
-			return
-		}
-
-		// Translate the file
-		result, err := translate(&input)
-		if err != nil {
-			c.JSON(http.StatusNotAcceptable, err.Error())
-			return
-		}
-
-		c.JSON(http.StatusOK, result)
-	})
-
-	// listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
-	r.Run()
+// loopback reports whether an address to listen on is only reachable from
+// this machine.
+func loopback(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
-// Translate calls the translator to translate the file and returns a result. It also
-// cleans up the temporary files.
-func translate(req *gocc.WebRequest) (*gocc.WebResult, error) {
-	arch, err := config.For(req.Arch)
-	if err != nil {
-		return nil, err
+func main() {
+	listen := flag.String("listen", "localhost:8080", "address to listen on; :8080 accepts connections from other machines")
+	timeout := flag.Duration("timeout", 2*time.Minute, "time one translation may take")
+	concurrency := flag.Int("concurrency", 0, "translations running at once (default: the number of CPUs)")
+	flag.Parse()
+
+	server := &gocc.Server{
+		Token:       os.Getenv("GOCC_TOKEN"),
+		Timeout:     *timeout,
+		Concurrency: *concurrency,
+	}
+	if server.Token == "" && !loopback(*listen) {
+		log.Printf("warning: anyone who can reach %s can compile here, and with that read and write files as this user; set GOCC_TOKEN to require a token", *listen)
 	}
 
-	// Create a temporary directory for the build process
-	tmp, err := os.MkdirTemp("", "*")
-	if err != nil {
-		return nil, err
+	log.Printf("listening on %s", *listen)
+	httpServer := &http.Server{
+		Addr:              *listen,
+		Handler:           server.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
-	defer os.RemoveAll(tmp)
-
-	// Write the input file
-	input := filepath.Join(tmp, req.Name)
-	if err := os.WriteFile(input, req.Body, 0644); err != nil {
-		return nil, err
-	}
-
-	// Create a new translator
-	if len(req.Options) == 0 {
-		req.Options = []string{"-O3"}
-	}
-
-	// Create a new translator
-	// FIXME: params for suffix & funcSuffix
-	translator, err := gocc.NewLocal(arch, input, tmp, "", "", req.Package, req.Options...)
-	if err != nil {
-		return nil, err
-	}
-	translator.WithInternalFunctions = req.WithInternalFunctions
-
-	// Translate the file and read the output
-	if err := translator.Translate(); err != nil {
-		return nil, err
-	}
-	return translator.Output()
+	log.Fatal(httpServer.ListenAndServe())
 }

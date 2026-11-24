@@ -16,8 +16,10 @@
 package cc
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -28,9 +30,20 @@ import (
 
 // Compiler represents a C/C++ compiler.
 type Compiler struct {
+	// Diagnostics receives what the compiler prints when it succeeds, which
+	// is its warnings. Standard error when nil.
+	Diagnostics io.Writer
+
 	arch    *config.Arch
 	clang   string
 	version string
+}
+
+func (c *Compiler) diagnostics() io.Writer {
+	if c.Diagnostics != nil {
+		return c.Diagnostics
+	}
+	return os.Stderr
 }
 
 var arm64X29Register = regexp.MustCompile(`\b([xw])29\b`)
@@ -85,7 +98,7 @@ func NewCompiler(arch *config.Arch) (*Compiler, error) {
 		return nil, err
 	}
 
-	versionOutput, err := runCommand(clang, "--version")
+	versionOutput, err := runCommand(context.Background(), clang, "--version")
 	if err != nil {
 		return nil, err
 	}
@@ -105,8 +118,9 @@ func (c *Compiler) Version() string {
 	return c.version
 }
 
-// compile compiles the C source file to assembly and then to object.
-func (c *Compiler) Compile(source, assembly, object string, compilerArgs ...string) error {
+// Compile compiles the C source file to assembly and then to object. The
+// compiler is killed when ctx ends.
+func (c *Compiler) Compile(ctx context.Context, source, assembly, object string, compilerArgs ...string) error {
 	defaults := []string{
 		"-mno-red-zone",
 		"-mstackrealign",
@@ -127,47 +141,50 @@ func (c *Compiler) Compile(source, assembly, object string, compilerArgs ...stri
 	// user options so -fhosted cannot accidentally enable libc assumptions.
 	args = append(args, "-ffreestanding")
 
-	compileOutput, err := runCommandAndLog(c.clang, append([]string{"-S", "-c", source, "-o", assembly}, args...)...)
+	compileOutput, err := runCommandAndLog(ctx, c.clang, append([]string{"-S", "-c", source, "-o", assembly}, args...)...)
 	// Compile to assembly first
 	if err != nil {
 		return err
 	}
 	if compileOutput != "" {
-		fmt.Fprintln(os.Stderr, compileOutput)
+		fmt.Fprintln(c.diagnostics(), compileOutput)
 	}
 	if err := c.remapArm64FrameRegister(assembly, args); err != nil {
 		return err
 	}
 
 	// Use clang to compile to object
-	objOutput, err := runCommandAndLog(c.clang, append([]string{"-c", assembly, "-o", object}, args...)...)
+	objOutput, err := runCommandAndLog(ctx, c.clang, append([]string{"-c", assembly, "-o", object}, args...)...)
 	if err != nil {
 		return err
 	}
 	if objOutput != "" {
-		fmt.Fprintln(os.Stderr, objOutput)
+		fmt.Fprintln(c.diagnostics(), objOutput)
 	}
 
 	return nil
 }
 
 // runCommandAndLog runs a command and extract its output.
-func runCommandAndLog(name string, args ...string) (string, error) {
+func runCommandAndLog(ctx context.Context, name string, args ...string) (string, error) {
 	cmd := fmt.Sprintf("%s %s", name, strings.Join(args, " "))
 	fmt.Printf("Running %q\n", cmd)
 
-	return runCommand(name, args...)
+	return runCommand(ctx, name, args...)
 }
 
-func runCommand(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
+func runCommand(ctx context.Context, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		return string(output), nil
 	}
 
 	switch {
-	case output != nil:
+	case ctx.Err() != nil:
+		// killed because the context ended, whatever it printed until then
+		return "", ctx.Err()
+	case len(output) > 0:
 		return "", errors.New(string(output))
 	default:
 		return "", err
