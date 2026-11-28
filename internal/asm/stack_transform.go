@@ -1407,9 +1407,10 @@ func rewriteStackOpsWithLinkage(arch *config.Arch, archInfo ArchStackInfo, layou
 	function.Lines = newLines
 	function.LocalsSize = layout.GoFrameSize
 	if archInfo.Name() == "arm64" && layout.GoFrameSize > 0 && linkageBias {
-		// cmd/asm adds a 16-byte linkage/alignment area to framed ARM64
-		// functions. Keeping the emulated C SP above both words also retains
-		// the 16-byte alignment assumed by Clang's vector spills.
+		// cmd/asm keeps the return address at 0(RSP). The emulated C SP is
+		// 16(RSP) rather than 8(RSP) to retain the 16-byte alignment assumed
+		// by Clang's vector spills; Generate declares the frame 16 bytes
+		// larger, which keeps its end below the frame pointer of the caller.
 		function.Lines = shiftArm64CStackRefs(function.Lines, 2*archInfo.PtrSize())
 	}
 
@@ -1944,7 +1945,7 @@ func reserveInternalStackFrames(arch *config.Arch, functions []Function) ([]Func
 		if arch.Name == "arm64" {
 			// BL does not touch SP, and Go keeps RSP 16-byte aligned, so every
 			// helper sees the same SP as its root. Slots start above the root's
-			// locals and the 16-byte linkage area cmd/asm reserves.
+			// locals, which begin at 16(RSP) (see rewriteStackOpsWithLinkage).
 			reserved := 0
 			for helperIdx := range functions {
 				if owners[helperIdx] != rootIdx || functions[helperIdx].HiddenStackSize == 0 {

@@ -50,3 +50,23 @@ func TestGenerateInternalFunctionsUseNoFrame(t *testing.T) {
 		})
 	}
 }
+
+// cmd/asm allocates 16 bytes on top of an arm64 frame: the return address at
+// 0(RSP) and, at the very top, the frame pointer saved by the calling Go
+// function. The C frame starts at 16(RSP), so the frame has to be declared 16
+// bytes larger for it to end below that frame pointer.
+func TestGenerateArm64FrameEndsBelowCallerFramePointer(t *testing.T) {
+	functions := []Function{
+		{Name: "framed", LocalsSize: 32, Lines: []Line{{Disassembled: "RET"}}},
+		{Name: "frameless", Lines: []Line{{Disassembled: "RET"}}},
+	}
+
+	generated, err := Generate(config.ARM64(), "", functions, GeneratorMeta{})
+	assert.NoError(t, err)
+	assert.Contains(t, string(generated), "TEXT ·framed(SB), 0, $48-0")
+	assert.Contains(t, string(generated), "TEXT ·frameless(SB), NOSPLIT, $0-0")
+
+	generated, err = Generate(config.AMD64(), "", functions, GeneratorMeta{})
+	assert.NoError(t, err)
+	assert.Contains(t, string(generated), "TEXT ·framed(SB), 0, $32-0")
+}

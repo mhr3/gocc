@@ -133,6 +133,16 @@ func Generate(arch *config.Arch, srcPath string, functions []Function, meta Gene
 			// keeps the original SP for the epilogue.
 			frameSize += function.StackAlign + 8
 		}
+		if frameSize > 0 && arch.Name == "arm64" && !function.Internal {
+			// cmd/asm allocates 16 bytes more than the frame declared here: the
+			// return address at 0(RSP) and, in the 8 bytes at the top, the frame
+			// pointer that the calling Go function saved. Everything between
+			// them belongs to this function. The C frame starts at 16(RSP) to
+			// stay 16-byte aligned (see rewriteStackOpsWithLinkage), so it needs
+			// 8 more bytes to end below that frame pointer; cmd/asm only takes
+			// frames in steps of 16.
+			frameSize += 16
+		}
 		builder.WriteString(fmt.Sprintf("\nTEXT %s(SB),%s,$%d-%d\n", name, textAttrs, frameSize, paramsSize+retSize))
 		if function.LocalsSize > 0 {
 			// The translated C stack slots are either scalars or transient

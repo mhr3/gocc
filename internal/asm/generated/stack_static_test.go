@@ -179,14 +179,18 @@ func (file *asmFile) reaches() map[*asmFunc][]asmReach {
 		if root.internal {
 			continue
 		}
-		seen := map[asmReach]bool{}
+		type visited struct {
+			fn    *asmFunc
+			depth int
+		}
+		seen := map[visited]bool{}
 		var visit func(fn *asmFunc, depth int)
 		visit = func(fn *asmFunc, depth int) {
-			reach := asmReach{root, depth}
-			if seen[reach] {
+			if seen[visited{fn, depth}] {
 				return
 			}
-			seen[reach] = true
+			seen[visited{fn, depth}] = true
+			reach := asmReach{root, depth}
 			reaches[fn] = append(reaches[fn], reach)
 
 			for _, inst := range fn.insts {
@@ -450,10 +454,11 @@ func checkArm64(file *asmFile) (problems []string) {
 				continue
 			}
 			for _, reach := range reaches[fn] {
-				// The Go assembler keeps the link register at 0(RSP) and pads
-				// the frame to 16 bytes; the C frame lies above those 16 bytes.
-				if offset < 16 || offset+size > reach.root.frame+16 {
-					report("touches %d bytes at %d(RSP); the frame of %s spans 16 to %d", size, offset, reach.root.name, reach.root.frame+16)
+				// The Go assembler keeps the return address at 0(RSP), and the
+				// top 8 bytes of what it allocates hold the frame pointer that
+				// the calling Go function saved. Neither belongs to the C code.
+				if offset < 8 || offset+size > reach.root.frame+8 {
+					report("touches %d bytes at %d(RSP); the frame of %s spans 8 to %d", size, offset, reach.root.name, reach.root.frame+8)
 				}
 			}
 		}
@@ -597,12 +602,12 @@ func TestStackChecksRejectBrokenAssembly(t *testing.T) {
 		},
 		{
 			name:   "arm64 frame",
-			source: arm64Header + "TEXT ·root(SB), 0, $32-0\n\tMOVD R0, 16(RSP)\n\tFMOVQ F0, 32(RSP)\n\tBL helper<>(SB)\n\tRET\nTEXT helper<>(SB), NOSPLIT|NOFRAME, $0-0\n\tMOVD R0, 40(RSP)\n\tRET\n",
+			source: arm64Header + "TEXT ·root(SB), 0, $32-0\n\tMOVD R0, 8(RSP)\n\tFMOVQ F0, 24(RSP)\n\tBL helper<>(SB)\n\tRET\nTEXT helper<>(SB), NOSPLIT|NOFRAME, $0-0\n\tMOVD R0, 32(RSP)\n\tRET\n",
 		},
 		{
 			name:     "arm64 operand outside the frame",
-			source:   arm64Header + "TEXT ·root(SB), 0, $32-0\n\tMOVD R0, 8(RSP)\n\tMOVD R0, 48(RSP)\n\tFMOVQ F0, 40(RSP)\n\tRET\n",
-			problems: []string{"touches 8 bytes at 8(RSP)", "touches 8 bytes at 48(RSP)", "touches 16 bytes at 40(RSP)"},
+			source:   arm64Header + "TEXT ·root(SB), 0, $32-0\n\tMOVD R0, (RSP)\n\tMOVD R0, 40(RSP)\n\tFMOVQ F0, 32(RSP)\n\tBL helper<>(SB)\n\tRET\nTEXT helper<>(SB), NOSPLIT|NOFRAME, $0-0\n\tMOVD R1, 40(RSP)\n\tRET\n",
+			problems: []string{"touches 8 bytes at 0(RSP)", "touches 8 bytes at 40(RSP)", "touches 16 bytes at 32(RSP)", "helper: touches 8 bytes at 40(RSP)"},
 		},
 		{
 			name:     "arm64 stack pointer moved",
