@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 	"unsafe"
+
+	"github.com/mhr3/gocc/internal/asm/generated"
 )
 
 // The functions of testdata/test_stack.c each force one use of the stack: a
@@ -246,6 +248,9 @@ type stackCall struct {
 	align   uintptr // the place of the calling frame, modulo 64
 	moved   bool    // the stack moved under the fixture
 	corrupt bool    // a frame above the fixture was written to
+	// lostFramePointer: the frame pointer that the Go function calling the
+	// fixture saved on the stack came back as something else
+	lostFramePointer bool
 }
 
 // stackFrameKinds is the number of frame sizes stackDescend picks from.
@@ -322,13 +327,16 @@ func stackLeaf(c *stackCall) {
 		data = buf[:copy(buf[:], data)]
 	}
 
-	// the frame is somewhere else once the stack has moved
+	// the frame is somewhere else once the stack has moved, and its frame
+	// pointer with it
 	frame := uintptr(unsafe.Pointer(&buf))
 	c.align = frame % 64
+	framePointer := generated.FramePointer() - frame
 
 	c.got = stackKernel(c.variant, c.fixture, data)
 
 	c.moved = uintptr(unsafe.Pointer(&buf)) != frame
+	c.lostFramePointer = generated.FramePointer()-uintptr(unsafe.Pointer(&buf)) != framePointer
 }
 
 // run calls the fixture below the frames of layout on a new goroutine, which
@@ -388,6 +396,9 @@ func TestStackFixtures(t *testing.T) {
 									where := fmt.Sprintf("%d bytes, on stack: %v, below %d frames of kind %d", len(data), onStack, depth, kind)
 									if c.corrupt {
 										t.Fatalf("a frame above the function was written to (%s)", where)
+									}
+									if c.lostFramePointer {
+										t.Fatalf("the frame pointer of the calling function was written over (%s)", where)
 									}
 									if want := fixture.ref(data, variant.width); c.got != want {
 										t.Fatalf("got %#x, want %#x (%s)", c.got, want, where)

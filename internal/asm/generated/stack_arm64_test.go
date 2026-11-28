@@ -14,9 +14,12 @@ var stackVariants = []stackVariant{
 // stackKernel calls a fixture. The calls are direct ones so that the compiler
 // sees the argument does not escape and leaves the caller's copy of the
 // input on the stack. It has no stack check of its own, so that a stack that
-// moves between the caller and the fixture was moved by the fixture.
+// moves between the caller and the fixture was moved by the fixture. It is a
+// frame of its own, which is where a fixture that writes over the saved frame
+// pointer does so: stackLeaf sees it once this function has returned.
 //
 //go:nosplit
+//go:noinline
 func stackKernel(_ stackVariantID, fixture stackFixtureID, data []byte) uint64 {
 	switch fixture {
 	case fixtureSpill:

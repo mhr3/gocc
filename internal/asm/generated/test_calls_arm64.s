@@ -9,7 +9,7 @@
 #include "textflag.h"
 #include "funcdata.h"
 
-TEXT ·Test_calls_nested(SB), 0, $208-40
+TEXT ·Test_calls_nested(SB), 0, $224-40
 	NO_LOCAL_POINTERS
 	MOVD p_base+0(FP), R0
 	MOVD p_len+8(FP), R1
@@ -69,7 +69,7 @@ LBB0_4:
 	MOVD R0, ret+32(FP)       // <--
 	RET                       // <--                                  // ret
 
-TEXT ·Test_calls_tail(SB), 0, $192-40
+TEXT ·Test_calls_tail(SB), 0, $208-40
 	NO_LOCAL_POINTERS
 	MOVD p_base+0(FP), R0
 	MOVD p_len+8(FP), R1
@@ -207,7 +207,7 @@ LBB2_21:
 	BNE    LBB2_21     // <--                                  // b.ne	.LBB2_21
 	JMP    LBB2_15     // <--                                  // b	.LBB2_15
 
-TEXT ·Test_calls_big_frame(SB), 0, $4832-32
+TEXT ·Test_calls_big_frame(SB), 0, $4848-32
 	NO_LOCAL_POINTERS
 	MOVD p_base+0(FP), R0
 	MOVD p_len+8(FP), R1
@@ -219,7 +219,7 @@ TEXT ·Test_calls_big_frame(SB), 0, $4832-32
 	MOVD R0, ret+24(FP)         // <--
 	RET                         // <--                                  // ret
 
-TEXT ·Test_calls_consts(SB), 0, $16-24
+TEXT ·Test_calls_consts(SB), 0, $32-24
 	NO_LOCAL_POINTERS
 	FMOVD x+0(FP), F0
 	MOVD  n+8(FP), R0
@@ -231,7 +231,7 @@ TEXT ·Test_calls_consts(SB), 0, $16-24
 	FMOVD F0, ret+16(FP)    // <--
 	RET                     // <--                                  // ret
 
-TEXT ·Test_calls_local_pointer(SB), 0, $272-16
+TEXT ·Test_calls_local_pointer(SB), 0, $288-16
 	NO_LOCAL_POINTERS
 	MOVD  seed+0(FP), R0
 	NOP                          // (skipped)                            // sub	sp, sp, #272
@@ -269,7 +269,7 @@ TEXT ·Test_calls_local_pointer(SB), 0, $272-16
 	MOVD  R0, ret+8(FP)          // <--
 	RET                          // <--                                  // ret
 
-TEXT ·Test_calls_big_frame_bytes(SB), 0, $32800-32
+TEXT ·Test_calls_big_frame_bytes(SB), 0, $32816-32
 	NO_LOCAL_POINTERS
 	MOVD p_base+0(FP), R0
 	MOVD p_len+8(FP), R1
