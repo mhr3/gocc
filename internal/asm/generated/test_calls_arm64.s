@@ -9,6 +9,12 @@
 #include "textflag.h"
 #include "funcdata.h"
 
+DATA scale_table_tbl<>+0x00(SB)/8, $0x3ff3c083126e978d
+DATA scale_table_tbl<>+0x08(SB)/8, $0x4002c3c9eecbfb16
+DATA scale_table_tbl<>+0x10(SB)/8, $0x400ba7525460aa65
+DATA scale_table_tbl<>+0x18(SB)/8, $0x4012456d5cfaacda
+GLOBL scale_table_tbl<>(SB), (RODATA|NOPTR), $32
+
 TEXT ·Test_calls_nested(SB), 0, $224-40
 	NO_LOCAL_POINTERS
 	MOVD p_base+0(FP), R0
@@ -38,26 +44,26 @@ TEXT ·Test_calls_nested(SB), 0, $224-40
 	MOVD ZR, R23              // <--                                  // mov	x23, xzr
 
 LBB0_2:
-	ADD  R22, R19, R2          // <--                                  // add	x2, x19, x22
-	MOVD R21, R0               // <--                                  // mov	x0, x21
-	MOVD R26, R1               // <--                                  // mov	x1, x26
-	CALL mix_with_locals<>(SB) // <--                                  // bl	mix_with_locals
-	ADD  R23, R0, R23          // <--                                  // add	x23, x0, x23
-	ADD  $16, RSP, R0          // <--                                  // mov	x0, sp
-	MOVW $8, R1                // <--                                  // mov	w1, #8
-	MOVD R22, R2               // <--                                  // mov	x2, x22
-	CALL mix_with_locals<>(SB) // <--                                  // bl	mix_with_locals
-	ADD  $1, R22, R22          // <--                                  // add	x22, x22, #1
-	EOR  R0, R23, R23          // <--                                  // eor	x23, x23, x0
-	CMP  R22, R26              // <--                                  // cmp	x26, x22
-	BNE  LBB0_2                // <--                                  // b.ne	.LBB0_2
-	MOVD R23, R0               // <--                                  // mov	x0, x23
-	LDP  112(RSP), (R26, R19)  // <--                                  // ldp	x26, x19, [sp, #96]
-	LDP  96(RSP), (R22, R21)   // <--                                  // ldp	x22, x21, [sp, #80]
-	LDP  80(RSP), (R30, R23)   // <--                                  // ldp	x30, x23, [sp, #64]
-	NOP                        // (skipped)                            // add	sp, sp, #112
-	MOVD R0, ret+32(FP)        // <--
-	RET                        // <--                                  // ret
+	ADD  R22, R19, R2         // <--                                  // add	x2, x19, x22
+	MOVD R21, R0              // <--                                  // mov	x0, x21
+	MOVD R26, R1              // <--                                  // mov	x1, x26
+	CALL fn_mix_with_locals   // <--                                  // bl	mix_with_locals
+	ADD  R23, R0, R23         // <--                                  // add	x23, x0, x23
+	ADD  $16, RSP, R0         // <--                                  // mov	x0, sp
+	MOVW $8, R1               // <--                                  // mov	w1, #8
+	MOVD R22, R2              // <--                                  // mov	x2, x22
+	CALL fn_mix_with_locals   // <--                                  // bl	mix_with_locals
+	ADD  $1, R22, R22         // <--                                  // add	x22, x22, #1
+	EOR  R0, R23, R23         // <--                                  // eor	x23, x23, x0
+	CMP  R22, R26             // <--                                  // cmp	x26, x22
+	BNE  LBB0_2               // <--                                  // b.ne	.LBB0_2
+	MOVD R23, R0              // <--                                  // mov	x0, x23
+	LDP  112(RSP), (R26, R19) // <--                                  // ldp	x26, x19, [sp, #96]
+	LDP  96(RSP), (R22, R21)  // <--                                  // ldp	x22, x21, [sp, #80]
+	LDP  80(RSP), (R30, R23)  // <--                                  // ldp	x30, x23, [sp, #64]
+	NOP                       // (skipped)                            // add	sp, sp, #112
+	MOVD R0, ret+32(FP)       // <--
+	RET                       // <--                                  // ret
 
 LBB0_4:
 	MOVD ZR, R23              // <--                                  // mov	x23, xzr
@@ -69,222 +75,10 @@ LBB0_4:
 	MOVD R0, ret+32(FP)       // <--
 	RET                       // <--                                  // ret
 
-TEXT ·Test_calls_tail(SB), 0, $208-40
-	NO_LOCAL_POINTERS
-	MOVD p_base+0(FP), R0
-	MOVD p_len+8(FP), R1
-	MOVD p_cap+16(FP), R2
-	MOVD mode+24(FP), R3
-	NOP                       // (skipped)                            // sub	sp, sp, #192
-	MOVD R30, 144(RSP)        // <--                                  // str	x30, [sp, #128]
-	STP  (R24, R23), 160(RSP) // <--                                  // stp	x24, x23, [sp, #144]
-	STP  (R22, R21), 176(RSP) // <--                                  // stp	x22, x21, [sp, #160]
-	STP  (R26, R19), 192(RSP) // <--                                  // stp	x26, x19, [sp, #176]
-	CBZ  R1, LBB2_16          // <--                                  // cbz	x1, .LBB2_16
-	CMP  $16, R1              // <--                                  // cmp	x1, #16
-	MOVW $16, R8              // <--                                  // mov	w8, #16
-	CSEL LO, R1, R8, R8       // <--                                  // csel	x8, x1, x8, lo
-	MOVD R3, R26              // <--                                  // mov	x26, x3
-	MOVD R1, R19              // <--                                  // mov	x19, x1
-	MOVD R0, R21              // <--                                  // mov	x21, x0
-	MOVD ZR, R22              // <--                                  // mov	x22, xzr
-	LSL  $3, R8, R23          // <--                                  // lsl	x23, x8, #3
-	ADD  $16, RSP, R24        // <--                                  // mov	x24, sp
-
-LBB2_2:
-	MOVD  (R21)(R22), R0        // <--                                  // ldr	x0, [x21, x22]
-	CALL  triple_plus_one<>(SB) // <--                                  // bl	triple_plus_one
-	MOVD  R0, (R24)(R22)        // <--                                  // str	x0, [x24, x22]
-	ADD   $8, R22, R22          // <--                                  // add	x22, x22, #8
-	CMP   R22, R23              // <--                                  // cmp	x23, x22
-	BNE   LBB2_2                // <--                                  // b.ne	.LBB2_2
-	CMP   $1, R26               // <--                                  // cmp	x26, #1
-	BEQ   LBB2_17               // <--                                  // b.eq	.LBB2_17
-	CMP   $2, R26               // <--                                  // cmp	x26, #2
-	BNE   LBB2_18               // <--                                  // b.ne	.LBB2_18
-	SUB   $1, R19, R8           // <--                                  // sub	x8, x19, #1
-	MOVW  $15, R9               // <--                                  // mov	w9, #15
-	CMP   $15, R8               // <--                                  // cmp	x8, #15
-	CSEL  LO, R8, R9, R8        // <--                                  // csel	x8, x8, x9, lo
-	CBZ   R8, LBB2_19           // <--                                  // cbz	x8, .LBB2_19
-	ADD   $1, R8, R10           // <--                                  // add	x10, x8, #1
-	FMOVQ 16(RSP), F0           // <--                                  // ldr	q0, [sp]
-	AND   $30, R10, R9          // <--                                  // and	x9, x10, #0x1e
-	CMP   $2, R9                // <--                                  // cmp	x9, #2
-	BEQ   LBB2_14               // <--                                  // b.eq	.LBB2_14
-	FMOVQ 32(RSP), F1           // <--                                  // ldr	q1, [sp, #16]
-	CMP   $4, R9                // <--                                  // cmp	x9, #4
-	VADD  V0.D2, V1.D2, V0.D2   // <--                                  // add	v0.2d, v1.2d, v0.2d
-	BEQ   LBB2_14               // <--                                  // b.eq	.LBB2_14
-	FMOVQ 48(RSP), F1           // <--                                  // ldr	q1, [sp, #32]
-	CMP   $6, R9                // <--                                  // cmp	x9, #6
-	VADD  V0.D2, V1.D2, V0.D2   // <--                                  // add	v0.2d, v1.2d, v0.2d
-	BEQ   LBB2_14               // <--                                  // b.eq	.LBB2_14
-	FMOVQ 64(RSP), F1           // <--                                  // ldr	q1, [sp, #48]
-	CMP   $8, R9                // <--                                  // cmp	x9, #8
-	VADD  V0.D2, V1.D2, V0.D2   // <--                                  // add	v0.2d, v1.2d, v0.2d
-	BEQ   LBB2_14               // <--                                  // b.eq	.LBB2_14
-	FMOVQ 80(RSP), F1           // <--                                  // ldr	q1, [sp, #64]
-	CMP   $10, R9               // <--                                  // cmp	x9, #10
-	VADD  V0.D2, V1.D2, V0.D2   // <--                                  // add	v0.2d, v1.2d, v0.2d
-	BEQ   LBB2_14               // <--                                  // b.eq	.LBB2_14
-	FMOVQ 96(RSP), F1           // <--                                  // ldr	q1, [sp, #80]
-	CMP   $12, R9               // <--                                  // cmp	x9, #12
-	VADD  V0.D2, V1.D2, V0.D2   // <--                                  // add	v0.2d, v1.2d, v0.2d
-	BEQ   LBB2_14               // <--                                  // b.eq	.LBB2_14
-	FMOVQ 112(RSP), F1          // <--                                  // ldr	q1, [sp, #96]
-	CMP   $14, R9               // <--                                  // cmp	x9, #14
-	VADD  V0.D2, V1.D2, V0.D2   // <--                                  // add	v0.2d, v1.2d, v0.2d
-	BEQ   LBB2_14               // <--                                  // b.eq	.LBB2_14
-	FMOVQ 128(RSP), F1          // <--                                  // ldr	q1, [sp, #112]
-	VADD  V0.D2, V1.D2, V0.D2   // <--                                  // add	v0.2d, v1.2d, v0.2d
-
-LBB2_14:
-	WORD  $0x5ef1b800 // VADDP V0.D2, V0                      // addp	d0, v0.2d
-	CMP   R9, R10     // <--                                  // cmp	x10, x9
-	FMOVD F0, R0      // <--                                  // fmov	x0, d0
-	BNE   LBB2_20     // <--                                  // b.ne	.LBB2_20
-
-LBB2_15:
-	LDP  192(RSP), (R26, R19) // <--                                  // ldp	x26, x19, [sp, #176]
-	LDP  176(RSP), (R22, R21) // <--                                  // ldp	x22, x21, [sp, #160]
-	LDP  160(RSP), (R24, R23) // <--                                  // ldp	x24, x23, [sp, #144]
-	MOVD 144(RSP), R30        // <--                                  // ldr	x30, [sp, #128]
-	NOP                       // (skipped)                            // add	sp, sp, #192
-	MOVD R0, ret+32(FP)       // <--
-	RET                       // <--                                  // ret
-
-LBB2_16:
-	MOVD $-1, R0              // <--                                  // mov	x0, #-1
-	LDP  192(RSP), (R26, R19) // <--                                  // ldp	x26, x19, [sp, #176]
-	LDP  176(RSP), (R22, R21) // <--                                  // ldp	x22, x21, [sp, #160]
-	LDP  160(RSP), (R24, R23) // <--                                  // ldp	x24, x23, [sp, #144]
-	MOVD 144(RSP), R30        // <--                                  // ldr	x30, [sp, #128]
-	NOP                       // (skipped)                            // add	sp, sp, #192
-	MOVD R0, ret+32(FP)       // <--
-	RET                       // <--                                  // ret
-
-LBB2_17:
-	MOVD 16(RSP), R0          // <--                                  // ldr	x0, [sp]
-	LDP  192(RSP), (R26, R19) // <--                                  // ldp	x26, x19, [sp, #176]
-	LDP  176(RSP), (R22, R21) // <--                                  // ldp	x22, x21, [sp, #160]
-	LDP  160(RSP), (R24, R23) // <--                                  // ldp	x24, x23, [sp, #144]
-	MOVD 144(RSP), R30        // <--                                  // ldr	x30, [sp, #128]
-	NOP                       // (skipped)                            // add	sp, sp, #192
-	MOVD R0, ret+32(FP)       // <--
-	RET                       // <--                                  // ret
-
-LBB2_18:
-	SUB  $1, R19, R8           // <--                                  // sub	x8, x19, #1
-	CMP  $16, R19              // <--                                  // cmp	x19, #16
-	MOVW $15, R9               // <--                                  // mov	w9, #15
-	MOVD 144(RSP), R30         // <--                                  // ldr	x30, [sp, #128]
-	CSEL HI, R9, R8, R8        // <--                                  // csel	x8, x9, x8, hi
-	ADD  $16, RSP, R9          // <--                                  // mov	x9, sp
-	LDP  192(RSP), (R26, R19)  // <--                                  // ldp	x26, x19, [sp, #176]
-	LDP  176(RSP), (R22, R21)  // <--                                  // ldp	x22, x21, [sp, #160]
-	LDP  160(RSP), (R24, R23)  // <--                                  // ldp	x24, x23, [sp, #144]
-	MOVD (R9)(R8<<3), R0       // <--                                  // ldr	x0, [x9, x8, lsl #3]
-	NOP                        // (skipped)                            // add	sp, sp, #192
-	CALL triple_plus_one<>(SB) // <--                                  // b	triple_plus_one
-	MOVD R0, ret+32(FP)        // <--
-	RET                        // <--                                  // ret
-
-LBB2_19:
-	MOVD ZR, R9 // <--                                  // mov	x9, xzr
-	MOVD ZR, R0 // <--                                  // mov	x0, xzr
-
-LBB2_20:
-	SUB R9, R8, R8     // <--                                  // sub	x8, x8, x9
-	ADD $16, RSP, R10  // <--                                  // mov	x10, sp
-	ADD $1, R8, R8     // <--                                  // add	x8, x8, #1
-	ADD R9<<3, R10, R9 // <--                                  // add	x9, x10, x9, lsl #3
-
-LBB2_21:
-	MOVD.P 8(R9), R10  // <--                                  // ldr	x10, [x9], #8
-	SUBS   $1, R8, R8  // <--                                  // subs	x8, x8, #1
-	ADD    R0, R10, R0 // <--                                  // add	x0, x10, x0
-	BNE    LBB2_21     // <--                                  // b.ne	.LBB2_21
-	JMP    LBB2_15     // <--                                  // b	.LBB2_15
-
-TEXT ·Test_calls_big_frame(SB), 0, $4848-32
-	NO_LOCAL_POINTERS
-	MOVD p_base+0(FP), R0
-	MOVD p_len+8(FP), R1
-	MOVD p_cap+16(FP), R2
-	MOVD R30, 16(RSP)           // <--                                  // str	x30, [sp, #-16]!
-	CALL big_frame_helper<>(SB) // <--                                  // bl	big_frame_helper
-	ADD  $1, R0, R0             // <--                                  // add	x0, x0, #1
-	MOVD 16(RSP), R30           // <--                                  // ldr	x30, [sp], #16
-	MOVD R0, ret+24(FP)         // <--
-	RET                         // <--                                  // ret
-
-TEXT ·Test_calls_consts(SB), 0, $32-24
-	NO_LOCAL_POINTERS
-	FMOVD x+0(FP), F0
-	MOVD  n+8(FP), R0
-	MOVD  R30, 16(RSP)      // <--                                  // str	x30, [sp, #-16]!
-	CALL  scale_table<>(SB) // <--                                  // bl	scale_table
-	FMOVD $1., F1           // <--                                  // fmov	d1, #1.00000000
-	FADDD F1, F0, F0        // <--                                  // fadd	d0, d0, d1
-	MOVD  16(RSP), R30      // <--                                  // ldr	x30, [sp], #16
-	FMOVD F0, ret+16(FP)    // <--
-	RET                     // <--                                  // ret
-
-TEXT ·Test_calls_local_pointer(SB), 0, $288-16
-	NO_LOCAL_POINTERS
-	MOVD  seed+0(FP), R0
-	NOP                          // (skipped)                            // sub	sp, sp, #272
-	MOVD  R0, R1                 // <--                                  // mov	x1, x0
-	ADD   $16, RSP, R0           // <--                                  // mov	x0, sp
-	STP   (R25, R30), 272(RSP)   // <--                                  // stp	x25, x30, [sp, #256]
-	CALL  fill_squares<>(SB)     // <--                                  // bl	fill_squares
-	FLDPQ 240(RSP), (F16, F17)   // <--                                  // ldp	q16, q17, [sp, #224]
-	FLDPQ 112(RSP), (F18, F19)   // <--                                  // ldp	q18, q19, [sp, #96]
-	FLDPQ 144(RSP), (F0, F1)     // <--                                  // ldp	q0, q1, [sp, #128]
-	VADD  V17.D2, V19.D2, V17.D2 // <--                                  // add	v17.2d, v19.2d, v17.2d
-	FLDPQ 208(RSP), (F2, F3)     // <--                                  // ldp	q2, q3, [sp, #192]
-	FLDPQ 80(RSP), (F4, F5)      // <--                                  // ldp	q4, q5, [sp, #64]
-	VADD  V2.D2, V4.D2, V2.D2    // <--                                  // add	v2.2d, v4.2d, v2.2d
-	FLDPQ 16(RSP), (F22, F19)    // <--                                  // ldp	q22, q19, [sp]
-	VADD  V3.D2, V5.D2, V3.D2    // <--                                  // add	v3.2d, v5.2d, v3.2d
-	VADD  V0.D2, V22.D2, V0.D2   // <--                                  // add	v0.2d, v22.2d, v0.2d
-	FLDPQ 176(RSP), (F6, F7)     // <--                                  // ldp	q6, q7, [sp, #160]
-	VADD  V1.D2, V19.D2, V1.D2   // <--                                  // add	v1.2d, v19.2d, v1.2d
-	VADD  V2.D2, V0.D2, V0.D2    // <--                                  // add	v0.2d, v0.2d, v2.2d
-	VADD  V3.D2, V1.D2, V1.D2    // <--                                  // add	v1.2d, v1.2d, v3.2d
-	VADD  V16.D2, V18.D2, V3.D2  // <--                                  // add	v3.2d, v18.2d, v16.2d
-	FLDPQ 48(RSP), (F20, F21)    // <--                                  // ldp	q20, q21, [sp, #32]
-	VADD  V6.D2, V20.D2, V6.D2   // <--                                  // add	v6.2d, v20.2d, v6.2d
-	VADD  V7.D2, V21.D2, V7.D2   // <--                                  // add	v7.2d, v21.2d, v7.2d
-	VADD  V3.D2, V6.D2, V3.D2    // <--                                  // add	v3.2d, v6.2d, v3.2d
-	VADD  V17.D2, V7.D2, V5.D2   // <--                                  // add	v5.2d, v7.2d, v17.2d
-	VADD  V3.D2, V0.D2, V0.D2    // <--                                  // add	v0.2d, v0.2d, v3.2d
-	VADD  V5.D2, V1.D2, V1.D2    // <--                                  // add	v1.2d, v1.2d, v5.2d
-	LDP   272(RSP), (R25, R30)   // <--                                  // ldp	x25, x30, [sp, #256]
-	VADD  V1.D2, V0.D2, V0.D2    // <--                                  // add	v0.2d, v0.2d, v1.2d
-	WORD  $0x5ef1b800            // VADDP V0.D2, V0                      // addp	d0, v0.2d
-	FMOVD F0, R0                 // <--                                  // fmov	x0, d0
-	NOP                          // (skipped)                            // add	sp, sp, #272
-	MOVD  R0, ret+8(FP)          // <--
-	RET                          // <--                                  // ret
-
-TEXT ·Test_calls_big_frame_bytes(SB), 0, $32816-32
-	NO_LOCAL_POINTERS
-	MOVD p_base+0(FP), R0
-	MOVD p_len+8(FP), R1
-	MOVD R30, 16(RSP)                 // <--                                  // str	x30, [sp, #-16]!
-	CALL big_frame_bytes_helper<>(SB) // <--                                  // bl	big_frame_bytes_helper
-	ADD  $1, R0, R0                   // <--                                  // add	x0, x0, #1
-	MOVD 16(RSP), R30                 // <--                                  // ldr	x30, [sp], #16
-	MOVD R0, ret+24(FP)               // <--
-	RET                               // <--                                  // ret
-
-TEXT ·test_calls_big_frame_stringInternal(SB), NOSPLIT|NOFRAME, $0-32
-	JMP ·Test_calls_big_frame_bytes(SB)
-
-// internal function, its stack space has been flattened into its caller's frame
-TEXT mix_with_locals<>(SB), NOSPLIT|NOFRAME, $0-0
+// fn_mix_with_locals is the C function mix_with_locals.
+// It runs in the frame of Test_calls_nested, so its code is part of this function,
+// where the Go runtime can unwind the stack from it.
+fn_mix_with_locals:
 	NOP                       // (skipped)                            // sub	sp, sp, #96
 	STP  (R26, R19), 208(RSP) // <--                                  // stp	x26, x19, [sp, #80]
 	MOVD R1, R19              // <--                                  // mov	x19, x1
@@ -336,16 +130,16 @@ LBB1_10:
 	ADD  $128, RSP, R0        // <--                                  // mov	x0, sp
 	MOVW $8, R1               // <--                                  // mov	w1, #8
 	MOVD R8, 184(RSP)         // <--                                  // str	x8, [sp, #56]
-	CALL weighted_sum<>(SB)   // <--                                  // bl	weighted_sum
+	CALL fn_weighted_sum      // <--                                  // bl	weighted_sum
 	MOVD R0, R21              // <--                                  // mov	x21, x0
 	MOVD R26, R0              // <--                                  // mov	x0, x26
 	MOVD R19, R1              // <--                                  // mov	x1, x19
-	CALL weighted_sum<>(SB)   // <--                                  // bl	weighted_sum
+	CALL fn_weighted_sum      // <--                                  // bl	weighted_sum
 	SUB  R0, R21, R0          // <--                                  // sub	x0, x21, x0
 	LDP  208(RSP), (R26, R19) // <--                                  // ldp	x26, x19, [sp, #80]
 	LDP  192(RSP), (R30, R21) // <--                                  // ldp	x30, x21, [sp, #64]
 	NOP                       // (skipped)                            // add	sp, sp, #96
-	RET                       // <--                                  // ret
+	WORD $0xd65f03c0          // RET                                  // ret (RET would undo the frame of Test_calls_nested)
 
 LBB1_11:
 	MOVD 24(R26), R8  // <--                                  // ldr	x8, [x26, #24]
@@ -379,14 +173,214 @@ LBB1_17:
 	MOVD 56(R26), R8 // <--                                  // ldr	x8, [x26, #56]
 	JMP  LBB1_10     // <--                                  // b	.LBB1_10
 
-// internal function, its stack space has been flattened into its caller's frame
-TEXT triple_plus_one<>(SB), NOSPLIT|NOFRAME, $0-0
-	ADD R0<<1, R0, R8 // <--                                  // add	x8, x0, x0, lsl #1
-	ADD $1, R8, R0    // <--                                  // add	x0, x8, #1
-	RET               // <--                                  // ret
+// fn_weighted_sum is the C function weighted_sum.
+// It runs in the frame of Test_calls_nested, so its code is part of this function,
+// where the Go runtime can unwind the stack from it.
+fn_weighted_sum:
+	CMP  $1, R1  // <--                                  // cmp	x1, #1
+	BLT  LBB12_3 // <--                                  // b.lt	.LBB12_3
+	BNE  LBB12_4 // <--                                  // b.ne	.LBB12_4
+	MOVD ZR, R9  // <--                                  // mov	x9, xzr
+	MOVD ZR, R8  // <--                                  // mov	x8, xzr
+	JMP  LBB12_7 // <--                                  // b	.LBB12_7
 
-// internal function, its stack space has been flattened into its caller's frame
-TEXT big_frame_helper<>(SB), NOSPLIT|NOFRAME, $0-0
+LBB12_3:
+	MOVD ZR, R0      // <--                                  // mov	x0, xzr
+	WORD $0xd65f03c0 // RET                                  // ret (RET would undo the frame of Test_calls_nested)
+
+LBB12_4:
+	MOVD ZR, R11     // <--                                  // mov	x11, xzr
+	MOVD ZR, R8      // <--                                  // mov	x8, xzr
+	MOVD ZR, R10     // <--                                  // mov	x10, xzr
+	AND  $-2, R1, R9 // <--                                  // and	x9, x1, #0xfffffffffffffffe
+
+LBB12_5:
+	ADD  R11<<3, R0, R12    // <--                                  // add	x12, x0, x11, lsl #3
+	ADD  $2, R11, R14       // <--                                  // add	x14, x11, #2
+	CMP  R14, R9            // <--                                  // cmp	x9, x14
+	LDP  (R12), (R13, R12)  // <--                                  // ldp	x13, x12, [x12]
+	MADD R11, R13, R13, R11 // <--                                  // madd	x11, x13, x11, x13
+	MADD R14, R10, R12, R10 // <--                                  // madd	x10, x12, x14, x10
+	ADD  R8, R11, R8        // <--                                  // add	x8, x11, x8
+	MOVD R14, R11           // <--                                  // mov	x11, x14
+	BNE  LBB12_5            // <--                                  // b.ne	.LBB12_5
+	ADD  R8, R10, R8        // <--                                  // add	x8, x10, x8
+	CMP  R1, R9             // <--                                  // cmp	x9, x1
+	BEQ  LBB12_8            // <--                                  // b.eq	.LBB12_8
+
+LBB12_7:
+	MOVD (R0)(R9<<3), R10 // <--                                  // ldr	x10, [x0, x9, lsl #3]
+	ADD  $1, R9, R9       // <--                                  // add	x9, x9, #1
+	CMP  R9, R1           // <--                                  // cmp	x1, x9
+	MADD R9, R8, R10, R8  // <--                                  // madd	x8, x10, x9, x8
+	BNE  LBB12_7          // <--                                  // b.ne	.LBB12_7
+
+LBB12_8:
+	MOVD R8, R0      // <--                                  // mov	x0, x8
+	WORD $0xd65f03c0 // RET                                  // ret (RET would undo the frame of Test_calls_nested)
+
+TEXT ·Test_calls_tail(SB), 0, $208-40
+	NO_LOCAL_POINTERS
+	MOVD p_base+0(FP), R0
+	MOVD p_len+8(FP), R1
+	MOVD p_cap+16(FP), R2
+	MOVD mode+24(FP), R3
+	NOP                       // (skipped)                            // sub	sp, sp, #192
+	MOVD R30, 144(RSP)        // <--                                  // str	x30, [sp, #128]
+	STP  (R24, R23), 160(RSP) // <--                                  // stp	x24, x23, [sp, #144]
+	STP  (R22, R21), 176(RSP) // <--                                  // stp	x22, x21, [sp, #160]
+	STP  (R26, R19), 192(RSP) // <--                                  // stp	x26, x19, [sp, #176]
+	CBZ  R1, LBB2_16          // <--                                  // cbz	x1, .LBB2_16
+	CMP  $16, R1              // <--                                  // cmp	x1, #16
+	MOVW $16, R8              // <--                                  // mov	w8, #16
+	CSEL LO, R1, R8, R8       // <--                                  // csel	x8, x1, x8, lo
+	MOVD R3, R26              // <--                                  // mov	x26, x3
+	MOVD R1, R19              // <--                                  // mov	x19, x1
+	MOVD R0, R21              // <--                                  // mov	x21, x0
+	MOVD ZR, R22              // <--                                  // mov	x22, xzr
+	LSL  $3, R8, R23          // <--                                  // lsl	x23, x8, #3
+	ADD  $16, RSP, R24        // <--                                  // mov	x24, sp
+
+LBB2_2:
+	MOVD  (R21)(R22), R0      // <--                                  // ldr	x0, [x21, x22]
+	CALL  fn_triple_plus_one  // <--                                  // bl	triple_plus_one
+	MOVD  R0, (R24)(R22)      // <--                                  // str	x0, [x24, x22]
+	ADD   $8, R22, R22        // <--                                  // add	x22, x22, #8
+	CMP   R22, R23            // <--                                  // cmp	x23, x22
+	BNE   LBB2_2              // <--                                  // b.ne	.LBB2_2
+	CMP   $1, R26             // <--                                  // cmp	x26, #1
+	BEQ   LBB2_17             // <--                                  // b.eq	.LBB2_17
+	CMP   $2, R26             // <--                                  // cmp	x26, #2
+	BNE   LBB2_18             // <--                                  // b.ne	.LBB2_18
+	SUB   $1, R19, R8         // <--                                  // sub	x8, x19, #1
+	MOVW  $15, R9             // <--                                  // mov	w9, #15
+	CMP   $15, R8             // <--                                  // cmp	x8, #15
+	CSEL  LO, R8, R9, R8      // <--                                  // csel	x8, x8, x9, lo
+	CBZ   R8, LBB2_19         // <--                                  // cbz	x8, .LBB2_19
+	ADD   $1, R8, R10         // <--                                  // add	x10, x8, #1
+	FMOVQ 16(RSP), F0         // <--                                  // ldr	q0, [sp]
+	AND   $30, R10, R9        // <--                                  // and	x9, x10, #0x1e
+	CMP   $2, R9              // <--                                  // cmp	x9, #2
+	BEQ   LBB2_14             // <--                                  // b.eq	.LBB2_14
+	FMOVQ 32(RSP), F1         // <--                                  // ldr	q1, [sp, #16]
+	CMP   $4, R9              // <--                                  // cmp	x9, #4
+	VADD  V0.D2, V1.D2, V0.D2 // <--                                  // add	v0.2d, v1.2d, v0.2d
+	BEQ   LBB2_14             // <--                                  // b.eq	.LBB2_14
+	FMOVQ 48(RSP), F1         // <--                                  // ldr	q1, [sp, #32]
+	CMP   $6, R9              // <--                                  // cmp	x9, #6
+	VADD  V0.D2, V1.D2, V0.D2 // <--                                  // add	v0.2d, v1.2d, v0.2d
+	BEQ   LBB2_14             // <--                                  // b.eq	.LBB2_14
+	FMOVQ 64(RSP), F1         // <--                                  // ldr	q1, [sp, #48]
+	CMP   $8, R9              // <--                                  // cmp	x9, #8
+	VADD  V0.D2, V1.D2, V0.D2 // <--                                  // add	v0.2d, v1.2d, v0.2d
+	BEQ   LBB2_14             // <--                                  // b.eq	.LBB2_14
+	FMOVQ 80(RSP), F1         // <--                                  // ldr	q1, [sp, #64]
+	CMP   $10, R9             // <--                                  // cmp	x9, #10
+	VADD  V0.D2, V1.D2, V0.D2 // <--                                  // add	v0.2d, v1.2d, v0.2d
+	BEQ   LBB2_14             // <--                                  // b.eq	.LBB2_14
+	FMOVQ 96(RSP), F1         // <--                                  // ldr	q1, [sp, #80]
+	CMP   $12, R9             // <--                                  // cmp	x9, #12
+	VADD  V0.D2, V1.D2, V0.D2 // <--                                  // add	v0.2d, v1.2d, v0.2d
+	BEQ   LBB2_14             // <--                                  // b.eq	.LBB2_14
+	FMOVQ 112(RSP), F1        // <--                                  // ldr	q1, [sp, #96]
+	CMP   $14, R9             // <--                                  // cmp	x9, #14
+	VADD  V0.D2, V1.D2, V0.D2 // <--                                  // add	v0.2d, v1.2d, v0.2d
+	BEQ   LBB2_14             // <--                                  // b.eq	.LBB2_14
+	FMOVQ 128(RSP), F1        // <--                                  // ldr	q1, [sp, #112]
+	VADD  V0.D2, V1.D2, V0.D2 // <--                                  // add	v0.2d, v1.2d, v0.2d
+
+LBB2_14:
+	WORD  $0x5ef1b800 // VADDP V0.D2, V0                      // addp	d0, v0.2d
+	CMP   R9, R10     // <--                                  // cmp	x10, x9
+	FMOVD F0, R0      // <--                                  // fmov	x0, d0
+	BNE   LBB2_20     // <--                                  // b.ne	.LBB2_20
+
+LBB2_15:
+	LDP  192(RSP), (R26, R19) // <--                                  // ldp	x26, x19, [sp, #176]
+	LDP  176(RSP), (R22, R21) // <--                                  // ldp	x22, x21, [sp, #160]
+	LDP  160(RSP), (R24, R23) // <--                                  // ldp	x24, x23, [sp, #144]
+	MOVD 144(RSP), R30        // <--                                  // ldr	x30, [sp, #128]
+	NOP                       // (skipped)                            // add	sp, sp, #192
+	MOVD R0, ret+32(FP)       // <--
+	RET                       // <--                                  // ret
+
+LBB2_16:
+	MOVD $-1, R0              // <--                                  // mov	x0, #-1
+	LDP  192(RSP), (R26, R19) // <--                                  // ldp	x26, x19, [sp, #176]
+	LDP  176(RSP), (R22, R21) // <--                                  // ldp	x22, x21, [sp, #160]
+	LDP  160(RSP), (R24, R23) // <--                                  // ldp	x24, x23, [sp, #144]
+	MOVD 144(RSP), R30        // <--                                  // ldr	x30, [sp, #128]
+	NOP                       // (skipped)                            // add	sp, sp, #192
+	MOVD R0, ret+32(FP)       // <--
+	RET                       // <--                                  // ret
+
+LBB2_17:
+	MOVD 16(RSP), R0          // <--                                  // ldr	x0, [sp]
+	LDP  192(RSP), (R26, R19) // <--                                  // ldp	x26, x19, [sp, #176]
+	LDP  176(RSP), (R22, R21) // <--                                  // ldp	x22, x21, [sp, #160]
+	LDP  160(RSP), (R24, R23) // <--                                  // ldp	x24, x23, [sp, #144]
+	MOVD 144(RSP), R30        // <--                                  // ldr	x30, [sp, #128]
+	NOP                       // (skipped)                            // add	sp, sp, #192
+	MOVD R0, ret+32(FP)       // <--
+	RET                       // <--                                  // ret
+
+LBB2_18:
+	SUB  $1, R19, R8          // <--                                  // sub	x8, x19, #1
+	CMP  $16, R19             // <--                                  // cmp	x19, #16
+	MOVW $15, R9              // <--                                  // mov	w9, #15
+	MOVD 144(RSP), R30        // <--                                  // ldr	x30, [sp, #128]
+	CSEL HI, R9, R8, R8       // <--                                  // csel	x8, x9, x8, hi
+	ADD  $16, RSP, R9         // <--                                  // mov	x9, sp
+	LDP  192(RSP), (R26, R19) // <--                                  // ldp	x26, x19, [sp, #176]
+	LDP  176(RSP), (R22, R21) // <--                                  // ldp	x22, x21, [sp, #160]
+	LDP  160(RSP), (R24, R23) // <--                                  // ldp	x24, x23, [sp, #144]
+	MOVD (R9)(R8<<3), R0      // <--                                  // ldr	x0, [x9, x8, lsl #3]
+	NOP                       // (skipped)                            // add	sp, sp, #192
+	CALL fn_triple_plus_one   // <--                                  // b	triple_plus_one
+	MOVD R0, ret+32(FP)       // <--
+	RET                       // <--                                  // ret
+
+LBB2_19:
+	MOVD ZR, R9 // <--                                  // mov	x9, xzr
+	MOVD ZR, R0 // <--                                  // mov	x0, xzr
+
+LBB2_20:
+	SUB R9, R8, R8     // <--                                  // sub	x8, x8, x9
+	ADD $16, RSP, R10  // <--                                  // mov	x10, sp
+	ADD $1, R8, R8     // <--                                  // add	x8, x8, #1
+	ADD R9<<3, R10, R9 // <--                                  // add	x9, x10, x9, lsl #3
+
+LBB2_21:
+	MOVD.P 8(R9), R10  // <--                                  // ldr	x10, [x9], #8
+	SUBS   $1, R8, R8  // <--                                  // subs	x8, x8, #1
+	ADD    R0, R10, R0 // <--                                  // add	x0, x10, x0
+	BNE    LBB2_21     // <--                                  // b.ne	.LBB2_21
+	JMP    LBB2_15     // <--                                  // b	.LBB2_15
+
+// fn_triple_plus_one is the C function triple_plus_one.
+// It runs in the frame of Test_calls_tail, so its code is part of this function,
+// where the Go runtime can unwind the stack from it.
+fn_triple_plus_one:
+	ADD  R0<<1, R0, R8 // <--                                  // add	x8, x0, x0, lsl #1
+	ADD  $1, R8, R0    // <--                                  // add	x0, x8, #1
+	WORD $0xd65f03c0   // RET                                  // ret (RET would undo the frame of Test_calls_tail)
+
+TEXT ·Test_calls_big_frame(SB), 0, $4848-32
+	NO_LOCAL_POINTERS
+	MOVD p_base+0(FP), R0
+	MOVD p_len+8(FP), R1
+	MOVD p_cap+16(FP), R2
+	MOVD R30, 16(RSP)        // <--                                  // str	x30, [sp, #-16]!
+	CALL fn_big_frame_helper // <--                                  // bl	big_frame_helper
+	ADD  $1, R0, R0          // <--                                  // add	x0, x0, #1
+	MOVD 16(RSP), R30        // <--                                  // ldr	x30, [sp], #16
+	MOVD R0, ret+24(FP)      // <--
+	RET                      // <--                                  // ret
+
+// fn_big_frame_helper is the C function big_frame_helper.
+// It runs in the frame of Test_calls_big_frame, so its code is part of this function,
+// where the Go runtime can unwind the stack from it.
+fn_big_frame_helper:
 	MOVD R25, 4832(RSP) // <--                                  // str	x25, [sp, #-16]!
 	NOP                 // (skipped)                            // sub	sp, sp, #1, lsl #12
 	NOP                 // (skipped)                            // sub	sp, sp, #704
@@ -421,7 +415,7 @@ LBB5_5:
 	NOP                   // (skipped)                            // add	sp, sp, #1, lsl #12
 	NOP                   // (skipped)                            // add	sp, sp, #704
 	MOVD 4832(RSP), R25   // <--                                  // ldr	x25, [sp], #16
-	RET                   // <--                                  // ret
+	WORD $0xd65f03c0      // RET                                  // ret (RET would undo the frame of Test_calls_big_frame)
 
 DATA LCPI7_0<>+0x00(SB)/8, $0x3ff3c083126e978d
 DATA LCPI7_0<>+0x08(SB)/8, $0x4002c3c9eecbfb16
@@ -434,8 +428,22 @@ GLOBL LCPI7_1<>(SB), (RODATA|NOPTR), $16
 DATA LCPI7_2<>+0x00(SB)/8, $0x3fef9add3c0e56b8
 GLOBL LCPI7_2<>(SB), (RODATA|NOPTR), $8
 
-// internal function, its stack space has been flattened into its caller's frame
-TEXT scale_table<>(SB), NOSPLIT|NOFRAME, $0-0
+TEXT ·Test_calls_consts(SB), 0, $32-24
+	NO_LOCAL_POINTERS
+	FMOVD x+0(FP), F0
+	MOVD  n+8(FP), R0
+	MOVD  R30, 16(RSP)   // <--                                  // str	x30, [sp, #-16]!
+	CALL  fn_scale_table // <--                                  // bl	scale_table
+	FMOVD $1., F1        // <--                                  // fmov	d1, #1.00000000
+	FADDD F1, F0, F0     // <--                                  // fadd	d0, d0, d1
+	MOVD  16(RSP), R30   // <--                                  // ldr	x30, [sp], #16
+	FMOVD F0, ret+16(FP) // <--
+	RET                  // <--                                  // ret
+
+// fn_scale_table is the C function scale_table.
+// It runs in the frame of Test_calls_consts, so its code is part of this function,
+// where the Go runtime can unwind the stack from it.
+fn_scale_table:
 	CMP   $1, R0             // <--                                  // cmp	x0, #1
 	BLT   LBB7_4             // <--                                  // b.lt	.LBB7_4
 	CMP   $4, R0             // <--                                  // cmp	x0, #4
@@ -458,13 +466,13 @@ TEXT scale_table<>(SB), NOSPLIT|NOFRAME, $0-0
 	BNE   LBB7_6             // <--                                  // b.ne	.LBB7_6
 
 LBB7_3:
-	FMOVD F1, F0 // <--                                  // fmov	d0, d1
-	RET          // <--                                  // ret
+	FMOVD F1, F0      // <--                                  // fmov	d0, d1
+	WORD  $0xd65f03c0 // RET                                  // ret (RET would undo the frame of Test_calls_consts)
 
 LBB7_4:
 	WORD  $0x2f00e401 // VMOVI $0, V1                         // movi	d1, #0000000000000000
 	FMOVD F1, F0      // <--                                  // fmov	d0, d1
-	RET               // <--                                  // ret
+	WORD  $0xd65f03c0 // RET                                  // ret (RET would undo the frame of Test_calls_consts)
 
 LBB7_5:
 	WORD $0x2f00e401 // VMOVI $0, V1                         // movi	d1, #0000000000000000
@@ -546,8 +554,48 @@ DATA LCPI9_14<>+0x00(SB)/8, $0x0000000000000349
 DATA LCPI9_14<>+0x08(SB)/8, $0x0000000000000384
 GLOBL LCPI9_14<>(SB), (RODATA|NOPTR), $16
 
-// internal function, its stack space has been flattened into its caller's frame
-TEXT fill_squares<>(SB), NOSPLIT|NOFRAME, $0-0
+TEXT ·Test_calls_local_pointer(SB), 0, $288-16
+	NO_LOCAL_POINTERS
+	MOVD  seed+0(FP), R0
+	NOP                          // (skipped)                            // sub	sp, sp, #272
+	MOVD  R0, R1                 // <--                                  // mov	x1, x0
+	ADD   $16, RSP, R0           // <--                                  // mov	x0, sp
+	STP   (R25, R30), 272(RSP)   // <--                                  // stp	x25, x30, [sp, #256]
+	CALL  fn_fill_squares        // <--                                  // bl	fill_squares
+	FLDPQ 240(RSP), (F16, F17)   // <--                                  // ldp	q16, q17, [sp, #224]
+	FLDPQ 112(RSP), (F18, F19)   // <--                                  // ldp	q18, q19, [sp, #96]
+	FLDPQ 144(RSP), (F0, F1)     // <--                                  // ldp	q0, q1, [sp, #128]
+	VADD  V17.D2, V19.D2, V17.D2 // <--                                  // add	v17.2d, v19.2d, v17.2d
+	FLDPQ 208(RSP), (F2, F3)     // <--                                  // ldp	q2, q3, [sp, #192]
+	FLDPQ 80(RSP), (F4, F5)      // <--                                  // ldp	q4, q5, [sp, #64]
+	VADD  V2.D2, V4.D2, V2.D2    // <--                                  // add	v2.2d, v4.2d, v2.2d
+	FLDPQ 16(RSP), (F22, F19)    // <--                                  // ldp	q22, q19, [sp]
+	VADD  V3.D2, V5.D2, V3.D2    // <--                                  // add	v3.2d, v5.2d, v3.2d
+	VADD  V0.D2, V22.D2, V0.D2   // <--                                  // add	v0.2d, v22.2d, v0.2d
+	FLDPQ 176(RSP), (F6, F7)     // <--                                  // ldp	q6, q7, [sp, #160]
+	VADD  V1.D2, V19.D2, V1.D2   // <--                                  // add	v1.2d, v19.2d, v1.2d
+	VADD  V2.D2, V0.D2, V0.D2    // <--                                  // add	v0.2d, v0.2d, v2.2d
+	VADD  V3.D2, V1.D2, V1.D2    // <--                                  // add	v1.2d, v1.2d, v3.2d
+	VADD  V16.D2, V18.D2, V3.D2  // <--                                  // add	v3.2d, v18.2d, v16.2d
+	FLDPQ 48(RSP), (F20, F21)    // <--                                  // ldp	q20, q21, [sp, #32]
+	VADD  V6.D2, V20.D2, V6.D2   // <--                                  // add	v6.2d, v20.2d, v6.2d
+	VADD  V7.D2, V21.D2, V7.D2   // <--                                  // add	v7.2d, v21.2d, v7.2d
+	VADD  V3.D2, V6.D2, V3.D2    // <--                                  // add	v3.2d, v6.2d, v3.2d
+	VADD  V17.D2, V7.D2, V5.D2   // <--                                  // add	v5.2d, v7.2d, v17.2d
+	VADD  V3.D2, V0.D2, V0.D2    // <--                                  // add	v0.2d, v0.2d, v3.2d
+	VADD  V5.D2, V1.D2, V1.D2    // <--                                  // add	v1.2d, v1.2d, v5.2d
+	LDP   272(RSP), (R25, R30)   // <--                                  // ldp	x25, x30, [sp, #256]
+	VADD  V1.D2, V0.D2, V0.D2    // <--                                  // add	v0.2d, v0.2d, v1.2d
+	WORD  $0x5ef1b800            // VADDP V0.D2, V0                      // addp	d0, v0.2d
+	FMOVD F0, R0                 // <--                                  // fmov	x0, d0
+	NOP                          // (skipped)                            // add	sp, sp, #272
+	MOVD  R0, ret+8(FP)          // <--
+	RET                          // <--                                  // ret
+
+// fn_fill_squares is the C function fill_squares.
+// It runs in the frame of Test_calls_local_pointer, so its code is part of this function,
+// where the Go runtime can unwind the stack from it.
+fn_fill_squares:
 	MOVD  $LCPI9_0<>(SB), R8   // <--                                  // adrp	x8, .LCPI9_0
 	MOVD  $LCPI9_2<>(SB), R10  // <--                                  // adrp	x10, .LCPI9_2
 	MOVD  $LCPI9_1<>(SB), R9   // <--                                  // adrp	x9, .LCPI9_1
@@ -612,10 +660,23 @@ TEXT fill_squares<>(SB), NOSPLIT|NOFRAME, $0-0
 	FMOVQ F0, 216(R0)          // <--                                  // stur	q0, [x0, #216]
 	MOVD  R8, 248(R0)          // <--                                  // str	x8, [x0, #248]
 	FMOVQ F1, 232(R0)          // <--                                  // stur	q1, [x0, #232]
-	RET                        // <--                                  // ret
+	WORD  $0xd65f03c0          // RET                                  // ret (RET would undo the frame of Test_calls_local_pointer)
 
-// internal function, its stack space has been flattened into its caller's frame
-TEXT big_frame_bytes_helper<>(SB), NOSPLIT|NOFRAME, $0-0
+TEXT ·Test_calls_big_frame_bytes(SB), 0, $32816-32
+	NO_LOCAL_POINTERS
+	MOVD p_base+0(FP), R0
+	MOVD p_len+8(FP), R1
+	MOVD R30, 16(RSP)              // <--                                  // str	x30, [sp, #-16]!
+	CALL fn_big_frame_bytes_helper // <--                                  // bl	big_frame_bytes_helper
+	ADD  $1, R0, R0                // <--                                  // add	x0, x0, #1
+	MOVD 16(RSP), R30              // <--                                  // ldr	x30, [sp], #16
+	MOVD R0, ret+24(FP)            // <--
+	RET                            // <--                                  // ret
+
+// fn_big_frame_bytes_helper is the C function big_frame_bytes_helper.
+// It runs in the frame of Test_calls_big_frame_bytes, so its code is part of this function,
+// where the Go runtime can unwind the stack from it.
+fn_big_frame_bytes_helper:
 	MOVD R25, 32800(RSP) // <--                                  // str	x25, [sp, #-16]!
 	NOP                  // (skipped)                            // sub	sp, sp, #8, lsl #12
 	MOVD ZR, R8          // <--                                  // mov	x8, xzr
@@ -651,54 +712,7 @@ LBB11_5:
 	BNE   LBB11_5         // <--                                  // b.ne	.LBB11_5
 	NOP                   // (skipped)                            // add	sp, sp, #8, lsl #12
 	MOVD  32800(RSP), R25 // <--                                  // ldr	x25, [sp], #16
-	RET                   // <--                                  // ret
+	WORD  $0xd65f03c0     // RET                                  // ret (RET would undo the frame of Test_calls_big_frame_bytes)
 
-DATA scale_table_tbl<>+0x00(SB)/8, $0x3ff3c083126e978d
-DATA scale_table_tbl<>+0x08(SB)/8, $0x4002c3c9eecbfb16
-DATA scale_table_tbl<>+0x10(SB)/8, $0x400ba7525460aa65
-DATA scale_table_tbl<>+0x18(SB)/8, $0x4012456d5cfaacda
-GLOBL scale_table_tbl<>(SB), (RODATA|NOPTR), $32
-
-// internal function, its stack space has been flattened into its caller's frame
-TEXT weighted_sum<>(SB), NOSPLIT|NOFRAME, $0-0
-	CMP  $1, R1  // <--                                  // cmp	x1, #1
-	BLT  LBB12_3 // <--                                  // b.lt	.LBB12_3
-	BNE  LBB12_4 // <--                                  // b.ne	.LBB12_4
-	MOVD ZR, R9  // <--                                  // mov	x9, xzr
-	MOVD ZR, R8  // <--                                  // mov	x8, xzr
-	JMP  LBB12_7 // <--                                  // b	.LBB12_7
-
-LBB12_3:
-	MOVD ZR, R0 // <--                                  // mov	x0, xzr
-	RET         // <--                                  // ret
-
-LBB12_4:
-	MOVD ZR, R11     // <--                                  // mov	x11, xzr
-	MOVD ZR, R8      // <--                                  // mov	x8, xzr
-	MOVD ZR, R10     // <--                                  // mov	x10, xzr
-	AND  $-2, R1, R9 // <--                                  // and	x9, x1, #0xfffffffffffffffe
-
-LBB12_5:
-	ADD  R11<<3, R0, R12    // <--                                  // add	x12, x0, x11, lsl #3
-	ADD  $2, R11, R14       // <--                                  // add	x14, x11, #2
-	CMP  R14, R9            // <--                                  // cmp	x9, x14
-	LDP  (R12), (R13, R12)  // <--                                  // ldp	x13, x12, [x12]
-	MADD R11, R13, R13, R11 // <--                                  // madd	x11, x13, x11, x13
-	MADD R14, R10, R12, R10 // <--                                  // madd	x10, x12, x14, x10
-	ADD  R8, R11, R8        // <--                                  // add	x8, x11, x8
-	MOVD R14, R11           // <--                                  // mov	x11, x14
-	BNE  LBB12_5            // <--                                  // b.ne	.LBB12_5
-	ADD  R8, R10, R8        // <--                                  // add	x8, x10, x8
-	CMP  R1, R9             // <--                                  // cmp	x9, x1
-	BEQ  LBB12_8            // <--                                  // b.eq	.LBB12_8
-
-LBB12_7:
-	MOVD (R0)(R9<<3), R10 // <--                                  // ldr	x10, [x0, x9, lsl #3]
-	ADD  $1, R9, R9       // <--                                  // add	x9, x9, #1
-	CMP  R9, R1           // <--                                  // cmp	x1, x9
-	MADD R9, R8, R10, R8  // <--                                  // madd	x8, x10, x9, x8
-	BNE  LBB12_7          // <--                                  // b.ne	.LBB12_7
-
-LBB12_8:
-	MOVD R8, R0 // <--                                  // mov	x0, x8
-	RET         // <--                                  // ret
+TEXT ·test_calls_big_frame_stringInternal(SB), NOSPLIT|NOFRAME, $0-32
+	JMP ·Test_calls_big_frame_bytes(SB)

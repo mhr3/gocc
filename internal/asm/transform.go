@@ -2,6 +2,7 @@ package asm
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/mhr3/gocc/internal/config"
@@ -36,12 +37,131 @@ func ApplyTransforms(arch *config.Arch, functions []Function) ([]Function, error
 		if err != nil {
 			return nil, err
 		}
-		if arch.Name == "amd64" {
+		switch arch.Name {
+		case "amd64":
 			functions = realignAmd64Roots(functions)
+		case "arm64":
+			functions, err = foldArm64Helpers(functions)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	return functions, nil
+}
+
+// arm64Return is the encoding of ret, the return through the link register.
+var arm64Return = []string{"c0", "03", "5f", "d6"}
+
+// arm64HelperLabel is the label an internal helper is called by once it is
+// part of the function that owns it. The prefix keeps a C name from reading
+// as a register of the Go assembler: a helper named g would otherwise be
+// called through the register that holds the goroutine.
+func arm64HelperLabel(name string) string {
+	return "fn_" + name
+}
+
+// foldArm64Helpers moves every internal helper into the Go-visible function
+// that owns it, where it is called by a label.
+//
+// A helper runs in the frame of its owner, with the stack pointer where the
+// owner left it. As a function of its own it would be a frameless leaf to
+// the Go runtime, whose return address is in the link register, and that is
+// only so until the helper calls another one: from then on the register
+// holds an address inside the helper itself. A CPU profile taken at that
+// moment made the runtime give up with "traceback stuck", and one taken
+// while the register was used for something else got a stack of garbage.
+//
+// Inside its owner, the helper's code is covered by the owner's frame, which
+// is the frame it does run in: the runtime finds the return address in the
+// stack and unwinds through it as through any other part of that function.
+// The helper returns with the raw instruction, since RET in a function with
+// a frame also tears the frame down.
+//
+// AMD64 has no need of this: a call puts the return address on the stack,
+// where the runtime looks for it.
+func foldArm64Helpers(functions []Function) ([]Function, error) {
+	owners, err := assignInternalFunctionOwners(functions)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	folded := make(map[string]bool)
+	for i := range functions {
+		if functions[i].Internal && owners[i] >= 0 {
+			folded[functions[i].Name] = true
+			names = append(names, regexp.QuoteMeta(functions[i].Name))
+		}
+	}
+	if len(folded) == 0 {
+		return functions, nil
+	}
+	// Any other use of a folded helper's symbol, which no longer exists.
+	symbol := regexp.MustCompile(`(?:^|\W)(` + strings.Join(names, "|") + `)<>\(SB\)`)
+
+	local := func(lines []Line) ([]Line, error) {
+		out := make([]Line, len(lines))
+		for i, line := range lines {
+			if target, ok := BranchTarget(line); ok && folded[target] {
+				line.Disassembled = strings.Fields(line.Disassembled)[0] + " " + arm64HelperLabel(target)
+			} else if match := symbol.FindStringSubmatch(line.Disassembled); match != nil {
+				return nil, fmt.Errorf("the address of internal function %q is taken (%s), which is not supported on arm64", match[1], line.Assembly)
+			}
+			out[i] = line
+		}
+		return out, nil
+	}
+
+	result := make([]Function, 0, len(functions))
+	for rootIdx := range functions {
+		root := functions[rootIdx]
+		if folded[root.Name] {
+			continue
+		}
+		if root.Internal {
+			// called by nothing that is translated: left as it was
+			result = append(result, root)
+			continue
+		}
+		rootName := root.Name
+		if root.GoFunc.Expr != nil {
+			rootName = root.GoFunc.Name
+		}
+		if root.Lines, err = local(root.Lines); err != nil {
+			return nil, fmt.Errorf("%s: %w", root.Name, err)
+		}
+
+		for helperIdx := range functions {
+			if owners[helperIdx] != rootIdx || len(functions[helperIdx].Lines) == 0 {
+				continue
+			}
+			helper := functions[helperIdx]
+			lines, err := local(helper.Lines)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", helper.Name, err)
+			}
+			for i := range lines {
+				if !strings.HasPrefix(lines[i].Assembly, "ret") {
+					continue
+				}
+				if strings.TrimSpace(lines[i].Assembly) != "ret" {
+					return nil, fmt.Errorf("%s: unsupported return %q in an internal function", helper.Name, lines[i].Assembly)
+				}
+				lines[i].Binary = arm64Return
+				lines[i].Disassembled = "RET"
+				lines[i].Comment = fmt.Sprintf("ret (RET would undo the frame of %s)", rootName)
+			}
+			label := arm64HelperLabel(helper.Name)
+			lines[0].Labels = append([]string{label}, lines[0].Labels...)
+			lines[0].Heading = fmt.Sprintf("%s is the C function %s.\nIt runs in the frame of %s, so its code is part of this function,\nwhere the Go runtime can unwind the stack from it.", label, helper.Name, rootName)
+
+			root.Lines = append(root.Lines, lines...)
+			root.Consts = append(root.Consts[:len(root.Consts):len(root.Consts)], helper.Consts...)
+		}
+		result = append(result, root)
+	}
+	return result, nil
 }
 
 // realignAmd64Roots makes a Go-visible AMD64 function realign SP when its

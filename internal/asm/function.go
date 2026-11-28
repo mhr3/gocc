@@ -263,11 +263,18 @@ type Line struct {
 	Assembly     string   `json:"assembly"`               // Assembly representation of the line
 	Disassembled string   `json:"disassembled,omitempty"` // Disassembled representation of the line
 	Comment      string   `json:"comment,omitempty"`      // Optional generated-code comment replacing Assembly
+	Heading      string   `json:"heading,omitempty"`      // Comment lines to put above the line and its labels
 }
 
 // Compile returns the string representation of a line in PLAN9 assembly
 func (line *Line) Compile(arch *config.Arch) string {
 	var builder strings.Builder
+	if line.Heading != "" {
+		builder.WriteString("\n")
+		for _, text := range strings.Split(line.Heading, "\n") {
+			builder.WriteString("// " + text + "\n")
+		}
+	}
 	for _, label := range line.Labels {
 		builder.WriteString(label)
 		builder.WriteString(":\n")
