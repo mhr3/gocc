@@ -161,3 +161,62 @@ func TestCallsLocalPointer(t *testing.T) {
 	}
 	assert.Equal(t, want, generated.Test_calls_local_pointer(7))
 }
+
+// The variant tests pass slices whose capacity is neither their length nor
+// the value of any other argument: the C functions take a pointer and a
+// length, and the capacity in the frame must not reach them.
+
+func TestVariantString(t *testing.T) {
+	data := append(make([]byte, 0, 64), "hello"...)
+	want := 7
+	for _, c := range data {
+		want += int(c)
+	}
+
+	assert.Equal(t, want, generated.Test_fn_sum_bytes(data, 7))
+	assert.Equal(t, want, generated.Test_fn_sum_string("hello", 7))
+}
+
+func TestVariantArgumentLayout(t *testing.T) {
+	const first, second, k = "gopher", "go!", 7
+	a := append(make([]byte, 0, 32), first...)
+	b := append(make([]byte, 0, 16), second...)
+
+	want := int(first[len(first)-1]) + 1000*len(first) +
+		1000000*int(second[len(second)-1]) + 1000000000*len(second) + 1000000000000*k
+
+	assert.Equal(t, want, generated.Test_fn_layout_strings(first, second, k))
+	assert.Equal(t, want, generated.Test_fn_layout_bytes(a, b, k))
+	assert.Equal(t, want, generated.Test_fn_layout_bytes_string(a, second, k))
+}
+
+func TestVariantOtherSliceAndFloat(t *testing.T) {
+	dst := make([]float32, 3, 9)
+
+	generated.Test_fn_scale_bytes(dst, append(make([]byte, 0, 16), "abc"...), 0.5)
+	assert.Equal(t, []float32{48.5, 49, 49.5}, dst)
+	generated.Test_fn_scale_string(dst, "xyz", 2)
+	assert.Equal(t, []float32{240, 242, 244}, dst)
+}
+
+func TestCallsVariantGrowsStack(t *testing.T) {
+	s := "stack"
+	var want int64 = 1
+	for i := range 32768 {
+		if i < len(s) {
+			want += int64(s[i])
+		} else {
+			want += int64(uint8(i))
+		}
+	}
+
+	// A new goroutine starts with a stack smaller than the frame of the
+	// function the variant jumps to.
+	got := make(chan int64)
+	go func() { got <- generated.Test_calls_big_frame_string(s) }()
+	assert.Equal(t, want, <-got)
+
+	p := append(make([]byte, 0, 4096), s...)
+	go func() { got <- generated.Test_calls_big_frame_bytes(p) }()
+	assert.Equal(t, want, <-got)
+}

@@ -36,3 +36,60 @@ func Test_fn_888888_8(a int, b int, c int, d int, e int, f int) int
 
 //go:noescape
 func Test_fn_sq_floats(input []float32, output []float32)
+
+//go:noescape
+func Test_fn_sum_bytes(data []byte, bias int) int
+
+// Test_fn_sum_string is Test_fn_sum_bytes with string arguments.
+func Test_fn_sum_string(data string, bias int) int {
+	return test_fn_sum_stringInternal(data, 0, bias)
+}
+
+// test_fn_sum_stringInternal jumps to Test_fn_sum_bytes.
+// The int after a string takes the place of the capacity of the []byte it
+// stands for, which gives both functions the same frame. It is not read.
+//
+//go:noescape
+func test_fn_sum_stringInternal(data string, _ int, bias int) int
+
+//go:noescape
+func Test_fn_layout_bytes(a []byte, b []byte, k int) int
+
+// Test_fn_layout_strings is Test_fn_layout_bytes with string arguments.
+func Test_fn_layout_strings(a string, b string, k int) int {
+	return test_fn_layout_stringsInternal(a, 0, b, 0, k)
+}
+
+// test_fn_layout_stringsInternal jumps to Test_fn_layout_bytes.
+// The int after a string takes the place of the capacity of the []byte it
+// stands for, which gives both functions the same frame. It is not read.
+//
+//go:noescape
+func test_fn_layout_stringsInternal(a string, _ int, b string, _ int, k int) int
+
+// Test_fn_layout_bytes_string is Test_fn_layout_bytes with string arguments.
+func Test_fn_layout_bytes_string(a []byte, b string, k int) int {
+	return test_fn_layout_bytes_stringInternal(a, b, 0, k)
+}
+
+// test_fn_layout_bytes_stringInternal jumps to Test_fn_layout_bytes.
+// The int after a string takes the place of the capacity of the []byte it
+// stands for, which gives both functions the same frame. It is not read.
+//
+//go:noescape
+func test_fn_layout_bytes_stringInternal(a []byte, b string, _ int, k int) int
+
+//go:noescape
+func Test_fn_scale_bytes(dst []float32, src []byte, factor float32)
+
+// Test_fn_scale_string is Test_fn_scale_bytes with string arguments.
+func Test_fn_scale_string(dst []float32, src string, factor float32) {
+	test_fn_scale_stringInternal(dst, src, 0, factor)
+}
+
+// test_fn_scale_stringInternal jumps to Test_fn_scale_bytes.
+// The int after a string takes the place of the capacity of the []byte it
+// stands for, which gives both functions the same frame. It is not read.
+//
+//go:noescape
+func test_fn_scale_stringInternal(dst []float32, src string, _ int, factor float32)

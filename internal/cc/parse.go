@@ -23,6 +23,7 @@ import (
 	"go/types"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -31,7 +32,10 @@ import (
 	"modernc.org/cc/v4"
 )
 
-const goccComment = "gocc:"
+const (
+	goccComment        = "gocc:"
+	goccVariantComment = "gocc-variant:"
+)
 
 var supportedTypes = mapset.NewSet(
 	"int64_t", "uint64_t",
@@ -137,6 +141,10 @@ func Parse(path string) ([]asm.Function, error) {
 		} else if err != nil {
 			return nil, err
 		}
+		variantSignatures, err := extractGoVariants(funcComment)
+		if err != nil {
+			return nil, err
+		}
 
 		declarator := funcDef.Declarator
 		if declarator != nil {
@@ -160,10 +168,16 @@ func Parse(path string) ([]asm.Function, error) {
 				return nil, fmt.Errorf("%s: function cannot be static", funcIdent.DirectDeclarator.Token.SrcStr())
 			}
 
+			cName := funcIdent.DirectDeclarator.Token.SrcStr()
+			goFunc, variants, err := resolveVariants(cName, goFunc, variantSignatures)
+			if err != nil {
+				return nil, err
+			}
 			function, err := convertFunction(funcIdent, extractCReturnType(allTypeSpecs), goFunc)
 			if err != nil {
 				return nil, err
 			}
+			function.Variants = variants
 			if err := checkFunction(&function); err != nil {
 				return nil, err
 			}
@@ -215,6 +229,22 @@ func extractAnnotatedSignatures(path string) (string, error) {
 
 	var clauseCount int
 	var isAnnotated bool
+	// variantLine is the line of a gocc-variant directive waiting for the
+	// function it belongs to. A variant of a function without a gocc
+	// signature must be rejected here: the function is dropped below while
+	// its comments are kept, so the directive would attach itself to the
+	// next annotated one.
+	var variantLine int
+	claimVariant := func() error {
+		if clauseCount != 0 {
+			return nil
+		}
+		if variantLine != 0 && !isAnnotated {
+			return fmt.Errorf("line %d: gocc-variant on a function without a gocc signature", variantLine)
+		}
+		variantLine = 0
+		return nil
+	}
 
 	lines := strings.Split(string(src), "\n")
 	for i, l := range lines {
@@ -224,17 +254,26 @@ func extractAnnotatedSignatures(path string) (string, error) {
 			continue
 		case strings.HasPrefix(line, "//") && clauseCount == 0:
 			// keep comments
-			if clauseCount == 0 && strings.Contains(line, goccComment) {
+			if strings.Contains(line, goccComment) {
 				isAnnotated = true
-			} else if clauseCount == 0 && isAnnotated {
+			} else if strings.Contains(line, goccVariantComment) {
+				// part of the annotation, on either side of the gocc line
+				variantLine = i + 1
+			} else if isAnnotated {
 				isAnnotated = false
 			}
 
 			redacted.WriteString(line)
 			redacted.WriteRune('\n')
 		case strings.Contains(line, "{") && strings.Contains(line, "}"):
+			if err := claimVariant(); err != nil {
+				return "", err
+			}
 			clauseCount += strings.Count(line, "{") - strings.Count(line, "}")
 		case strings.Contains(line, "{"):
+			if err := claimVariant(); err != nil {
+				return "", err
+			}
 			if clauseCount == 0 && isAnnotated {
 				startLine := i
 				bracketIdx := strings.Index(line, "(")
@@ -327,6 +366,22 @@ func convertFunction(declarator *cc.DirectDeclarator, returnType string, goFunc 
 	}, nil
 }
 
+// parseGoSignature parses "Name(params) results" as written in a directive.
+func parseGoSignature(signature string) (asm.GoFunction, error) {
+	goExpr, err := parser.ParseExpr("interface {" + signature + "}")
+	if err != nil {
+		return asm.GoFunction{}, err
+	}
+	if interfaceType, ok := goExpr.(*ast.InterfaceType); !ok {
+		return asm.GoFunction{}, errors.New("gocc: invalid signature")
+	} else if len(interfaceType.Methods.List) != 1 {
+		return asm.GoFunction{}, errors.New("gocc: invalid signature")
+	} else {
+		method := interfaceType.Methods.List[0]
+		return asm.GoFunction{Name: method.Names[0].String(), Expr: method.Type.(*ast.FuncType)}, nil
+	}
+}
+
 func extractGoSignature(comment string) (asm.GoFunction, error) {
 	lines := strings.Split(comment, "\n")
 	for _, line := range lines {
@@ -334,27 +389,170 @@ func extractGoSignature(comment string) (asm.GoFunction, error) {
 			continue
 		}
 		parts := strings.SplitN(line, goccComment, 2)
-
-		goExpr, err := parser.ParseExpr("interface {" + parts[1] + "}")
-		if err != nil {
-			return asm.GoFunction{}, err
-		}
-		if interfaceType, ok := goExpr.(*ast.InterfaceType); !ok {
-			return asm.GoFunction{}, errors.New("gocc: invalid signature")
-		} else if len(interfaceType.Methods.List) != 1 {
-			return asm.GoFunction{}, errors.New("gocc: invalid signature")
-		} else {
-			method := interfaceType.Methods.List[0]
-			return asm.GoFunction{Name: method.Names[0].String(), Expr: method.Type.(*ast.FuncType)}, nil
-		}
+		return parseGoSignature(parts[1])
 	}
 
 	return asm.GoFunction{}, errNoSignature
 }
 
+// extractGoVariants returns the signatures of the gocc-variant directives.
+func extractGoVariants(comment string) ([]asm.GoFunction, error) {
+	var variants []asm.GoFunction
+	for _, line := range strings.Split(comment, "\n") {
+		_, signature, found := strings.Cut(line, goccVariantComment)
+		if !found {
+			continue
+		}
+		variant, err := parseGoSignature(signature)
+		if err != nil {
+			return nil, err
+		}
+		variants = append(variants, variant)
+	}
+	return variants, nil
+}
+
+func isByteSlice(goType string) bool {
+	return goType == "[]byte" || goType == "[]uint8"
+}
+
+// isText reports whether a parameter of this type may be a string in one
+// signature of a function and a []byte in another.
+func isText(goType string) bool {
+	return goType == "string" || isByteSlice(goType)
+}
+
+// resolveVariants checks the signatures of a function that has gocc-variant
+// directives and decides which of them the assembly is declared with.
+//
+// The signatures may differ only in taking a parameter as a string or as a
+// []byte. The assembly gets the frame of the widest of them, so it is
+// declared with the one that takes []byte wherever any of them does. The
+// others are entered through padded entry points (see asm.GoVariant), and
+// are returned with the parameters that need padding marked.
+func resolveVariants(cName string, primary asm.GoFunction, others []asm.GoFunction) (asm.GoFunction, []asm.GoVariant, error) {
+	if len(others) == 0 {
+		return primary, nil, nil
+	}
+	fail := func(format string, args ...any) (asm.GoFunction, []asm.GoVariant, error) {
+		return asm.GoFunction{}, nil, fmt.Errorf("%s: %s", cName, fmt.Sprintf(format, args...))
+	}
+
+	signatures := append([]asm.GoFunction{primary}, others...)
+	var names, results [][]string
+	types := make([][]string, len(signatures))
+	for i := range signatures {
+		var paramNames, resultTypes []string
+		signatures[i].ForEachParam(func(name, typ string) {
+			paramNames = append(paramNames, name)
+			types[i] = append(types[i], typ)
+		})
+		signatures[i].ForEachResult(func(_, typ string) { resultTypes = append(resultTypes, typ) })
+		names, results = append(names, paramNames), append(results, resultTypes)
+	}
+
+	// wide: some signature takes the parameter as a []byte and another as a
+	// string, so its place in the frame is that of the []byte.
+	wide := make([]bool, len(types[0]))
+	for i := 1; i < len(signatures); i++ {
+		variant := signatures[i].Name
+		switch {
+		case len(types[i]) != len(types[0]):
+			return fail("variant %s: expected %d parameters, got %d", variant, len(types[0]), len(types[i]))
+		case !slices.Equal(results[i], results[0]):
+			return fail("variant %s: results differ from those of %s", variant, primary.Name)
+		case slices.Equal(types[i], types[0]):
+			return fail("variant %s: takes no parameter of %s as a string or a []byte instead", variant, primary.Name)
+		}
+		for p, typ := range types[i] {
+			want := types[0][p]
+			switch {
+			case typ == want || (isByteSlice(typ) && isByteSlice(want)):
+			case isText(typ) && isText(want):
+				wide[p] = true
+			case isText(want):
+				return fail("variant %s: param %q: expected string or []byte, got %s", variant, names[i][p], typ)
+			default:
+				return fail("variant %s: param %q: expected %s, got %s", variant, names[i][p], want, typ)
+			}
+		}
+	}
+
+	takesBytes := func(i int) bool {
+		for p := range wide {
+			if wide[p] && !isByteSlice(types[i][p]) {
+				return false
+			}
+		}
+		return true
+	}
+	declared := -1
+	for i := range signatures {
+		if takesBytes(i) {
+			declared = i
+			break
+		}
+	}
+	if declared < 0 {
+		var wideNames []string
+		for p := range wide {
+			if wide[p] {
+				wideNames = append(wideNames, names[0][p])
+			}
+		}
+		return fail("one of the signatures has to take all of %s as []byte", strings.Join(wideNames, ", "))
+	}
+
+	var variants []asm.GoVariant
+	for i := range signatures {
+		if i == declared {
+			continue
+		}
+		padded := make([]bool, len(wide))
+		for p := range wide {
+			// A wrapper passes the arguments on by name.
+			if name := names[i][p]; name == "" || name == "_" {
+				return fail("%s: parameter %d has to be named", signatures[i].Name, p+1)
+			}
+			padded[p] = wide[p] && types[i][p] == "string"
+		}
+		variants = append(variants, asm.GoVariant{GoFunction: signatures[i], Padded: padded})
+	}
+	return signatures[declared], variants, nil
+}
+
+// cParamCount returns the number of C parameters a Go signature stands for.
+func cParamCount(goFunc *asm.GoFunction, capacities bool) int {
+	count := 0
+	goFunc.ForEachParam(func(_, typ string) {
+		switch {
+		case typ == "string":
+			count += 2
+		case strings.HasPrefix(typ, "[]") && capacities:
+			count += 3
+		case strings.HasPrefix(typ, "[]"):
+			count += 2
+		default:
+			count++
+		}
+	})
+	return count
+}
+
 // checkFunction verifies that the C signature matches the annotated Go one
 // and records, for every C parameter, the name of its Go argument slot.
+//
+// A slice is three C parameters: pointer, length and capacity. A function
+// with variants takes all of its slices as a pointer and a length instead,
+// since a string in their place has no capacity to pass. The capacity keeps
+// its word in the frame, which is recorded as a gap after the length.
 func checkFunction(function *asm.Function) error {
+	withoutCapacities := len(function.Variants) > 0
+	if withoutCapacities && len(function.Params) != cParamCount(&function.GoFunc, false) &&
+		len(function.Params) == cParamCount(&function.GoFunc, true) {
+		return fmt.Errorf("%s: a function with variants takes a slice as a pointer and a length, without the capacity", function.Name)
+	}
+
 	checkParam := func(idx int, expectedParam asm.Param, goName string) error {
 		if idx >= len(function.Params) {
 			return fmt.Errorf("%s: too few parameters, missing %s", function.Name, expectedParam.CTypeStr())
@@ -414,6 +612,12 @@ func checkFunction(function *asm.Function) error {
 					}
 					if err := checkParam(j+1, go2c["int"], name+"_len"); err != nil {
 						return err
+					}
+					if withoutCapacities {
+						capacity := go2c["int"]
+						function.Params[j+1].FrameGap = capacity.Size()
+						j += 2
+						continue
 					}
 					if err := checkParam(j+2, go2c["int"], name+"_cap"); err != nil {
 						return err

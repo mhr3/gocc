@@ -210,6 +210,9 @@ func (t *Local) TranslateContext(ctx context.Context) error {
 	// apply the function suffix, this needs to be done after the mapping
 	for i := range functions {
 		functions[i].GoFunc.Name += t.FuncSuffix
+		for j := range functions[i].Variants {
+			functions[i].Variants[j].Name += t.FuncSuffix
+		}
 	}
 
 	meta := asm.GeneratorMeta{

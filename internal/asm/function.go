@@ -26,6 +26,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/mhr3/gocc/internal/config"
 )
@@ -44,6 +46,34 @@ var constSizes = map[string]int{
 type GoFunction struct {
 	Name string
 	Expr *ast.FuncType
+}
+
+// GoVariant is a further Go signature of a function, declared with a
+// gocc-variant directive: the function's own with some of its []byte
+// parameters taken as strings.
+//
+// A string is one word shorter than a slice, so the two signatures have
+// different frames and, under the stack-based ABI of assembly functions,
+// keep their result in different places. The function is therefore given the
+// frame of the []byte form, and the entry point of a variant is declared
+// with a blank int after each such string. That makes the frames identical
+// and the entry point a single jump. A Go wrapper with the signature the
+// user asked for supplies the blank word.
+//
+// The C function takes a pointer and a length for such a parameter. The
+// third word, the capacity of the slice or the blank int, is in the frame
+// but is not passed on (see Param.FrameGap).
+type GoVariant struct {
+	GoFunction
+	// Padded reports, for each parameter, whether it is a string standing in
+	// for a []byte of the function.
+	Padded []bool
+}
+
+// InternalName is the name of the padded assembly entry point.
+func (v *GoVariant) InternalName() string {
+	first, size := utf8.DecodeRuneInString(v.Name)
+	return string(unicode.ToLower(first)) + v.Name[size:] + "Internal"
 }
 
 // ------------------------------------- Function -------------------------------------
@@ -65,7 +95,11 @@ type Function struct {
 	// and the epilogue restore it; zero leaves SP untouched.
 	StackAlign int    `json:"stackAlign,omitempty"`
 	Ret        *Param `json:"return,omitempty"`
-	GoFunc     GoFunction
+	// GoFunc is the Go signature the assembly is declared with. For a
+	// function with variants it is the one that takes []byte wherever any of
+	// them does, whichever directive it came from.
+	GoFunc   GoFunction
+	Variants []GoVariant
 }
 
 func (f *GoFunction) NumResults() int {
@@ -116,7 +150,7 @@ func (f *Function) ParamsSize(arch *config.Arch) (int, []int) {
 
 		offsets[i] = offset
 
-		offset += size
+		offset += size + param.FrameGap
 	}
 
 	// we calc the return size separately, but still account for it
@@ -128,39 +162,35 @@ func (f *Function) ParamsSize(arch *config.Arch) (int, []int) {
 	return offset, offsets
 }
 
-// String returns the function signature for a Go stub
-func (f *Function) String() string {
-	if f.GoFunc.Expr == nil {
-		// should probably panic
-		return "/* no Go function */"
-	}
-
-	var builder strings.Builder
-
-	builder.WriteString("\n//go:noescape\n")
-	builder.WriteString(fmt.Sprintf("func %s(", f.GoFunc.Name))
+// writeSignature writes "func name(params) results". A parameter flagged in
+// padded is followed by a blank int.
+func (f *GoFunction) writeSignature(builder *strings.Builder, name string, padded []bool) {
+	fmt.Fprintf(builder, "func %s(", name)
 	paramIdx := 0
-	f.GoFunc.ForEachParam(func(name, typ string) {
+	f.ForEachParam(func(name, typ string) {
 		if paramIdx > 0 {
 			builder.WriteString(", ")
 		}
 		builder.WriteString(name)
 		builder.WriteByte(' ')
 		builder.WriteString(typ)
+		if paramIdx < len(padded) && padded[paramIdx] {
+			builder.WriteString(", _ int")
+		}
 		paramIdx++
 	})
 	builder.WriteString(")")
-	switch f.GoFunc.NumResults() {
+	switch f.NumResults() {
 	case 0:
 	case 1:
 		builder.WriteByte(' ')
-		f.GoFunc.ForEachResult(func(_, typ string) {
+		f.ForEachResult(func(_, typ string) {
 			builder.WriteString(typ)
 		})
 	default:
 		builder.WriteString(" (")
 		resultIdx := 0
-		f.GoFunc.ForEachResult(func(name, typ string) {
+		f.ForEachResult(func(name, typ string) {
 			if resultIdx > 0 {
 				builder.WriteString(", ")
 			}
@@ -171,7 +201,56 @@ func (f *Function) String() string {
 		})
 		builder.WriteString(")")
 	}
+}
+
+// writeStub writes the Go wrapper of a variant of target and the declaration
+// of the assembly entry point it calls.
+func (v *GoVariant) writeStub(builder *strings.Builder, target string) {
+	internal := v.InternalName()
+
+	fmt.Fprintf(builder, "\n// %s is %s with string arguments.\n", v.Name, target)
+	v.writeSignature(builder, v.Name, nil)
+	builder.WriteString(" {\n\t")
+	if v.NumResults() > 0 {
+		builder.WriteString("return ")
+	}
+	builder.WriteString(internal)
+	builder.WriteByte('(')
+	paramIdx := 0
+	v.ForEachParam(func(name, _ string) {
+		if paramIdx > 0 {
+			builder.WriteString(", ")
+		}
+		builder.WriteString(name)
+		if v.Padded[paramIdx] {
+			builder.WriteString(", 0")
+		}
+		paramIdx++
+	})
+	builder.WriteString(")\n}\n")
+
+	fmt.Fprintf(builder, "\n// %s jumps to %s.\n", internal, target)
+	builder.WriteString("// The int after a string takes the place of the capacity of the []byte it\n")
+	builder.WriteString("// stands for, which gives both functions the same frame. It is not read.\n//\n//go:noescape\n")
+	v.writeSignature(builder, internal, v.Padded)
 	builder.WriteByte('\n')
+}
+
+// String returns the Go stub of the function and of its variants.
+func (f *Function) String() string {
+	if f.GoFunc.Expr == nil {
+		// should probably panic
+		return "/* no Go function */"
+	}
+
+	var builder strings.Builder
+
+	builder.WriteString("\n//go:noescape\n")
+	f.GoFunc.writeSignature(&builder, f.GoFunc.Name, nil)
+	builder.WriteByte('\n')
+	for i := range f.Variants {
+		f.Variants[i].writeStub(&builder, f.GoFunc.Name)
+	}
 	return builder.String()
 }
 
@@ -272,6 +351,10 @@ type Param struct {
 	// the length and capacity words of strings and slices. Empty for
 	// internal helpers, which have no Go signature.
 	GoName string `json:"goName,omitempty"`
+	// FrameGap is the number of bytes of the Go argument frame that follow
+	// this parameter and are not passed to the C function: the capacity of
+	// a slice whose C counterpart is a pointer and a length.
+	FrameGap int `json:"frameGap,omitempty"`
 }
 
 // FrameName returns the name to use in a name+offset(FP) reference.
