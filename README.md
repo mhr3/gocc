@@ -38,6 +38,24 @@ int64_t simd_fn(char *input1, uint64_t input1_len) {
 }
 ```
 
+### Slices without their capacity
+
+A slice is three parameters in C. A function that has no use for the capacity can leave it out
+for the slices it lists in a `gocc-omit-cap` directive:
+
+```c
+// gocc: Dot(a []float32, b []float32) float32
+// gocc-omit-cap: a, b
+float dot(const float *a, uint64_t a_len, const float *b, uint64_t b_len) {
+  ...
+}
+```
+
+The listed slices are a pointer and a length in C; the others keep their capacity. Nothing
+changes for the Go caller: the capacity still has its word in the arguments, the generated
+code does not load it. This matters where argument registers are short. amd64 has six for
+integers and pointers, which three slices fill without their capacities and two fill with them.
+
 ### String and `[]byte` variants of a function
 
 Go code often needs the same routine for strings and for byte slices. A `gocc-variant` directive

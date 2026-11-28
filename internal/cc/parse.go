@@ -26,6 +26,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/mhr3/gocc/internal/asm"
@@ -35,7 +36,27 @@ import (
 const (
 	goccComment        = "gocc:"
 	goccVariantComment = "gocc-variant:"
+	goccOmitCapComment = "gocc-omit-cap:"
 )
+
+// extractOmitCapParams returns the parameters named by the gocc-omit-cap
+// directives of a function: the slices its C function takes as a pointer
+// and a length, without the capacity.
+func extractOmitCapParams(comment string) ([]string, error) {
+	var names []string
+	for _, line := range strings.Split(comment, "\n") {
+		_, list, found := strings.Cut(line, goccOmitCapComment)
+		if !found {
+			continue
+		}
+		listed := strings.FieldsFunc(list, func(r rune) bool { return r == ',' || unicode.IsSpace(r) })
+		if len(listed) == 0 {
+			return nil, errors.New("gocc-omit-cap names no parameter")
+		}
+		names = append(names, listed...)
+	}
+	return names, nil
+}
 
 var supportedTypes = mapset.NewSet(
 	"int64_t", "uint64_t",
@@ -178,7 +199,11 @@ func Parse(path string) ([]asm.Function, error) {
 				return nil, err
 			}
 			function.Variants = variants
-			if err := checkFunction(&function); err != nil {
+			omitCap, err := extractOmitCapParams(funcComment)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", cName, err)
+			}
+			if err := checkFunction(&function, omitCap); err != nil {
 				return nil, err
 			}
 
@@ -229,20 +254,23 @@ func extractAnnotatedSignatures(path string) (string, error) {
 
 	var clauseCount int
 	var isAnnotated bool
-	// variantLine is the line of a gocc-variant directive waiting for the
-	// function it belongs to. A variant of a function without a gocc
-	// signature must be rejected here: the function is dropped below while
-	// its comments are kept, so the directive would attach itself to the
-	// next annotated one.
-	var variantLine int
-	claimVariant := func() error {
+	// pending is a gocc-variant or gocc-omit-cap directive waiting for
+	// the function it belongs to. One on a function without a gocc signature
+	// must be rejected here: the function is dropped below while its
+	// comments are kept, so the directive would attach itself to the next
+	// annotated one.
+	var pending struct {
+		line int
+		name string
+	}
+	claimDirective := func() error {
 		if clauseCount != 0 {
 			return nil
 		}
-		if variantLine != 0 && !isAnnotated {
-			return fmt.Errorf("line %d: gocc-variant on a function without a gocc signature", variantLine)
+		if pending.line != 0 && !isAnnotated {
+			return fmt.Errorf("line %d: %s on a function without a gocc signature", pending.line, pending.name)
 		}
-		variantLine = 0
+		pending.line = 0
 		return nil
 	}
 
@@ -258,7 +286,9 @@ func extractAnnotatedSignatures(path string) (string, error) {
 				isAnnotated = true
 			} else if strings.Contains(line, goccVariantComment) {
 				// part of the annotation, on either side of the gocc line
-				variantLine = i + 1
+				pending.line, pending.name = i+1, "gocc-variant"
+			} else if strings.Contains(line, goccOmitCapComment) {
+				pending.line, pending.name = i+1, "gocc-omit-cap"
 			} else if isAnnotated {
 				isAnnotated = false
 			}
@@ -266,12 +296,12 @@ func extractAnnotatedSignatures(path string) (string, error) {
 			redacted.WriteString(line)
 			redacted.WriteRune('\n')
 		case strings.Contains(line, "{") && strings.Contains(line, "}"):
-			if err := claimVariant(); err != nil {
+			if err := claimDirective(); err != nil {
 				return "", err
 			}
 			clauseCount += strings.Count(line, "{") - strings.Count(line, "}")
 		case strings.Contains(line, "{"):
-			if err := claimVariant(); err != nil {
+			if err := claimDirective(); err != nil {
 				return "", err
 			}
 			if clauseCount == 0 && isAnnotated {
@@ -521,14 +551,15 @@ func resolveVariants(cName string, primary asm.GoFunction, others []asm.GoFuncti
 	return signatures[declared], variants, nil
 }
 
-// cParamCount returns the number of C parameters a Go signature stands for.
-func cParamCount(goFunc *asm.GoFunction, capacities bool) int {
+// cParamCount returns the number of C parameters a Go signature stands for,
+// given which of its slices come with their capacity.
+func cParamCount(goFunc *asm.GoFunction, hasCapacity func(param string) bool) int {
 	count := 0
-	goFunc.ForEachParam(func(_, typ string) {
+	goFunc.ForEachParam(func(name, typ string) {
 		switch {
 		case typ == "string":
 			count += 2
-		case strings.HasPrefix(typ, "[]") && capacities:
+		case strings.HasPrefix(typ, "[]") && hasCapacity(name):
 			count += 3
 		case strings.HasPrefix(typ, "[]"):
 			count += 2
@@ -542,15 +573,39 @@ func cParamCount(goFunc *asm.GoFunction, capacities bool) int {
 // checkFunction verifies that the C signature matches the annotated Go one
 // and records, for every C parameter, the name of its Go argument slot.
 //
-// A slice is three C parameters: pointer, length and capacity. A function
-// with variants takes all of its slices as a pointer and a length instead,
-// since a string in their place has no capacity to pass. The capacity keeps
+// A slice is three C parameters: pointer, length and capacity. The ones
+// listed in omitCap, by a gocc-omit-cap directive, are a pointer and a
+// length instead. So is every slice of a function with variants, since a
+// string in the place of a slice has no capacity to pass. The capacity keeps
 // its word in the frame, which is recorded as a gap after the length.
-func checkFunction(function *asm.Function) error {
-	withoutCapacities := len(function.Variants) > 0
-	if withoutCapacities && len(function.Params) != cParamCount(&function.GoFunc, false) &&
-		len(function.Params) == cParamCount(&function.GoFunc, true) {
+func checkFunction(function *asm.Function, omitCap []string) error {
+	goTypes := map[string]string{}
+	function.GoFunc.ForEachParam(func(name, typ string) { goTypes[name] = typ })
+	listed := map[string]bool{}
+	for _, name := range omitCap {
+		switch typ, exists := goTypes[name]; {
+		case !exists:
+			return fmt.Errorf("%s: gocc-omit-cap: %s has no parameter %q", function.Name, function.GoFunc.Name, name)
+		case !strings.HasPrefix(typ, "[]"):
+			return fmt.Errorf("%s: gocc-omit-cap: param %q is a %s, not a slice", function.Name, name, typ)
+		}
+		listed[name] = true
+	}
+	variants := len(function.Variants) > 0
+	hasCapacity := func(param string) bool { return !variants && !listed[param] }
+
+	// The usual mistakes, which would otherwise be reported as a mismatch
+	// of some later parameter.
+	every := cParamCount(&function.GoFunc, func(string) bool { return true })
+	none := cParamCount(&function.GoFunc, func(string) bool { return false })
+	switch params := len(function.Params); {
+	case params == cParamCount(&function.GoFunc, hasCapacity):
+	case variants && params == every:
 		return fmt.Errorf("%s: a function with variants takes a slice as a pointer and a length, without the capacity", function.Name)
+	case len(listed) > 0 && params == every:
+		return fmt.Errorf("%s: the C function takes the capacity of a slice listed in gocc-omit-cap", function.Name)
+	case !variants && len(listed) == 0 && params == none:
+		return fmt.Errorf("%s: too few parameters: a slice is a pointer, a length and a capacity; list it in gocc-omit-cap if the C function takes no capacity", function.Name)
 	}
 
 	checkParam := func(idx int, expectedParam asm.Param, goName string) error {
@@ -613,7 +668,7 @@ func checkFunction(function *asm.Function) error {
 					if err := checkParam(j+1, go2c["int"], name+"_len"); err != nil {
 						return err
 					}
-					if withoutCapacities {
+					if !hasCapacity(name) {
 						capacity := go2c["int"]
 						function.Params[j+1].FrameGap = capacity.Size()
 						j += 2

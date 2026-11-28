@@ -220,3 +220,19 @@ func TestCallsVariantGrowsStack(t *testing.T) {
 	go func() { got <- generated.Test_calls_big_frame_bytes(p) }()
 	assert.Equal(t, want, <-got)
 }
+
+func TestOmitCap(t *testing.T) {
+	// capacities that are neither a length nor any other argument
+	a := append(make([]int64, 0, 32), 1, 2, 3, 4, 5, 7)
+	b := append(make([]int32, 0, 16), 9, 8, 5)
+
+	// b is not listed, so its capacity is an argument; that of a is not
+	want := 7 + 1000*len(a) + 1000000*5 + 1000000000*len(b) + 1000000000000*cap(b) + 1000000000000000*2
+	assert.Equal(t, want, generated.Test_fn_omit_cap_mixed(a, b, 2))
+
+	x := append(make([]byte, 0, 64), "gopher"...)
+	y := append(make([]byte, 0, 48), "go!"...)
+	z := append(make([]byte, 0, 40), "gocc"...)
+	want = int('r') + 1000*len(x) + 1000000*int('!') + 1000000000*len(y) + 1000000000000*int('c') + 1000000000000000*len(z)
+	assert.Equal(t, want, generated.Test_fn_omit_cap_three(x, y, z))
+}

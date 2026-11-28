@@ -446,3 +446,61 @@ LBB13_13:
 
 TEXT ·test_fn_scale_stringInternal(SB), NOSPLIT|NOFRAME, $0-52
 	JMP ·Test_fn_scale_bytes(SB)
+
+TEXT ·Test_fn_omit_cap_mixed(SB), NOSPLIT, $0-64
+	MOVQ  a_base+0(FP), DI
+	MOVQ  a_len+8(FP), SI
+	MOVQ  b_base+24(FP), DX
+	MOVQ  b_len+32(FP), CX
+	MOVQ  b_cap+40(FP), R8
+	MOVQ  k+48(FP), R9
+	NOP                                         // (skipped)                            // push	rbp
+	NOP                                         // (skipped)                            // mov	rbp, rsp
+	NOP                                         // (skipped)                            // and	rsp, -8
+	LONG  $0xe8c66948; WORD $0x0003; BYTE $0x00 // IMULQ $0x3e8, SI, AX                 // imul	rax, rsi, 1000
+	LONG  $0x8a546348; BYTE $0xfc               // MOVSXD -0x4(DX)(CX*4), DX            // movsxd	rdx, dword ptr [rdx + 4*rcx - 4]
+	LONG  $0x40d26948; WORD $0x0f42; BYTE $0x00 // IMULQ $0xf4240, DX, DX               // imul	rdx, rdx, 1000000
+	LONG  $0x00c96948; WORD $0x9aca; BYTE $0x3b // IMULQ $0x3b9aca00, CX, CX            // imul	rcx, rcx, 1000000000
+	ADDQ  AX, CX                                // <--                                  // add	rcx, rax
+	MOVQ  $0xe8d4a51000, R10                    // <--                                  // movabs	r10, 1000000000000
+	IMULQ R8, R10                               // <--                                  // imul	r10, r8
+	ADDQ  CX, R10                               // <--                                  // add	r10, rcx
+	MOVQ  $0x38d7ea4c68000, AX                  // <--                                  // movabs	rax, 1000000000000000
+	IMULQ R9, AX                                // <--                                  // imul	rax, r9
+	ADDQ  R10, AX                               // <--                                  // add	rax, r10
+	ADDQ  -0x8(DI)(SI*8), AX                    // <--                                  // add	rax, qword ptr [rdi + 8*rsi - 8]
+	ADDQ  DX, AX                                // <--                                  // add	rax, rdx
+	NOP                                         // (skipped)                            // mov	rsp, rbp
+	NOP                                         // (skipped)                            // pop	rbp
+	MOVQ  AX, ret+56(FP)                        // <--
+	RET                                         // <--                                  // ret
+
+TEXT ·Test_fn_omit_cap_three(SB), NOSPLIT, $0-80
+	MOVQ  a_base+0(FP), DI
+	MOVQ  a_len+8(FP), SI
+	MOVQ  b_base+24(FP), DX
+	MOVQ  b_len+32(FP), CX
+	MOVQ  c_base+48(FP), R8
+	MOVQ  c_len+56(FP), R9
+	NOP                                         // (skipped)                            // push	rbp
+	NOP                                         // (skipped)                            // mov	rbp, rsp
+	NOP                                         // (skipped)                            // and	rsp, -8
+	LONG  $0x3e7cb60f; BYTE $0xff               // MOVZX -0x1(SI)(DI*1), DI             // movzx	edi, byte ptr [rsi + rdi - 1]
+	LONG  $0xe8c66948; WORD $0x0003; BYTE $0x00 // IMULQ $0x3e8, SI, AX                 // imul	rax, rsi, 1000
+	LONG  $0x1154b60f; BYTE $0xff               // MOVZX -0x1(CX)(DX*1), DX             // movzx	edx, byte ptr [rcx + rdx - 1]
+	LONG  $0x40d26948; WORD $0x0f42; BYTE $0x00 // IMULQ $0xf4240, DX, DX               // imul	rdx, rdx, 1000000
+	LONG  $0x00c96948; WORD $0x9aca; BYTE $0x3b // IMULQ $0x3b9aca00, CX, CX            // imul	rcx, rcx, 1000000000
+	ADDQ  AX, CX                                // <--                                  // add	rcx, rax
+	LONG  $0x44b60f43; WORD $0xff01             // MOVZX -0x1(R9)(R8*1), AX             // movzx	eax, byte ptr [r9 + r8 - 1]
+	MOVQ  $0xe8d4a51000, SI                     // <--                                  // movabs	rsi, 1000000000000
+	IMULQ AX, SI                                // <--                                  // imul	rsi, rax
+	MOVQ  $0x38d7ea4c68000, AX                  // <--                                  // movabs	rax, 1000000000000000
+	IMULQ R9, AX                                // <--                                  // imul	rax, r9
+	ADDQ  CX, AX                                // <--                                  // add	rax, rcx
+	ADDQ  DI, AX                                // <--                                  // add	rax, rdi
+	ADDQ  DX, AX                                // <--                                  // add	rax, rdx
+	ADDQ  SI, AX                                // <--                                  // add	rax, rsi
+	NOP                                         // (skipped)                            // mov	rsp, rbp
+	NOP                                         // (skipped)                            // pop	rbp
+	MOVQ  AX, ret+72(FP)                        // <--
+	RET                                         // <--                                  // ret
