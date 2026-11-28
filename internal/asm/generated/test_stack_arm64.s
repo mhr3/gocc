@@ -175,7 +175,7 @@ TEXT ·Stack_pointer_neon(SB), 0, $64-32
 	FMOVQ (R8), F0            // <--                                  // ldr	q0, [x8, :lo12:.LCPI4_0]
 	STP   (ZR, ZR), 16(RSP)   // <--                                  // stp	xzr, xzr, [sp]
 	FMOVQ F0, 32(RSP)         // <--                                  // str	q0, [sp, #16]
-	CALL  mix<>(SB)           // <--                                  // bl	mix
+	CALL  fn_mix              // <--                                  // bl	mix
 	FLDPQ 16(RSP), (F0, F1)   // <--                                  // ldp	q0, q1, [sp]
 	VMOV  V0.D[1], R8         // <--                                  // mov	x8, v0.d[1]
 	FMOVD F0, R10             // <--                                  // fmov	x10, d0
@@ -190,6 +190,29 @@ TEXT ·Stack_pointer_neon(SB), 0, $64-32
 	NOP                       // (skipped)                            // add	sp, sp, #48
 	MOVD  R0, ret+24(FP)      // <--
 	RET                       // <--                                  // ret
+
+// fn_mix is the C function mix.
+// It runs in the frame of Stack_pointer_neon, so its code is part of this function,
+// where the Go runtime can unwind the stack from it.
+fn_mix:
+	CMP   $16, R2        // <--                                  // cmp	x2, #16
+	BCC   LBB5_3         // <--                                  // b.lo	.LBB5_3
+	FLDPQ (R0), (F0, F1) // <--                                  // ldp	q0, q1, [x0]
+	MOVD  ZR, R8         // <--                                  // mov	x8, xzr
+
+LBB5_2:
+	WORD  $0x3ce86822            // FMOVQ (R1)(R8), F2                   // ldr	q2, [x1, x8]
+	ADD   $16, R8, R9            // <--                                  // add	x9, x8, #16
+	ADD   $32, R8, R10           // <--                                  // add	x10, x8, #32
+	MOVD  R9, R8                 // <--                                  // mov	x8, x9
+	CMP   R2, R10                // <--                                  // cmp	x10, x2
+	VADD  V0.D2, V2.D2, V0.D2    // <--                                  // add	v0.2d, v2.2d, v0.2d
+	VEOR  V0.B16, V1.B16, V1.B16 // <--                                  // eor	v1.16b, v1.16b, v0.16b
+	FSTPQ (F0, F1), (R0)         // <--                                  // stp	q0, q1, [x0]
+	BLS   LBB5_2                 // <--                                  // b.ls	.LBB5_2
+
+LBB5_3:
+	WORD $0xd65f03c0 // RET                                  // ret (RET would undo the frame of Stack_pointer_neon)
 
 DATA LCPI6_0<>+0x00(SB)/8, $0x9e3779b97f4a7c15
 DATA LCPI6_0<>+0x08(SB)/8, $0xbf58476d1ce4e5b9
@@ -332,7 +355,7 @@ TEXT ·Stack_overaligned_neon(SB), 0, $144-32
 LBB7_2:
 	ADD   R21, R26, R1      // <--                                  // add	x1, x26, x21
 	ADD   $16, RSP, R0      // <--                                  // mov	x0, sp
-	CALL  absorb<>(SB)      // <--                                  // bl	absorb
+	CALL  fn_absorb         // <--                                  // bl	absorb
 	ADD   $32, R21, R8      // <--                                  // add	x8, x21, #32
 	ADD   $64, R21, R9      // <--                                  // add	x9, x21, #64
 	MOVD  R8, R21           // <--                                  // mov	x21, x8
@@ -356,6 +379,38 @@ LBB7_4:
 	LDP   96(RSP), (R25, R30)  // <--                                  // ldp	x25, x30, [sp], #48
 	MOVD  R0, ret+24(FP)       // <--
 	RET                        // <--                                  // ret
+
+// fn_absorb is the C function absorb.
+// It runs in the frame of Stack_overaligned_neon, so its code is part of this function,
+// where the Go runtime can unwind the stack from it.
+fn_absorb:
+	FLDPQ (R0), (F1, F2)         // <--                                  // ldp	q1, q2, [x0]
+	FMOVQ (R1), F0               // <--                                  // ldr	q0, [x1]
+	VADD  V1.D2, V0.D2, V0.D2    // <--                                  // add	v0.2d, v0.2d, v1.2d
+	FMOVQ F0, (R0)               // <--                                  // str	q0, [x0]
+	FMOVQ 16(R1), F1             // <--                                  // ldr	q1, [x1, #16]
+	VEOR  V1.B16, V2.B16, V1.B16 // <--                                  // eor	v1.16b, v2.16b, v1.16b
+	VEOR  V0.B16, V1.B16, V0.B16 // <--                                  // eor	v0.16b, v1.16b, v0.16b
+	FMOVQ F0, 16(R0)             // <--                                  // str	q0, [x0, #16]
+	WORD  $0xd65f03c0            // RET                                  // ret (RET would undo the frame of Stack_overaligned_neon)
+
+DATA table<>+0x00(SB)/8, $0x8ebc6af09c88c6e3
+DATA table<>+0x08(SB)/8, $0xe7037ed1a0b428db
+DATA table<>+0x10(SB)/8, $0xa0761d6478bd642f
+DATA table<>+0x18(SB)/8, $0xd6e8feb86659fd93
+DATA table<>+0x20(SB)/8, $0x2545f4914f6cdd1d
+DATA table<>+0x28(SB)/8, $0x94d049bb133111eb
+DATA table<>+0x30(SB)/8, $0xbf58476d1ce4e5b9
+DATA table<>+0x38(SB)/8, $0x9e3779b97f4a7c15
+DATA table<>+0x40(SB)/8, $0x9e3779b97f4a7c15
+DATA table<>+0x48(SB)/8, $0x94d049bb133111eb
+DATA table<>+0x50(SB)/8, $0xd6e8feb86659fd93
+DATA table<>+0x58(SB)/8, $0xe7037ed1a0b428db
+DATA table<>+0x60(SB)/8, $0xbf58476d1ce4e5b9
+DATA table<>+0x68(SB)/8, $0x2545f4914f6cdd1d
+DATA table<>+0x70(SB)/8, $0xa0761d6478bd642f
+DATA table<>+0x78(SB)/8, $0x8ebc6af09c88c6e3
+GLOBL table<>(SB), (RODATA|NOPTR), $128
 
 TEXT ·Stack_frame_neon(SB), 0, $6112-32
 	NO_LOCAL_POINTERS
@@ -418,39 +473,39 @@ LBB9_4:
 
 LBB9_5:
 	MOVBU 32(RSP), R0      // <--                                  // ldrb	w0, [sp, #16]
-	CALL  scramble<>(SB)   // <--                                  // bl	scramble
+	CALL  fn_scramble      // <--                                  // bl	scramble
 	MOVD  R0, 24(RSP)      // <--                                  // str	x0, [sp, #8]
 	MOVD  R0, R1           // <--                                  // mov	x1, x0
 	MOVBU 3(R19), R0       // <--                                  // ldrb	w0, [x19, #3]
-	CALL  scramble<>(SB)   // <--                                  // bl	scramble
+	CALL  fn_scramble      // <--                                  // bl	scramble
 	MOVD  R0, R26          // <--                                  // mov	x26, x0
 	MOVBU 33(RSP), R0      // <--                                  // ldrb	w0, [sp, #17]
 	MOVD  R26, R1          // <--                                  // mov	x1, x26
-	CALL  scramble<>(SB)   // <--                                  // bl	scramble
+	CALL  fn_scramble      // <--                                  // bl	scramble
 	MOVD  R0, R21          // <--                                  // mov	x21, x0
 	MOVBU 2(R19), R0       // <--                                  // ldrb	w0, [x19, #2]
 	MOVD  R21, R1          // <--                                  // mov	x1, x21
-	CALL  scramble<>(SB)   // <--                                  // bl	scramble
+	CALL  fn_scramble      // <--                                  // bl	scramble
 	MOVD  R0, R22          // <--                                  // mov	x22, x0
 	MOVBU 34(RSP), R0      // <--                                  // ldrb	w0, [sp, #18]
 	MOVD  R22, R1          // <--                                  // mov	x1, x22
-	CALL  scramble<>(SB)   // <--                                  // bl	scramble
+	CALL  fn_scramble      // <--                                  // bl	scramble
 	MOVD  R0, R23          // <--                                  // mov	x23, x0
 	MOVBU 1(R19), R0       // <--                                  // ldrb	w0, [x19, #1]
 	MOVD  R23, R1          // <--                                  // mov	x1, x23
-	CALL  scramble<>(SB)   // <--                                  // bl	scramble
+	CALL  fn_scramble      // <--                                  // bl	scramble
 	MOVD  R0, R24          // <--                                  // mov	x24, x0
 	MOVBU 35(RSP), R0      // <--                                  // ldrb	w0, [sp, #19]
 	MOVD  R24, R1          // <--                                  // mov	x1, x24
-	CALL  scramble<>(SB)   // <--                                  // bl	scramble
+	CALL  fn_scramble      // <--                                  // bl	scramble
 	MOVD  R0, R25          // <--                                  // mov	x25, x0
 	MOVBU (R19), R0        // <--                                  // ldrb	w0, [x19]
 	MOVD  R25, R1          // <--                                  // mov	x1, x25
-	CALL  scramble<>(SB)   // <--                                  // bl	scramble
+	CALL  fn_scramble      // <--                                  // bl	scramble
 	MOVD  R0, R19          // <--                                  // mov	x19, x0
 	MOVBU 36(RSP), R0      // <--                                  // ldrb	w0, [sp, #20]
 	MOVD  R19, R1          // <--                                  // mov	x1, x19
-	CALL  scramble<>(SB)   // <--                                  // bl	scramble
+	CALL  fn_scramble      // <--                                  // bl	scramble
 	MOVW  $11, R9          // <--                                  // mov	w9, #11
 	MOVW  $13, R10         // <--                                  // mov	w10, #13
 	LSL   $3, R22, R11     // <--                                  // lsl	x11, x22, #3
@@ -497,59 +552,10 @@ LBB9_6:
 	MOVD  R0, ret+24(FP) // <--
 	RET                  // <--                                  // ret
 
-// internal function, its stack space has been flattened into its caller's frame
-TEXT mix<>(SB), NOSPLIT|NOFRAME, $0-0
-	CMP   $16, R2        // <--                                  // cmp	x2, #16
-	BCC   LBB5_3         // <--                                  // b.lo	.LBB5_3
-	FLDPQ (R0), (F0, F1) // <--                                  // ldp	q0, q1, [x0]
-	MOVD  ZR, R8         // <--                                  // mov	x8, xzr
-
-LBB5_2:
-	WORD  $0x3ce86822            // FMOVQ (R1)(R8), F2                   // ldr	q2, [x1, x8]
-	ADD   $16, R8, R9            // <--                                  // add	x9, x8, #16
-	ADD   $32, R8, R10           // <--                                  // add	x10, x8, #32
-	MOVD  R9, R8                 // <--                                  // mov	x8, x9
-	CMP   R2, R10                // <--                                  // cmp	x10, x2
-	VADD  V0.D2, V2.D2, V0.D2    // <--                                  // add	v0.2d, v2.2d, v0.2d
-	VEOR  V0.B16, V1.B16, V1.B16 // <--                                  // eor	v1.16b, v1.16b, v0.16b
-	FSTPQ (F0, F1), (R0)         // <--                                  // stp	q0, q1, [x0]
-	BLS   LBB5_2                 // <--                                  // b.ls	.LBB5_2
-
-LBB5_3:
-	RET // <--                                  // ret
-
-// internal function, its stack space has been flattened into its caller's frame
-TEXT absorb<>(SB), NOSPLIT|NOFRAME, $0-0
-	FLDPQ (R0), (F1, F2)         // <--                                  // ldp	q1, q2, [x0]
-	FMOVQ (R1), F0               // <--                                  // ldr	q0, [x1]
-	VADD  V1.D2, V0.D2, V0.D2    // <--                                  // add	v0.2d, v0.2d, v1.2d
-	FMOVQ F0, (R0)               // <--                                  // str	q0, [x0]
-	FMOVQ 16(R1), F1             // <--                                  // ldr	q1, [x1, #16]
-	VEOR  V1.B16, V2.B16, V1.B16 // <--                                  // eor	v1.16b, v2.16b, v1.16b
-	VEOR  V0.B16, V1.B16, V0.B16 // <--                                  // eor	v0.16b, v1.16b, v0.16b
-	FMOVQ F0, 16(R0)             // <--                                  // str	q0, [x0, #16]
-	RET                          // <--                                  // ret
-
-DATA table<>+0x00(SB)/8, $0x8ebc6af09c88c6e3
-DATA table<>+0x08(SB)/8, $0xe7037ed1a0b428db
-DATA table<>+0x10(SB)/8, $0xa0761d6478bd642f
-DATA table<>+0x18(SB)/8, $0xd6e8feb86659fd93
-DATA table<>+0x20(SB)/8, $0x2545f4914f6cdd1d
-DATA table<>+0x28(SB)/8, $0x94d049bb133111eb
-DATA table<>+0x30(SB)/8, $0xbf58476d1ce4e5b9
-DATA table<>+0x38(SB)/8, $0x9e3779b97f4a7c15
-DATA table<>+0x40(SB)/8, $0x9e3779b97f4a7c15
-DATA table<>+0x48(SB)/8, $0x94d049bb133111eb
-DATA table<>+0x50(SB)/8, $0xd6e8feb86659fd93
-DATA table<>+0x58(SB)/8, $0xe7037ed1a0b428db
-DATA table<>+0x60(SB)/8, $0xbf58476d1ce4e5b9
-DATA table<>+0x68(SB)/8, $0x2545f4914f6cdd1d
-DATA table<>+0x70(SB)/8, $0xa0761d6478bd642f
-DATA table<>+0x78(SB)/8, $0x8ebc6af09c88c6e3
-GLOBL table<>(SB), (RODATA|NOPTR), $128
-
-// internal function, its stack space has been flattened into its caller's frame
-TEXT scramble<>(SB), NOSPLIT|NOFRAME, $0-0
+// fn_scramble is the C function scramble.
+// It runs in the frame of Stack_frame_neon, so its code is part of this function,
+// where the Go runtime can unwind the stack from it.
+fn_scramble:
 	NOP                   // (skipped)                            // sub	sp, sp, #16
 	MOVD $58809, R8       // <--                                  // mov	x8, #58809
 	MOVK $(7396<<16), R8  // <--                                  // movk	x8, #7396, lsl #16
@@ -562,4 +568,4 @@ TEXT scramble<>(SB), NOSPLIT|NOFRAME, $0-0
 	EOR  R9>>29, R8, R8   // <--                                  // eor	x8, x8, x9, lsr #29
 	ADD  R1, R8, R0       // <--                                  // add	x0, x8, x1
 	NOP                   // (skipped)                            // add	sp, sp, #16
-	RET                   // <--                                  // ret
+	WORD $0xd65f03c0      // RET                                  // ret (RET would undo the frame of Stack_frame_neon)

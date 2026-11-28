@@ -172,6 +172,9 @@ This tool does not support most of the C features, it's not a replacement for C/
   tail calls) require `--with-internal-functions`; recursive helpers and helpers
   reachable from multiple exported functions are rejected, as are helpers that
   take arguments on the stack (more than 8 integer arguments on arm64, 6 on amd64).
+  On arm64 a helper is emitted as part of the function that calls it, so that the
+  Go runtime can unwind the stack from inside it; a CPU profile shows its time
+  under that function. Taking the address of a helper is not supported there.
 - No dynamic stack allocation: VLAs and `alloca` are rejected. Go only keeps the
   amd64 stack 8-byte aligned; aligned vector moves to and from the stack are
   rewritten to unaligned ones. A function whose code still depends on the

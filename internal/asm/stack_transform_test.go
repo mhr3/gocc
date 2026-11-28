@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"go/ast"
 	"strings"
 	"testing"
 
@@ -1072,16 +1073,116 @@ func TestApplyTransformsFlattensInternalArm64Frame(t *testing.T) {
 	modified, err := ApplyTransforms(config.ARM64(), functions)
 	require.NoError(t, err)
 
+	// The helper has become part of the function that calls it.
+	require.Len(t, modified, 1)
 	assert.Equal(t, 32, modified[0].LocalsSize)
-	assert.Equal(t, 0, modified[1].LocalsSize)
-	assert.Equal(t, 32, modified[1].HiddenStackSize)
-	assert.Equal(t, "STP (R8, R8), 16(RSP)", modified[1].Lines[1].Disassembled)
-	for _, line := range modified[1].Lines {
+	assert.Equal(t, "CALL fn_helper", modified[0].Lines[0].Disassembled)
+	helper := modified[0].Lines[1:]
+	require.Len(t, helper, 6)
+	assert.Equal(t, []string{"fn_helper"}, helper[0].Labels)
+	assert.Equal(t, "STP (R8, R8), 16(RSP)", helper[1].Disassembled)
+	for _, line := range helper {
 		assert.NotContains(t, line.Disassembled, "RSP, RSP")
 		if strings.Contains(line.Disassembled, "(RSP)") {
 			assert.Empty(t, line.Binary)
 		}
 	}
+}
+
+func TestFoldArm64Helpers(t *testing.T) {
+	ret := Line{Assembly: "ret", Disassembled: "RET"}
+	call := func(target string) Line {
+		return Line{Assembly: "bl\t" + target, Disassembled: "CALL " + target + "<>(SB)"}
+	}
+	functions := func() []Function {
+		return []Function{
+			{Name: "entry", GoFunc: GoFunction{Name: "Entry", Expr: &ast.FuncType{}}, Consts: []Const{{Label: "LCPI0_0"}}, Lines: []Line{
+				call("mid"),
+				// a constant whose name ends like a helper's
+				{Disassembled: "MOVD $checksum<>(SB), R1"},
+				{Disassembled: "MOVD R0, ret+0(FP)"}, ret,
+			}},
+			{Name: "other", Lines: []Line{ret}},
+			{Name: "mid", Internal: true, Lines: []Line{
+				{Labels: []string{"LBB1_1"}, Disassembled: "MOVD R30, 16(RSP)"},
+				call("sum"),
+				{Disassembled: "MOVD 16(RSP), R30"},
+				// a tail call
+				{Assembly: "b\tsum", Disassembled: "JMP sum<>(SB)"},
+			}},
+			{Name: "sum", Internal: true, Consts: []Const{{Label: "LCPI2_0"}}, Lines: []Line{
+				{Disassembled: "ADD R1, R0, R0"}, ret,
+			}},
+			{Name: "unused", Internal: true, Lines: []Line{ret}},
+		}
+	}
+
+	folded, err := foldArm64Helpers(functions())
+	require.NoError(t, err)
+
+	// Helpers go into the function that calls them, behind its own code;
+	// one that nothing calls stays a function.
+	var names []string
+	for _, function := range folded {
+		names = append(names, function.Name)
+	}
+	require.Equal(t, []string{"entry", "other", "unused"}, names)
+	assert.True(t, folded[2].Internal)
+
+	entry := folded[0]
+	var text []string
+	for _, line := range entry.Lines {
+		text = append(text, strings.Join(append(append([]string{}, line.Labels...), line.Disassembled), ": "))
+	}
+	assert.Equal(t, []string{
+		"CALL fn_mid",
+		"MOVD $checksum<>(SB), R1",
+		"MOVD R0, ret+0(FP)",
+		"RET",
+		"fn_mid: LBB1_1: MOVD R30, 16(RSP)",
+		"CALL fn_sum",
+		"MOVD 16(RSP), R30",
+		"JMP fn_sum",
+		"fn_sum: ADD R1, R0, R0",
+		"RET",
+	}, text)
+
+	// The entry function returns through its epilogue, a helper with the
+	// instruction alone.
+	assert.Empty(t, entry.Lines[3].Binary)
+	assert.Equal(t, arm64Return, entry.Lines[9].Binary)
+	assert.Contains(t, entry.Lines[4].Heading, "fn_mid is the C function mid.\nIt runs in the frame of Entry")
+
+	var consts []string
+	for _, c := range entry.Consts {
+		consts = append(consts, c.Label)
+	}
+	assert.Equal(t, []string{"LCPI0_0", "LCPI2_0"}, consts)
+
+	t.Run("address of a helper", func(t *testing.T) {
+		input := functions()
+		input[0].Lines[1] = Line{Assembly: "adrp\tx1, sum", Disassembled: "MOVD $sum<>(SB), R1"}
+		_, err := foldArm64Helpers(input)
+		assert.ErrorContains(t, err, `entry: the address of internal function "sum" is taken`)
+	})
+	t.Run("return through another register", func(t *testing.T) {
+		input := functions()
+		input[3].Lines[1] = Line{Assembly: "ret\tx17", Disassembled: "RET"}
+		_, err := foldArm64Helpers(input)
+		assert.ErrorContains(t, err, `sum: unsupported return "ret\tx17"`)
+	})
+}
+
+func TestAmd64HelpersStayFunctions(t *testing.T) {
+	functions := []Function{
+		{Name: "entry", Lines: []Line{{Assembly: "call\thelper", Disassembled: "CALL helper<>(SB)"}, {Assembly: "ret", Disassembled: "RET"}}},
+		{Name: "helper", Internal: true, Lines: []Line{{Assembly: "ret", Disassembled: "RET"}}},
+	}
+	modified, err := ApplyTransforms(config.AMD64(), functions)
+	require.NoError(t, err)
+	require.Len(t, modified, 2)
+	assert.Equal(t, "CALL helper<>(SB)", modified[0].Lines[0].Disassembled)
+	assert.Empty(t, modified[1].Lines[0].Binary)
 }
 
 func TestApplyTransformsRejectsDirectInternalRecursion(t *testing.T) {
