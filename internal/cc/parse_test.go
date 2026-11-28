@@ -95,7 +95,46 @@ long score(float *w, long w_len, char *t, long t_len, char *s, long s_len)` + bo
 			ArgsSize: 64,
 		},
 		{
-			Name: "no variants",
+			// Only the listed slices lose their C capacity. The directive
+			// counts on either side of the signature.
+			Name: "gocc-omit-cap",
+			Source: `
+// gocc-omit-cap: a, c
+// gocc: Mix(a []float32, b []int64, c []byte, k int) int
+long mix(float *a, long a_len, long *b, long b_len, long b_cap, char *c, long c_len, long k)` + body,
+			Declared: "Mix",
+			Slots:    []string{"a_base", "a_len", "b_base", "b_len", "b_cap", "c_base", "c_len", "k"},
+			Offsets:  []int{0, 8, 24, 32, 40, 48, 56, 72},
+			ArgsSize: 80,
+		},
+		{
+			Name: "several directives",
+			Source: `
+// gocc: Dot(a, b, c []int64) int
+// gocc-omit-cap: a
+// gocc-omit-cap: b c
+long dot(long *a, long a_len, long *b, long b_len, long *c, long c_len)` + body,
+			Declared: "Dot",
+			Slots:    []string{"a_base", "a_len", "b_base", "b_len", "c_base", "c_len"},
+			Offsets:  []int{0, 8, 24, 32, 48, 56},
+			ArgsSize: 72,
+		},
+		{
+			// A function with variants has no capacities already.
+			Name: "gocc-omit-cap with variants",
+			Source: `
+// gocc: SumString(p string, bias int) int
+// gocc-variant: Sum(p []byte, bias int) int
+// gocc-omit-cap: p
+long sum(char *p, long p_len, long bias)` + body,
+			Declared: "Sum",
+			Variants: []variant{{"SumString", []bool{true, false}}},
+			Slots:    []string{"p_base", "p_len", "bias"},
+			Offsets:  []int{0, 8, 24},
+			ArgsSize: 32,
+		},
+		{
+			Name: "no directive",
 			Source: `
 // gocc: Sum(p []byte, bias int) int
 long sum(char *p, long p_len, long p_cap, long bias)` + body,
@@ -193,12 +232,60 @@ long sum(char *p, long p_len, long p_cap, long bias)` + body,
 			Expected: "takes a slice as a pointer and a length, without the capacity",
 		},
 		{
-			// Only a function with variants may leave the capacity out.
-			Name: "capacity missing without variants",
+			Name: "capacity missing without a directive",
 			Source: `
 // gocc: Sum(p []byte) int
 long sum(char *p, long p_len)` + body,
+			Expected: "too few parameters: a slice is a pointer, a length and a capacity; list it in gocc-omit-cap",
+		},
+		{
+			Name: "capacity missing for a slice that is not listed",
+			Source: `
+// gocc: Mix(a []int64, b []int64) int
+// gocc-omit-cap: a
+long mix(long *a, long a_len, long *b, long b_len)` + body,
 			Expected: "too few parameters",
+		},
+		{
+			Name: "listed and the C function takes the capacity",
+			Source: `
+// gocc: Sum(p []int64, bias int) int
+// gocc-omit-cap: p
+long sum(long *p, long p_len, long p_cap, long bias)` + body,
+			Expected: "the C function takes the capacity of a slice listed in gocc-omit-cap",
+		},
+		{
+			Name: "listed parameter that does not exist",
+			Source: `
+// gocc: Sum(p []int64) int
+// gocc-omit-cap: q
+long sum(long *p, long p_len)` + body,
+			Expected: `gocc-omit-cap: Sum has no parameter "q"`,
+		},
+		{
+			Name: "listed parameter that is not a slice",
+			Source: `
+// gocc: Find(p []int64, s string) int
+// gocc-omit-cap: p, s
+long find(long *p, long p_len, char *s, long s_len)` + body,
+			Expected: `gocc-omit-cap: param "s" is a string, not a slice`,
+		},
+		{
+			Name: "empty list",
+			Source: `
+// gocc: Sum(p []int64) int
+// gocc-omit-cap:
+long sum(long *p, long p_len)` + body,
+			Expected: "sum: gocc-omit-cap names no parameter",
+		},
+		{
+			Name: "gocc-omit-cap on a function without a signature",
+			Source: `
+// gocc-omit-cap: p
+long sum(long *p, long p_len)` + body + `
+// gocc: Total(p []int64) int
+long total(long *p, long p_len, long p_cap)` + body,
+			Expected: "line 2: gocc-omit-cap on a function without a gocc signature",
 		},
 		{
 			Name: "unnamed parameter of a wrapper",

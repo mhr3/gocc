@@ -526,3 +526,73 @@ LBB13_16:
 
 TEXT ·test_fn_scale_stringInternal(SB), NOSPLIT|NOFRAME, $0-52
 	JMP ·Test_fn_scale_bytes(SB)
+
+TEXT ·Test_fn_omit_cap_mixed(SB), NOSPLIT, $0-64
+	MOVD   a_base+0(FP), R0
+	MOVD   a_len+8(FP), R1
+	MOVD   b_base+24(FP), R2
+	MOVD   b_len+32(FP), R3
+	MOVD   b_cap+40(FP), R4
+	MOVD   k+48(FP), R5
+	NOP                           // (skipped)                            // stp	x29, x30, [sp, #-16]!
+	MOVW   $1000, R8              // <--                                  // mov	w8, #1000
+	MOVW   $51712, R9             // <--                                  // mov	w9, #51712
+	MOVKW  $(15258<<16), R9       // <--                                  // movk	w9, #15258, lsl #16
+	MOVD   $4096, R11             // <--                                  // mov	x11, #4096
+	MUL    R8, R1, R8             // <--                                  // mul	x8, x1, x8
+	MOVK   $(54437<<16), R11      // <--                                  // movk	x11, #54437, lsl #16
+	ADD    R1<<3, R0, R10         // <--                                  // add	x10, x0, x1, lsl #3
+	MOVK   $(232<<32), R11        // <--                                  // movk	x11, #232, lsl #32
+	MADD   R9, R8, R3, R8         // <--                                  // madd	x8, x3, x9, x8
+	MOVD   $1125899906809856, R12 // <--                                  // mov	x12, #1125899906809856
+	ADD    R3<<2, R2, R9          // <--                                  // add	x9, x2, x3, lsl #2
+	MOVK   $(42182<<16), R12      // <--                                  // movk	x12, #42182, lsl #16
+	MOVK   $(36222<<32), R12      // <--                                  // movk	x12, #36222, lsl #32
+	MADD   R11, R8, R4, R8        // <--                                  // madd	x8, x4, x11, x8
+	MOVD   -8(R10), R10           // <--                                  // ldur	x10, [x10, #-8]
+	MOVW   $16960, R11            // <--                                  // mov	w11, #16960
+	WORD   $0xb89fc129            // LDURSW -4(R9), R9                    // ldursw	x9, [x9, #-4]
+	MADD   R12, R8, R5, R8        // <--                                  // madd	x8, x5, x12, x8
+	MOVKW  $(15<<16), R11         // <--                                  // movk	w11, #15, lsl #16
+	NOP                           // (skipped)                            // mov	x29, sp
+	ADD    R10, R8, R8            // <--                                  // add	x8, x8, x10
+	SMADDL R11, R8, R9, R0        // <--                                  // smaddl	x0, w9, w11, x8
+	NOP                           // (skipped)                            // ldp	x29, x30, [sp], #16
+	MOVD   R0, ret+56(FP)         // <--
+	RET                           // <--                                  // ret
+
+TEXT ·Test_fn_omit_cap_three(SB), NOSPLIT, $0-80
+	MOVD   a_base+0(FP), R0
+	MOVD   a_len+8(FP), R1
+	MOVD   b_base+24(FP), R2
+	MOVD   b_len+32(FP), R3
+	MOVD   c_base+48(FP), R4
+	MOVD   c_len+56(FP), R5
+	NOP                           // (skipped)                            // stp	x29, x30, [sp, #-16]!
+	MOVW   $1000, R8              // <--                                  // mov	w8, #1000
+	MOVW   $51712, R10            // <--                                  // mov	w10, #51712
+	ADD    R0, R1, R9             // <--                                  // add	x9, x1, x0
+	MOVKW  $(15258<<16), R10      // <--                                  // movk	w10, #15258, lsl #16
+	MUL    R8, R1, R8             // <--                                  // mul	x8, x1, x8
+	MOVD   $1125899906809856, R12 // <--                                  // mov	x12, #1125899906809856
+	MOVK   $(42182<<16), R12      // <--                                  // movk	x12, #42182, lsl #16
+	ADD    R2, R3, R11            // <--                                  // add	x11, x3, x2
+	MOVK   $(36222<<32), R12      // <--                                  // movk	x12, #36222, lsl #32
+	MADD   R10, R8, R3, R8        // <--                                  // madd	x8, x3, x10, x8
+	WORD   $0x385ff129            // LDURBW -1(R9), R9                    // ldurb	w9, [x9, #-1]
+	ADD    R4, R5, R10            // <--                                  // add	x10, x5, x4
+	MADD   R12, R8, R5, R8        // <--                                  // madd	x8, x5, x12, x8
+	WORD   $0x385ff16b            // LDURBW -1(R11), R11                  // ldurb	w11, [x11, #-1]
+	MOVW   $16960, R12            // <--                                  // mov	w12, #16960
+	NOP                           // (skipped)                            // mov	x29, sp
+	MOVKW  $(15<<16), R12         // <--                                  // movk	w12, #15, lsl #16
+	ADD    R9, R8, R8             // <--                                  // add	x8, x8, x9
+	MOVD   $4096, R9              // <--                                  // mov	x9, #4096
+	WORD   $0x385ff14a            // LDURBW -1(R10), R10                  // ldurb	w10, [x10, #-1]
+	MOVK   $(54437<<16), R9       // <--                                  // movk	x9, #54437, lsl #16
+	UMADDL R12, R8, R11, R8       // <--                                  // umaddl	x8, w11, w12, x8
+	MOVK   $(232<<32), R9         // <--                                  // movk	x9, #232, lsl #32
+	MADD   R9, R8, R10, R0        // <--                                  // madd	x0, x10, x9, x8
+	NOP                           // (skipped)                            // ldp	x29, x30, [sp], #16
+	MOVD   R0, ret+72(FP)         // <--
+	RET                           // <--                                  // ret

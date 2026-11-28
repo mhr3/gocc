@@ -93,3 +93,9 @@ func Test_fn_scale_string(dst []float32, src string, factor float32) {
 //
 //go:noescape
 func test_fn_scale_stringInternal(dst []float32, src string, _ int, factor float32)
+
+//go:noescape
+func Test_fn_omit_cap_mixed(a []int64, b []int32, k int) int
+
+//go:noescape
+func Test_fn_omit_cap_three(a []byte, b []byte, c []byte) int

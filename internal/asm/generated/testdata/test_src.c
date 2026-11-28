@@ -93,3 +93,23 @@ void test_fn_scale(float *dst, long dst_len, const unsigned char *src, long src_
         dst[i] = src[i] * factor;
     }
 }
+
+// Slices listed in gocc-omit-cap are a pointer and a length in C; the
+// others keep their capacity. As above, each argument has its own weight in
+// the result, so one loaded from the wrong word of the frame changes it.
+// gocc: Test_fn_omit_cap_mixed(a []int64, b []int32, k int) int
+// gocc-omit-cap: a
+long test_fn_omit_cap_mixed(const long *a, long a_len, const int *b, long b_len, long b_cap, long k) {
+    return a[a_len - 1] + 1000 * a_len + 1000000 * b[b_len - 1] + 1000000000 * b_len +
+           1000000000000 * b_cap + 1000000000000000 * k;
+}
+
+// Three slices are six arguments without their capacities, which is all the
+// integer argument registers of amd64, and nine with them.
+// gocc: Test_fn_omit_cap_three(a, b, c []byte) int
+// gocc-omit-cap: a, b, c
+long test_fn_omit_cap_three(const unsigned char *a, long a_len, const unsigned char *b, long b_len,
+                            const unsigned char *c, long c_len) {
+    return a[a_len - 1] + 1000 * a_len + 1000000 * b[b_len - 1] + 1000000000 * b_len +
+           1000000000000 * c[c_len - 1] + 1000000000000000 * c_len;
+}
